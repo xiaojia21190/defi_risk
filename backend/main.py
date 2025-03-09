@@ -218,7 +218,7 @@ async def predict_protocol_risk(protocol_name: str):
     """分析DeFi协议风险"""
     try:
         protocol_data = {"name": protocol_name}
-        risk_analysis = ai_predictor.analyze_protocol_risk(protocol_name)
+        risk_analysis = ai_predictor.analyze_defi_protocol_risk(protocol_name)
         return risk_analysis
     except Exception as e:
         logger.error(f"分析协议风险时出错: {e}")
