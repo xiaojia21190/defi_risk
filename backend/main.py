@@ -1,24 +1,27 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Dict, Any, Optional
 import os
-from datetime import datetime
+import logging
 
 from risk_calculator import RiskCalculator, Position
 from blockchain_service import BlockchainService
 from ai_predictor import AiPredictor
 
-app = FastAPI(title="DeFi Risk Monitor API")
+# 设置日志记录
+logger = logging.getLogger("defi_risk")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+
+app = FastAPI(title="DeFi存款分析API")
 
 # 配置 CORS
-app.CORSMiddleware = CORSMiddleware
 app.add_middleware(
-    allow_origins=[
-        "http://localhost:3000",  # 开发环境
-        "http://127.0.0.1:3000",
-        "https://your-production-domain.com",  # 生产环境
-    ],
+    CORSMiddleware,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,197 +29,379 @@ app.add_middleware(
 
 # 初始化服务
 web3_provider = os.getenv(
-    "WEB3_PROVIDER_URL", "https://eth-sepolia.g.alchemy.com/v2/8GHYFBqZcX9OEuKkgB1N3u1RDPBYy9Mm"
+    "WEB3_PROVIDER_URL",
+    "https://eth-sepolia.g.alchemy.com/v2/8GHYFBqZcX9OEuKkgB1N3u1RDPBYy9Mm",
 )
 blockchain_service = BlockchainService(web3_provider)
 risk_calculator = RiskCalculator()
 ai_predictor = AiPredictor()
 
 
-# 数据模型
 class PortfolioRequest(BaseModel):
     wallet_address: str
 
 
-class Alert(BaseModel):
-    id: str
-    type: str  # liquidation, impermanentLoss, marketVolatility
-    severity: str  # high, medium, low
-    message: str
-    timestamp: str
+class DefiPosition(BaseModel):
     protocol: str
     asset: str
+    amount: float
+    apy: float
+    leverage: Optional[float] = None
 
 
-class RiskAssessmentResponse(BaseModel):
+class PortfolioAnalysis(BaseModel):
+    total_value: float
+    positions: List[DefiPosition]
     risk_level: str
-    liquidation_risk: float
-    impermanent_loss_risk: float
-    market_volatility_risk: float
     recommendations: List[str]
-    timestamp: str
+    market_analysis: Dict[str, Any]
+    ai_predictions: Dict[str, Any]
 
 
-class MarketAnalysis(BaseModel):
+class MarketData(BaseModel):
     asset: str
-    current_price: float
-    predicted_price: float
-    price_change_prediction: float
-    volatility: float
-    rsi: float
-    trend: str
-    risk_level: str
-    signals: List[str]
+    price: float
+    volume_24h: float
+    price_change_24h: float
+    market_cap: float
+
+
+class TokenPrice(BaseModel):
+    token_address: str
+
+
+class MarketPredictionRequest(BaseModel):
+    asset: str
+    time_frame: Optional[str] = "24h"  # 24h, 7d, 30d
 
 
 @app.get("/")
 async def root():
-    return {"message": "DeFi Risk Monitor API"}
+    return {"message": "DeFi存款分析API"}
 
 
-@app.post("/portfolio/analyze", response_model=RiskAssessmentResponse)
-async def analyze_portfolio(request: PortfolioRequest):
+@app.post("/analyze", response_model=PortfolioAnalysis)
+async def analyze_defi_deposits(request: PortfolioRequest):
+    """分析用户的DeFi存款情况"""
     try:
-        # 获取用户在各协议中的头寸
+        logger.info(f"分析钱包地址: {request.wallet_address} 的DeFi存款")
+
+        # 获取用户在各协议中的存款头寸
         positions = await blockchain_service.get_all_positions(request.wallet_address)
 
         if not positions:
-            raise HTTPException(status_code=404, detail="No positions found")
+            raise HTTPException(status_code=404, detail="未找到DeFi存款")
 
-        # 计算投资组合风险
-        portfolio_risk = risk_calculator.assess_portfolio_risk(positions)
+        # 计算风险评估
+        risk_assessment = risk_calculator.assess_portfolio_risk(positions)
 
-        return RiskAssessmentResponse(
-            risk_level=portfolio_risk["risk_level"],
-            liquidation_risk=portfolio_risk["liquidation_risk"],
-            impermanent_loss_risk=portfolio_risk["impermanent_loss_risk"],
-            market_volatility_risk=portfolio_risk["market_volatility_risk"],
-            recommendations=portfolio_risk["recommendations"],
-            timestamp=datetime.now().isoformat(),
+        # 计算总存款价值
+        total_value = sum(position.amount for position in positions)
+
+        # 获取市场分析数据
+        market_analysis = await get_market_analysis(positions)
+
+        # 获取AI预测数据
+        ai_predictions = {}
+        for pos in positions:
+            asset = pos.asset.split("/")[0]  # 处理LP token的情况
+            historical_data = await blockchain_service.get_asset_historical_data(asset)
+            if not historical_data.empty:
+                prediction = ai_predictor.analyze_market_trend(historical_data, asset)
+                # 确保预测数据包含前端需要的字段
+                if (
+                    "predicted_price_range" in prediction
+                    and "24h" in prediction["predicted_price_range"]
+                ):
+                    prediction["predicted_price"] = (
+                        prediction["predicted_price_range"]["24h"][0]
+                        + prediction["predicted_price_range"]["24h"][1]
+                    ) / 2
+
+                # 确保key_price_levels结构正确
+                if "key_levels" in prediction and "key_price_levels" not in prediction:
+                    prediction["key_price_levels"] = {
+                        "support": prediction["key_levels"]["support"],
+                        "resistance": prediction["key_levels"]["resistance"],
+                    }
+
+                # 确保signals字段存在
+                if "trading_signals" in prediction and "signals" not in prediction:
+                    prediction["signals"] = prediction["trading_signals"]
+
+                ai_predictions[asset] = prediction
+
+        # 转换为响应格式
+        defi_positions = [
+            DefiPosition(
+                protocol=pos.protocol,
+                asset=pos.asset,
+                amount=pos.amount,
+                apy=pos.apy or 0.0,
+                leverage=pos.leverage,
+            )
+            for pos in positions
+        ]
+
+        # 构建并返回响应
+        return PortfolioAnalysis(
+            total_value=total_value,
+            positions=defi_positions,
+            risk_level=risk_assessment["risk_level"],
+            recommendations=risk_assessment["recommendations"],
+            market_analysis=market_analysis,
+            ai_predictions=ai_predictions,
         )
+
     except Exception as e:
+        logger.error(f"分析DeFi存款时出错: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/alerts/{address}", response_model=List[Alert])
-async def get_user_alerts(address: str):
-    try:
-        # 获取链上警报
-        chain_alerts = await blockchain_service.get_chain_alerts(address)
-
-        # 获取风险计算器的警报
-        risk_alerts = risk_calculator.get_active_alerts(address)
-
-        # 获取 AI 预测的警报
-        market_alerts = ai_predictor.get_market_alerts(address)
-
-        # 合并所有警报
-        all_alerts = []
-
-        # 处理链上警报
-        for alert in chain_alerts:
-            all_alerts.append(
-                Alert(
-                    id=f"chain_{alert['timestamp']}",
-                    type="liquidation",
-                    severity="high" if float(alert["risk_level"]) > 0.7 else "medium",
-                    message=f"清算风险警报: 风险等级 {float(alert['risk_level']):.2f}",
-                    timestamp=datetime.fromtimestamp(
-                        int(alert["timestamp"])
-                    ).isoformat(),
-                    protocol=alert["protocol"],
-                    asset=alert["asset"],
-                )
-            )
-
-        # 处理风险计算器警报
-        for alert in risk_alerts:
-            all_alerts.append(
-                Alert(
-                    id=f"risk_{alert['timestamp']}",
-                    type=alert["type"],
-                    severity=alert["severity"],
-                    message=alert["message"],
-                    timestamp=alert["timestamp"],
-                    protocol=alert["protocol"],
-                    asset=alert["asset"],
-                )
-            )
-
-        # 处理市场预测警报
-        for alert in market_alerts:
-            all_alerts.append(
-                Alert(
-                    id=f"market_{alert['timestamp']}",
-                    type="marketVolatility",
-                    severity=alert["severity"],
-                    message=alert["message"],
-                    timestamp=alert["timestamp"],
-                    protocol=alert["protocol"],
-                    asset=alert["asset"],
-                )
-            )
-
-        # 按时间戳排序，最新的在前
-        all_alerts.sort(key=lambda x: x.timestamp, reverse=True)
-
-        return all_alerts
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/market/analysis/{asset}", response_model=MarketAnalysis)
-async def get_market_analysis(asset: str):
+@app.post("/predict/market")
+async def predict_market(request: MarketPredictionRequest):
+    """获取市场预测"""
     try:
         # 获取历史数据
-        historical_data = await blockchain_service.get_asset_historical_data(asset)
-
-        if not historical_data.empty:
-            # 进行市场分析
-            analysis = ai_predictor.analyze_market_trend(historical_data, asset)
-            signals = ai_predictor.generate_trading_signals(analysis, position_size=1.0)
-
-            return MarketAnalysis(
-                asset=analysis["asset"],
-                current_price=analysis["current_price"],
-                predicted_price=analysis["predicted_price"],
-                price_change_prediction=analysis["price_change_prediction"],
-                volatility=analysis["volatility"],
-                rsi=analysis["rsi"],
-                trend=analysis["trend"],
-                risk_level=analysis["risk_level"],
-                signals=signals,
-            )
-        else:
+        historical_data = await blockchain_service.get_asset_historical_data(
+            request.asset
+        )
+        if historical_data.empty:
             raise HTTPException(
-                status_code=404, detail=f"No historical data found for {asset}"
+                status_code=404, detail=f"未找到 {request.asset} 的市场数据"
             )
+
+        # 获取AI预测
+        prediction = ai_predictor.analyze_market_trend(historical_data, request.asset)
+
+        # 获取市场警报
+        alerts = await blockchain_service.get_market_alerts(
+            DEMO_ADDRESS
+        )  # 使用演示地址获取警报
+        relevant_alerts = [alert for alert in alerts if alert["asset"] == request.asset]
+
+        return {
+            "asset": request.asset,
+            "current_price": prediction["current_price"],
+            "predicted_price": (
+                prediction["predicted_price_range"]["24h"][0]
+                + prediction["predicted_price_range"]["24h"][1]
+            )
+            / 2,
+            "trend": prediction["trend"],
+            "risk_level": prediction["risk_level"],
+            "volatility": prediction["volatility"],
+            "recommendations": prediction["recommendations"],
+            "signals": prediction["trading_signals"],
+            "key_price_levels": {
+                "support": (
+                    prediction["key_levels"]["support"]
+                    if "key_levels" in prediction
+                    else prediction.get("support_levels", [])
+                ),
+                "resistance": (
+                    prediction["key_levels"]["resistance"]
+                    if "key_levels" in prediction
+                    else prediction.get("resistance_levels", [])
+                ),
+            },
+            "alerts": relevant_alerts,
+        }
+
     except Exception as e:
+        logger.error(f"获取市场预测时出错: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/predict/protocol/{protocol_name}")
+async def predict_protocol_risk(protocol_name: str):
+    """分析DeFi协议风险"""
+    try:
+        protocol_data = {"name": protocol_name}
+        risk_analysis = ai_predictor.analyze_protocol_risk(protocol_name)
+        return risk_analysis
+    except Exception as e:
+        logger.error(f"分析协议风险时出错: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/protocols")
 async def get_supported_protocols():
+    """获取支持的DeFi协议列表"""
     return {
         "protocols": [
             {
-                "name": "Aave",
-                "version": "V2",
+                "name": "Aave V3",
+                "description": "去中心化借贷协议",
                 "supported_assets": ["ETH", "USDC", "DAI", "WBTC"],
-                "features": ["lending", "borrowing"],
+                "features": ["存款", "借贷", "抵押"],
             },
             {
-                "name": "Uniswap",
-                "version": "V2",
-                "supported_assets": ["ETH", "USDC", "DAI", "WBTC"],
-                "features": ["liquidity", "swapping"],
+                "name": "Compound V3",
+                "description": "去中心化借贷协议",
+                "supported_assets": ["ETH", "USDC", "DAI"],
+                "features": ["存款", "借贷"],
+            },
+            {
+                "name": "Curve",
+                "description": "稳定币交易协议",
+                "supported_assets": ["USDC", "DAI", "USDT"],
+                "features": ["流动性挖矿", "稳定币交换"],
+            },
+            {
+                "name": "Uniswap V2",
+                "description": "去中心化交易所",
+                "supported_assets": ["ETH/USDC", "ETH/USDT"],
+                "features": ["流动性提供", "交易"],
             },
         ]
     }
 
 
+@app.get("/market-data/{asset}")
+async def get_market_data(asset: str) -> MarketData:
+    """获取资产的市场数据"""
+    try:
+        # 获取历史数据
+        historical_data = await blockchain_service.get_asset_historical_data(asset)
+        if historical_data.empty:
+            raise HTTPException(status_code=404, detail=f"未找到 {asset} 的市场数据")
+
+        # 获取最新数据
+        latest_data = historical_data.iloc[-1]
+
+        return MarketData(
+            asset=asset,
+            price=latest_data["price"],
+            volume_24h=latest_data["volume"],
+            price_change_24h=(
+                latest_data["price"] / historical_data.iloc[-2]["price"] - 1
+            )
+            * 100,
+            market_cap=latest_data["market_cap"],
+        )
+    except Exception as e:
+        logger.error(f"获取市场数据时出错: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/token-price")
+async def get_token_price(request: TokenPrice) -> float:
+    """获取代币价格"""
+    try:
+        price = await blockchain_service.get_token_price(request.token_address)
+        if price == 0:
+            raise HTTPException(status_code=404, detail="未找到代币价格")
+        return price
+    except Exception as e:
+        logger.error(f"获取代币价格时出错: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/gas-price")
+async def get_gas_price() -> float:
+    """获取当前gas价格"""
+    try:
+        return await blockchain_service.get_gas_price()
+    except Exception as e:
+        logger.error(f"获取gas价格时出错: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def get_market_analysis(positions: List[Position]) -> Dict[str, Any]:
+    """获取市场分析数据"""
+    try:
+        analysis = {}
+        for pos in positions:
+            # 获取资产的历史数据
+            historical_data = await blockchain_service.get_asset_historical_data(
+                pos.asset.split("/")[0]
+            )
+            if not historical_data.empty:
+                latest_data = historical_data.iloc[-1]
+                analysis[pos.asset] = {
+                    "current_price": latest_data["price"],
+                    "volume_24h": latest_data["volume"],
+                    "market_cap": latest_data["market_cap"],
+                    "price_change_24h": (
+                        latest_data["price"] / historical_data.iloc[-2]["price"] - 1
+                    )
+                    * 100,
+                    "volatility_30d": historical_data["price"].std()
+                    / historical_data["price"].mean()
+                    * 100,
+                }
+        return analysis
+    except Exception as e:
+        logger.error(f"获取市场分析数据时出错: {e}")
+        return {}
+
+
 if __name__ == "__main__":
     import uvicorn
+    import asyncio
+    from dotenv import load_dotenv
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    # 加载环境变量
+    load_dotenv()
+
+    # 测试数据
+    DEMO_ADDRESS = "0xAbCdEf123456789AbCdEf123456789AbCdEf1234"
+    TEST_ASSETS = ["ETH", "USDC", "DAI", "WBTC"]
+    TEST_PROTOCOLS = ["Aave V3", "Compound V3", "Curve", "Uniswap V2"]
+
+    async def test_api_endpoints():
+        """测试主要API端点"""
+        try:
+            print("\n=== 测试API端点 ===\n")
+
+            # 1. 测试分析DeFi存款
+            print("1. 测试分析DeFi存款")
+            portfolio_request = PortfolioRequest(wallet_address=DEMO_ADDRESS)
+            portfolio_analysis = await analyze_defi_deposits(portfolio_request)
+            print(f"总存款价值: ${portfolio_analysis.total_value:,.2f}")
+            print(f"风险等级: {portfolio_analysis.risk_level}")
+            print("-" * 50)
+
+            # 2. 测试市场预测
+            print("\n2. 测试市场预测")
+            for asset in TEST_ASSETS[:2]:  # 只测试前两个资产
+                prediction_request = MarketPredictionRequest(asset=asset)
+                prediction = await predict_market(prediction_request)
+                print(f"\n{asset} 市场预测:")
+                print(f"当前价格: ${prediction['current_price']:,.2f}")
+                print(f"趋势: {prediction['trend']}")
+                print(f"风险等级: {prediction['risk_level']}")
+            print("-" * 50)
+
+            # 3. 测试协议风险分析
+            print("\n3. 测试协议风险分析")
+            for protocol in TEST_PROTOCOLS[:2]:  # 只测试前两个协议
+                risk_analysis = await predict_protocol_risk(protocol)
+                print(f"\n{protocol} 风险分析:")
+                print(f"风险评分: {risk_analysis['risk_score']}")
+                print(f"风险等级: {risk_analysis['risk_level']}")
+                print(f"安全评分: {risk_analysis['security_score']}")
+            print("-" * 50)
+
+            # 4. 测试市场数据
+            print("\n4. 测试市场数据")
+            for asset in TEST_ASSETS[:2]:  # 只测试前两个资产
+                market_data = await get_market_data(asset)
+                print(f"\n{asset} 市场数据:")
+                print(f"价格: ${market_data.price:,.2f}")
+                print(f"24h成交量: ${market_data.volume_24h:,.2f}")
+                print(f"24h价格变化: {market_data.price_change_24h:.2f}%")
+            print("-" * 50)
+
+            print("\n所有测试完成!")
+
+        except Exception as e:
+            print(f"测试过程中出错: {e}")
+
+    # 运行测试
+    asyncio.run(test_api_endpoints())
+
+    # 启动FastAPI服务器
+    print("\n启动FastAPI服务器...")
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

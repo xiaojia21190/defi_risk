@@ -13,19 +13,9 @@ contract RiskMonitor is Ownable, Pausable {
         uint256 liquidationThreshold;
     }
 
-    struct RiskAlert {
-        address user;
-        address protocol;
-        address asset;
-        uint256 riskLevel;
-        uint256 timestamp;
-    }
-
     mapping(address => Position[]) public userPositions;
-    mapping(address => RiskAlert[]) public userAlerts;
 
     event PositionAdded(address indexed user, address protocol, address asset, uint256 amount);
-    event RiskAlertCreated(address indexed user, address protocol, address asset, uint256 riskLevel);
     event PositionUpdated(address indexed user, address protocol, address asset, uint256 newAmount);
 
     constructor(address initialOwner) Ownable(initialOwner) {
@@ -50,30 +40,8 @@ contract RiskMonitor is Ownable, Pausable {
         emit PositionAdded(msg.sender, protocol, asset, amount);
     }
 
-    function createRiskAlert(
-        address user,
-        address protocol,
-        address asset,
-        uint256 riskLevel
-    ) external onlyOwner {
-        RiskAlert memory alert = RiskAlert({
-            user: user,
-            protocol: protocol,
-            asset: asset,
-            riskLevel: riskLevel,
-            timestamp: block.timestamp
-        });
-
-        userAlerts[user].push(alert);
-        emit RiskAlertCreated(user, protocol, asset, riskLevel);
-    }
-
     function getUserPositions(address user) external view returns (Position[] memory) {
         return userPositions[user];
-    }
-
-    function getUserAlerts(address user) external view returns (RiskAlert[] memory) {
-        return userAlerts[user];
     }
 
     function updatePosition(

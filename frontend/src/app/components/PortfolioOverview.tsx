@@ -1,108 +1,129 @@
 "use client";
 
 import React from "react";
+import { Portfolio } from "../services/api";
 import { PieChart } from "react-minimal-pie-chart";
 
-interface Position {
-  protocol: string;
-  asset: string;
-  amount: number;
-  leverage?: number;
-  apy?: number;
-}
-
-interface Portfolio {
-  positions: Position[];
-  totalValue: number;
-  riskScore: number;
-}
-
 interface PortfolioOverviewProps {
-  portfolio: Portfolio | null;
-}
-
-interface DataEntry {
-  title: string;
-  value: number;
-  color: string;
-  percentage?: number;
+  portfolio: Portfolio;
 }
 
 const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
-  if (!portfolio) {
-    return (
-      <div className="p-6 bg-white rounded-lg shadow">
-        <h2 className="mb-4 text-xl font-bold">投资组合概览</h2>
-        <p className="text-gray-600">加载中...</p>
-      </div>
-    );
-  }
-
-  // 按协议分组
-  const protocolData = portfolio.positions.reduce((acc: { [key: string]: number }, position) => {
-    acc[position.protocol] = (acc[position.protocol] || 0) + position.amount;
+  // 计算每个协议的总价值
+  const protocolValues = portfolio.positions.reduce((acc, pos) => {
+    const marketAnalysis = portfolio.market_analysis[pos.asset.split("/")[0]];
+    const value = pos.amount * (marketAnalysis?.current_price || 0);
+    acc[pos.protocol] = (acc[pos.protocol] || 0) + value;
     return acc;
-  }, {});
+  }, {} as { [key: string]: number });
 
   // 生成饼图数据
-  const pieData: DataEntry[] = Object.entries(protocolData).map(([protocol, amount], index) => ({
+  const pieData = Object.entries(protocolValues).map(([protocol, value], index) => ({
     title: protocol,
-    value: amount,
-    color: ["#FF6384", "#36A2EB", "#FFCE56", "#4BC0C0", "#9966FF"][index % 5],
+    value,
+    color: [
+      "#2563eb", // blue-600
+      "#16a34a", // green-600
+      "#dc2626", // red-600
+      "#9333ea", // purple-600
+      "#ea580c", // orange-600
+    ][index % 5],
   }));
 
-  return (
-    <div className="p-6 bg-white rounded-lg shadow">
-      <h2 className="mb-4 text-xl font-bold">投资组合概览</h2>
+  // 计算总收益率
+  const totalAPY = portfolio.positions.reduce((sum, pos) => sum + (pos.apy || 0), 0) / portfolio.positions.length;
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+  return (
+    <div>
+      <h2 className="text-xl font-semibold mb-6">投资组合概览</h2>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <div>
-          <h3 className="mb-3 text-lg font-semibold">资产分布</h3>
-          <div className="w-full h-64">
-            <PieChart
-              data={pieData}
-              label={({ dataEntry }: { dataEntry: DataEntry }) => `${dataEntry.title} (${Math.round(dataEntry.percentage || 0)}%)`}
-              labelStyle={{
-                fontSize: "5px",
-                fontFamily: "sans-serif",
-              }}
-              labelPosition={60}
-              animate
-            />
+          <div className="mb-6">
+            <div className="flex justify-between items-baseline mb-2">
+              <h3 className="font-medium">总资产价值</h3>
+              <span className="text-2xl font-bold">${portfolio.total_value.toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between items-center text-sm text-muted">
+              <span>平均APY</span>
+              <span className="text-success">{(totalAPY * 100).toFixed(2)}%</span>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {Object.entries(protocolValues).map(([protocol, value], index) => (
+              <div key={protocol} className="flex items-center gap-3">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: pieData[index].color }} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between items-baseline">
+                    <span className="font-medium">{protocol}</span>
+                    <span className="text-sm text-muted">${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                  </div>
+                  <div className="w-full bg-muted/30 rounded-full h-1 mt-1">
+                    <div
+                      className="h-1 rounded-full"
+                      style={{
+                        width: `${(value / portfolio.total_value) * 100}%`,
+                        backgroundColor: pieData[index].color,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
         <div>
-          <h3 className="mb-3 text-lg font-semibold">主要指标</h3>
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-gray-600">总资产价值:</span>
-              <span className="font-bold">${portfolio.totalValue.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-gray-600">协议数量:</span>
-              <span className="font-bold">{Object.keys(protocolData).length}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-gray-600">头寸数量:</span>
-              <span className="font-bold">{portfolio.positions.length}</span>
-            </div>
+          <div className="relative aspect-square">
+            <PieChart
+              data={pieData}
+              lineWidth={20}
+              paddingAngle={2}
+              rounded
+              label={({ dataEntry }) => `${((dataEntry.value / portfolio.total_value) * 100).toFixed(1)}%`}
+              labelStyle={{
+                fontSize: "6px",
+                fill: "#fff",
+                fontWeight: "bold",
+              }}
+              labelPosition={75}
+            />
           </div>
+        </div>
+      </div>
 
-          <div className="mt-6">
-            <h3 className="mb-3 text-lg font-semibold">最大头寸</h3>
-            {[...portfolio.positions]
-              .sort((a, b) => b.amount - a.amount)
-              .slice(0, 3)
-              .map((position, index) => (
-                <div key={index} className="flex justify-between items-center mb-2">
-                  <span className="text-gray-600">
-                    {position.protocol} - {position.asset}
-                  </span>
-                  <span className="font-bold">${position.amount.toLocaleString()}</span>
+      <div className="mt-8">
+        <h3 className="font-medium mb-4">最大头寸</h3>
+        <div className="space-y-3">
+          {[...portfolio.positions]
+            .sort((a, b) => {
+              const aValue = a.amount * (portfolio.market_analysis[a.asset.split("/")[0]]?.current_price || 0);
+              const bValue = b.amount * (portfolio.market_analysis[b.asset.split("/")[0]]?.current_price || 0);
+              return bValue - aValue;
+            })
+            .slice(0, 3)
+            .map((position, index) => {
+              const marketAnalysis = portfolio.market_analysis[position.asset.split("/")[0]];
+              const value = position.amount * (marketAnalysis?.current_price || 0);
+              return (
+                <div key={index} className="p-4 rounded-lg border border-border bg-card/50 hover:bg-card transition-colors">
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-medium">{position.asset.substring(0, 2)}</div>
+                      <div>
+                        <h4 className="font-medium">{position.protocol}</h4>
+                        <p className="text-sm text-muted">{position.asset}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-medium">${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+                      {position.apy && <p className="text-sm text-success">APY: {(position.apy * 100).toFixed(2)}%</p>}
+                    </div>
+                  </div>
                 </div>
-              ))}
-          </div>
+              );
+            })}
         </div>
       </div>
     </div>

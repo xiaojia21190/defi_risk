@@ -8,123 +8,74 @@ import AlertsList from "./AlertsList";
 import MarketAnalysis from "./MarketAnalysis";
 import { apiService } from "../services/api";
 import { useRiskMonitor } from "../services/contract";
-
-type OnChainPosition = {
-  protocol: `0x${string}`;
-  asset: `0x${string}`;
-  amount: bigint;
-  leverage: bigint;
-  liquidationThreshold: bigint;
-};
-
-type OnChainAlert = {
-  user: `0x${string}`;
-  protocol: `0x${string}`;
-  asset: `0x${string}`;
-  riskLevel: bigint;
-  timestamp: bigint;
-};
+import { Portfolio, MarketPrediction } from "../services/api";
+import { Loader2 } from "lucide-react";
 
 export const Dashboard: React.FC = () => {
   const { address, isConnected } = useAccount();
-  const [portfolio, setPortfolio] = useState<any>(null);
-  const [alerts, setAlerts] = useState<any[]>([]);
+  const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
+  const [marketPredictions, setMarketPredictions] = useState<{ [key: string]: MarketPrediction }>({});
   const [selectedAsset, setSelectedAsset] = useState<string>("ETH");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"overview" | "market">("overview");
 
   // 获取合约数据
   const riskMonitor = useRiskMonitor();
-  const { data: onchainPositions } = riskMonitor.usePositions(address || "");
-  const { data: onchainAlerts } = riskMonitor.useAlerts(address || "");
 
   useEffect(() => {
     if (isConnected && address) {
       fetchPortfolioData();
-      fetchAlerts();
     }
   }, [address, isConnected]);
-
-  // 当链上数据更新时，更新本地状态
-  useEffect(() => {
-    if (onchainPositions) {
-      // 将链上数据转换为前端格式
-      const positions = onchainPositions.map((pos: OnChainPosition) => ({
-        protocol: pos.protocol,
-        asset: pos.asset,
-        amount: Number(pos.amount),
-        leverage: Number(pos.leverage),
-        liquidationThreshold: Number(pos.liquidationThreshold),
-      }));
-
-      // 更新投资组合数据
-      if (portfolio) {
-        setPortfolio({
-          ...portfolio,
-          positions: [...portfolio.positions, ...positions],
-        });
-      }
-    }
-  }, [onchainPositions, portfolio]);
-
-  useEffect(() => {
-    if (onchainAlerts) {
-      // 将链上警报转换为前端格式
-      const chainAlerts = onchainAlerts.map((alert: OnChainAlert, index) => ({
-        id: `chain-${index}`,
-        type: "liquidation",
-        severity: Number(alert.riskLevel) > 70 ? "high" : "medium",
-        message: `风险等级: ${Number(alert.riskLevel)}`,
-        timestamp: new Date(Number(alert.timestamp) * 1000).toISOString(),
-        protocol: alert.protocol,
-        asset: alert.asset,
-      }));
-
-      // 更新警报数据
-      setAlerts((prev) => [...prev, ...chainAlerts]);
-    }
-  }, [onchainAlerts]);
 
   const fetchPortfolioData = async () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await apiService.getPortfolio(address as string);
+
+      const data = await apiService.getPortfolio(address || "");
       setPortfolio(data);
+
+      // 获取每个资产的市场预测
+      const predictions: { [key: string]: MarketPrediction } = {};
+      for (const position of data.positions) {
+        const asset = position.asset.split("/")[0];
+        if (!predictions[asset]) {
+          const prediction = await apiService.predictMarket(asset);
+
+          // 确保警报数据存在
+          if (!prediction.alerts || prediction.alerts.length === 0) {
+            // 尝试获取市场警报
+            try {
+              const alerts = await apiService.getMarketAlerts(address || "");
+              // 过滤出与当前资产相关的警报
+              const assetAlerts = alerts.filter((alert) => alert.asset === asset);
+              prediction.alerts = assetAlerts;
+            } catch (alertError) {
+              console.error("Error fetching market alerts:", alertError);
+              prediction.alerts = [];
+            }
+          }
+
+          predictions[asset] = prediction;
+        }
+      }
+      setMarketPredictions(predictions);
     } catch (error) {
-      console.error("Error fetching portfolio:", error);
-      setError("获取投资组合数据失败");
+      console.error("Error fetching data:", error);
+      setError("获取数据失败");
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchAlerts = async () => {
-    try {
-      const data = await apiService.getAlerts(address as string);
-      setAlerts(data);
-    } catch (error) {
-      console.error("Error fetching alerts:", error);
-    }
-  };
-
-  if (!isConnected) {
-    return (
-      <div className="flex justify-center items-center h-full w-full">
-        <div className="text-center">
-          <h2 className="mb-4 text-2xl font-bold">请连接钱包</h2>
-          <p className="text-gray-600">连接您的钱包以查看投资组合风险分析</p>
-        </div>
-      </div>
-    );
-  }
-
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-full w-full">
+      <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
-          <div className="mb-4 w-12 h-12 rounded-full border-b-2 border-blue-600 animate-spin"></div>
-          <p className="text-gray-600">加载中...</p>
+          <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
+          <p className="text-muted">加载中...</p>
         </div>
       </div>
     );
@@ -132,11 +83,14 @@ export const Dashboard: React.FC = () => {
 
   if (error) {
     return (
-      <div className="flex justify-center items-center h-full w-full">
+      <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
-          <h2 className="mb-4 text-2xl font-bold text-red-600">出错了</h2>
-          <p className="mb-4 text-gray-600">{error}</p>
-          <button onClick={fetchPortfolioData} className="px-4 py-2 text-white bg-blue-600 rounded-lg transition-colors hover:bg-blue-700">
+          <div className="bg-destructive/10 text-destructive p-3 rounded-full w-12 h-12 mx-auto mb-4 flex items-center justify-center">
+            <span className="text-2xl">!</span>
+          </div>
+          <h3 className="text-lg font-medium mb-2">出错了</h3>
+          <p className="text-muted">{error}</p>
+          <button onClick={fetchPortfolioData} className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">
             重试
           </button>
         </div>
@@ -144,34 +98,69 @@ export const Dashboard: React.FC = () => {
     );
   }
 
-  return (
-    <div className="container px-4 py-8 mx-auto">
-      <h1 className="mb-8 text-3xl font-bold">DeFi 风险监控仪表板</h1>
-
-      <div className="grid grid-cols-1 gap-8">
-        <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
-          <PortfolioOverview portfolio={portfolio} />
-          <RiskMonitor portfolio={portfolio} />
+  if (!portfolio) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-center">
+          <div className="bg-muted p-3 rounded-full w-12 h-12 mx-auto mb-4 flex items-center justify-center">
+            <span className="text-2xl">💼</span>
+          </div>
+          <h3 className="text-lg font-medium mb-2">未连接钱包</h3>
+          <p className="text-muted">请连接您的钱包以查看投资组合</p>
         </div>
+      </div>
+    );
+  }
 
-        <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
-          <AlertsList alerts={alerts} />
-          <div className="space-y-4">
-            <div className="p-4 bg-white rounded-lg shadow">
-              <label htmlFor="asset-select" className="block mb-2 text-sm font-medium text-gray-700">
-                选择资产
-              </label>
-              <select id="asset-select" value={selectedAsset} onChange={(e) => setSelectedAsset(e.target.value)} className="block px-3 py-2 w-full rounded-md border border-gray-300 shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                <option value="ETH">ETH</option>
-                <option value="WBTC">WBTC</option>
-                <option value="USDC">USDC</option>
-                <option value="DAI">DAI</option>
-              </select>
-            </div>
-            <MarketAnalysis asset={selectedAsset} />
+  return (
+    <div className="container mx-auto px-4 py-8">
+      <div className="mb-8">
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold">DeFi 投资组合</h1>
+          <div className="flex gap-2">
+            <button onClick={() => setActiveTab("overview")} className={`px-4 py-2 rounded-lg transition-colors ${activeTab === "overview" ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/80"}`}>
+              总览
+            </button>
+            <button onClick={() => setActiveTab("market")} className={`px-4 py-2 rounded-lg transition-colors ${activeTab === "market" ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/80"}`}>
+              市场分析
+            </button>
           </div>
         </div>
       </div>
+
+      {activeTab === "overview" ? (
+        <div className="grid grid-cols-1 gap-8 animate-fade-in">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="bg-card rounded-xl border border-border p-6 shadow-sm hover:shadow-md transition-all">
+              <PortfolioOverview portfolio={portfolio} />
+            </div>
+            <div className="bg-card rounded-xl border border-border p-6 shadow-sm hover:shadow-md transition-all">
+              <RiskMonitor portfolio={portfolio} />
+            </div>
+          </div>
+          <div className="bg-card rounded-xl border border-border p-6 shadow-sm hover:shadow-md transition-all">
+            <AlertsList portfolio={portfolio} predictions={marketPredictions} />
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-8 animate-fade-in">
+          <div className="bg-card rounded-xl border border-border p-6 shadow-sm hover:shadow-md transition-all">
+            <div className="mb-6">
+              <label htmlFor="asset-select" className="block mb-2 text-sm font-medium">
+                选择资产分析
+              </label>
+              <select id="asset-select" value={selectedAsset} onChange={(e) => setSelectedAsset(e.target.value)} className="block w-full md:w-64 px-4 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all">
+                {portfolio.positions.map((position) => (
+                  <option key={position.asset} value={position.asset.split("/")[0]}>
+                    {position.asset} - {position.protocol}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <MarketAnalysis asset={selectedAsset} prediction={marketPredictions[selectedAsset]} marketAnalysis={portfolio.market_analysis[selectedAsset]} aiPrediction={portfolio.ai_predictions[selectedAsset]} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
