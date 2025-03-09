@@ -1,3 +1,4 @@
+import httpx
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Tuple, Optional
@@ -13,10 +14,8 @@ from functools import lru_cache
 logger = logging.getLogger("defi_risk.ai_predictor")
 
 # 设置代理
-proxies = {
-    "http": "http://127.0.0.1:7890",
-    "https": "http://127.0.0.1:7890"
-}
+proxies = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
+
 
 class AiPredictor:
     def __init__(self):
@@ -28,22 +27,27 @@ class AiPredictor:
                 logger.warning("未设置有效的OpenAI API密钥，AI预测功能将使用模拟数据")
                 self.client = None
             else:
-                # 创建OpenAI客户端，使用代理
+                # 创建带有代理的HTTP客户端
+                try:
+                    client_http = httpx.Client(proxy="http://127.0.0.1:7890")
+                except TypeError:
+                    # 如果是旧版本httpx
+                    client_http = httpx.Client()
+                    logger.warning("您的httpx版本不支持proxies参数，将使用默认连接")
+
+                # 将http_client传递给OpenAI客户端
                 self.client = OpenAI(
-                    api_key=api_key,
-                    base_url=base_url,
-                    http_client=requests.Session()
+                    api_key=api_key, base_url=base_url, http_client=client_http
                 )
-                # 设置OpenAI客户端的代理
-                if hasattr(self.client, '_client'):
-                    if hasattr(self.client._client, 'session'):
-                        self.client._client.session.proxies = proxies
+
                 logger.info("成功初始化OpenAI客户端")
         except Exception as e:
             logger.error(f"初始化OpenAI客户端时出错: {e}")
             self.client = None
 
-    def _prepare_market_data(self, historical_data: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, float, float, float, float]:
+    def _prepare_market_data(
+        self, historical_data: pd.DataFrame
+    ) -> Tuple[np.ndarray, np.ndarray, float, float, float, float]:
         """准备市场数据，返回可哈希的数据类型"""
         prices = historical_data["price"].values
         volumes = historical_data["volume"].values
@@ -54,10 +58,20 @@ class AiPredictor:
         return prices, volumes, current_price, price_change_24h, volatility, rsi
 
     @lru_cache(maxsize=16)
-    def _get_cached_analysis(self, asset: str, current_price: float, price_change_24h: float,
-                           volatility: float, rsi: float, ma7: float, ma30: float,
-                           macd_trend: str, bb_position: str, volume_trend: str,
-                           volume_strength: str) -> Dict:
+    def _get_cached_analysis(
+        self,
+        asset: str,
+        current_price: float,
+        price_change_24h: float,
+        volatility: float,
+        rsi: float,
+        ma7: float,
+        ma30: float,
+        macd_trend: str,
+        bb_position: str,
+        volume_trend: str,
+        volume_strength: str,
+    ) -> Dict:
         """缓存分析结果的核心逻辑"""
         try:
             # 构建市场分析提示
@@ -132,23 +146,29 @@ class AiPredictor:
                     messages=[
                         {
                             "role": "system",
-                            "content": "你是一个专业的加密货币市场分析师，擅长技术分析和风险评估。"
+                            "content": "你是一个专业的加密货币市场分析师，擅长技术分析和风险评估。",
                         },
-                        {"role": "user", "content": prompt}
+                        {"role": "user", "content": prompt},
                     ],
-                    response_format={"type": "json_object"}
+                    response_format={"type": "json_object"},
                 )
                 return json.loads(response.choices[0].message.content)
-            return self._get_basic_analysis(asset, current_price, price_change_24h, volatility, rsi)
+            return self._get_basic_analysis(
+                asset, current_price, price_change_24h, volatility, rsi
+            )
         except Exception as e:
             logger.error(f"获取缓存分析时出错: {e}")
-            return self._get_basic_analysis(asset, current_price, price_change_24h, volatility, rsi)
+            return self._get_basic_analysis(
+                asset, current_price, price_change_24h, volatility, rsi
+            )
 
     def analyze_market_trend(self, historical_data: pd.DataFrame, asset: str) -> Dict:
         """分析市场趋势并预测价格走势"""
         try:
             # 准备市场数据
-            prices, volumes, current_price, price_change_24h, volatility, rsi = self._prepare_market_data(historical_data)
+            prices, volumes, current_price, price_change_24h, volatility, rsi = (
+                self._prepare_market_data(historical_data)
+            )
 
             # 计算技术指标
             ma7 = np.mean(prices[-7:]) if len(prices) >= 7 else current_price
@@ -163,20 +183,30 @@ class AiPredictor:
             # MACD指标
             macd, signal, histogram = self.calculate_macd(prices)
             macd_trend = "上升" if macd[-1] > signal[-1] else "下降"
-            macd_strength = "强" if abs(macd[-1] - signal[-1]) > 0.02 * current_price else "弱"
+            macd_strength = (
+                "强" if abs(macd[-1] - signal[-1]) > 0.02 * current_price else "弱"
+            )
 
             # 布林带指标
             bb_upper, bb_middle, bb_lower = self.calculate_bollinger_bands(prices)
             bb_width = (bb_upper[-1] - bb_lower[-1]) / bb_middle[-1]  # 布林带宽度
-            bb_position = "上轨" if current_price >= bb_upper[-1] else ("下轨" if current_price <= bb_lower[-1] else "中轨")
+            bb_position = (
+                "上轨"
+                if current_price >= bb_upper[-1]
+                else ("下轨" if current_price <= bb_lower[-1] else "中轨")
+            )
 
             # 成交量分析
             volume_trend = "上升" if volumes[-1] > np.mean(volumes[-7:]) else "下降"
-            volume_strength = "强" if volumes[-1] > np.mean(volumes) * 1.5 else ("弱" if volumes[-1] < np.mean(volumes) * 0.5 else "中等")
+            volume_strength = (
+                "强"
+                if volumes[-1] > np.mean(volumes) * 1.5
+                else ("弱" if volumes[-1] < np.mean(volumes) * 0.5 else "中等")
+            )
 
             # 趋势强度分析
             price_trend = "上升" if ma7 > ma30 else "下降"
-            trend_strength = "强" if abs(ma7/ma30 - 1) > 0.05 else "弱"
+            trend_strength = "强" if abs(ma7 / ma30 - 1) > 0.05 else "弱"
 
             # 支撑位和阻力位计算
             support_levels = self._calculate_support_levels(prices, current_price)
@@ -206,56 +236,69 @@ class AiPredictor:
 
             # 获取缓存的分析结果
             analysis = self._get_cached_analysis(
-                asset, current_price, price_change_24h, volatility, rsi,
-                ma7, ma30, macd_trend, bb_position, volume_trend, volume_strength
+                asset,
+                current_price,
+                price_change_24h,
+                volatility,
+                rsi,
+                ma7,
+                ma30,
+                macd_trend,
+                bb_position,
+                volume_trend,
+                volume_strength,
             )
 
             # 添加技术指标数据
-            analysis.update({
-                "asset": asset,
-                "current_price": current_price,
-                "price_change_24h": price_change_24h,
-                "volatility": volatility,
-                "rsi": rsi,
-                "risk_level": risk_level,
-                "risk_factors": risk_factors,
-                "technical_indicators": {
-                    "ma7": ma7,
-                    "ma30": ma30,
-                    "ma50": ma50,
-                    "ma200": ma200,
-                    "ema12": ema12[-1] if len(ema12) > 0 else current_price,
-                    "ema26": ema26[-1] if len(ema26) > 0 else current_price,
-                    "macd": macd[-1],
-                    "macd_signal": signal[-1],
-                    "macd_histogram": histogram[-1] if len(histogram) > 0 else 0,
-                    "macd_trend": macd_trend,
-                    "macd_strength": macd_strength,
-                    "bollinger_bands": {
-                        "upper": bb_upper[-1],
-                        "middle": bb_middle[-1],
-                        "lower": bb_lower[-1],
-                        "width": bb_width,
-                        "position": bb_position
+            analysis.update(
+                {
+                    "asset": asset,
+                    "current_price": current_price,
+                    "price_change_24h": price_change_24h,
+                    "volatility": volatility,
+                    "rsi": rsi,
+                    "risk_level": risk_level,
+                    "risk_factors": risk_factors,
+                    "technical_indicators": {
+                        "ma7": ma7,
+                        "ma30": ma30,
+                        "ma50": ma50,
+                        "ma200": ma200,
+                        "ema12": ema12[-1] if len(ema12) > 0 else current_price,
+                        "ema26": ema26[-1] if len(ema26) > 0 else current_price,
+                        "macd": macd[-1],
+                        "macd_signal": signal[-1],
+                        "macd_histogram": histogram[-1] if len(histogram) > 0 else 0,
+                        "macd_trend": macd_trend,
+                        "macd_strength": macd_strength,
+                        "bollinger_bands": {
+                            "upper": bb_upper[-1],
+                            "middle": bb_middle[-1],
+                            "lower": bb_lower[-1],
+                            "width": bb_width,
+                            "position": bb_position,
+                        },
+                        "volume": {
+                            "current": volumes[-1] if len(volumes) > 0 else 0,
+                            "avg_7d": np.mean(volumes[-7:]) if len(volumes) >= 7 else 0,
+                            "trend": volume_trend,
+                            "strength": volume_strength,
+                        },
                     },
-                    "volume": {
-                        "current": volumes[-1] if len(volumes) > 0 else 0,
-                        "avg_7d": np.mean(volumes[-7:]) if len(volumes) >= 7 else 0,
-                        "trend": volume_trend,
-                        "strength": volume_strength
-                    }
-                },
-                "support_levels": support_levels,
-                "resistance_levels": resistance_levels,
-                "timestamp": datetime.now().isoformat()
-            })
+                    "support_levels": support_levels,
+                    "resistance_levels": resistance_levels,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
 
             logger.info(f"成功获取 {asset} 的AI市场分析")
             return analysis
 
         except Exception as e:
             logger.error(f"分析市场趋势时出错: {e}")
-            return self._get_basic_analysis(asset, current_price, price_change_24h, volatility, rsi)
+            return self._get_basic_analysis(
+                asset, current_price, price_change_24h, volatility, rsi
+            )
 
     def calculate_macd(
         self, prices: np.ndarray, fast: int = 12, slow: int = 26, signal: int = 9
@@ -414,7 +457,9 @@ class AiPredictor:
                 # 可以添加更多协议
             }
 
-            protocol_id = security_identifiers.get(protocol_name, protocol_name.lower().replace(" ", "-"))
+            protocol_id = security_identifiers.get(
+                protocol_name, protocol_name.lower().replace(" ", "-")
+            )
 
             # 尝试从CertiK API获取数据
             certik_data = self._fetch_certik_data(protocol_id)
@@ -442,29 +487,31 @@ class AiPredictor:
                     "last_audit_date": "2023-06-15",
                     "audit_firms": ["CertiK", "OpenZeppelin", "Trail of Bits"],
                     "vulnerabilities": [],
-                    "security_incidents": []
+                    "security_incidents": [],
                 },
                 "compound-v3": {
                     "audit_score": 92,
                     "last_audit_date": "2023-04-20",
                     "audit_firms": ["Trail of Bits", "OpenZeppelin"],
-                    "vulnerabilities": ["Medium severity issue in liquidation mechanism (fixed)"],
-                    "security_incidents": []
+                    "vulnerabilities": [
+                        "Medium severity issue in liquidation mechanism (fixed)"
+                    ],
+                    "security_incidents": [],
                 },
                 "curve": {
                     "audit_score": 90,
                     "last_audit_date": "2023-02-10",
                     "audit_firms": ["CertiK", "Quantstamp"],
                     "vulnerabilities": ["Low severity reentrancy issue (fixed)"],
-                    "security_incidents": []
+                    "security_incidents": [],
                 },
                 "uniswap-v2": {
                     "audit_score": 94,
                     "last_audit_date": "2022-11-05",
                     "audit_firms": ["Trail of Bits", "Consensys Diligence"],
                     "vulnerabilities": [],
-                    "security_incidents": []
-                }
+                    "security_incidents": [],
+                },
             }
 
             if protocol_id in security_data:
@@ -477,7 +524,7 @@ class AiPredictor:
                     "last_audit_date": "未知",
                     "audit_firms": ["未知"],
                     "vulnerabilities": [],
-                    "security_incidents": []
+                    "security_incidents": [],
                 }
 
         except Exception as e:
@@ -487,7 +534,7 @@ class AiPredictor:
                 "last_audit_date": "未知",
                 "audit_firms": ["未知"],
                 "vulnerabilities": [],
-                "security_incidents": []
+                "security_incidents": [],
             }
 
     def _fetch_certik_data(self, protocol_id: str) -> Optional[Dict]:
@@ -502,7 +549,9 @@ class AiPredictor:
             certik_url = f"https://api.certik.com/projects/{protocol_id}"
             headers = {"Authorization": f"Bearer {certik_api_key}"}
 
-            response = requests.get(certik_url, headers=headers, proxies=proxies, timeout=10)
+            response = requests.get(
+                certik_url, headers=headers, proxies=proxies, timeout=10
+            )
             if response.status_code == 200:
                 data = response.json()
                 return {
@@ -510,7 +559,7 @@ class AiPredictor:
                     "last_audit_date": data.get("last_audit_date", "未知"),
                     "audit_firms": data.get("auditors", ["CertiK"]),
                     "vulnerabilities": data.get("vulnerabilities", []),
-                    "security_incidents": data.get("incidents", [])
+                    "security_incidents": data.get("incidents", []),
                 }
             else:
                 logger.warning(f"CertiK API返回状态码: {response.status_code}")
@@ -531,7 +580,7 @@ class AiPredictor:
                     "last_audit_date": data.get("last_reviewed", "未知"),
                     "audit_firms": data.get("auditors", ["DeFiSafety"]),
                     "vulnerabilities": [],
-                    "security_incidents": []
+                    "security_incidents": [],
                 }
             else:
                 logger.warning(f"DeFiSafety API返回状态码: {response.status_code}")
@@ -552,7 +601,9 @@ class AiPredictor:
             immunefi_url = f"https://api.immunefi.com/v1/projects/{protocol_id}"
             headers = {"Authorization": f"Bearer {immunefi_api_key}"}
 
-            response = requests.get(immunefi_url, headers=headers, proxies=proxies, timeout=10)
+            response = requests.get(
+                immunefi_url, headers=headers, proxies=proxies, timeout=10
+            )
             if response.status_code == 200:
                 data = response.json()
                 return {
@@ -560,7 +611,7 @@ class AiPredictor:
                     "last_audit_date": data.get("last_audit", "未知"),
                     "audit_firms": data.get("auditors", ["未知"]),
                     "vulnerabilities": data.get("disclosed_vulnerabilities", []),
-                    "security_incidents": data.get("incidents", [])
+                    "security_incidents": data.get("incidents", []),
                 }
             else:
                 logger.warning(f"Immunefi API返回状态码: {response.status_code}")
@@ -592,7 +643,9 @@ class AiPredictor:
             }
 
             # 获取协议标识符
-            protocol_id = protocol_identifiers.get(protocol_name, protocol_name.lower().replace(" ", "-"))
+            protocol_id = protocol_identifiers.get(
+                protocol_name, protocol_name.lower().replace(" ", "-")
+            )
 
             # 使用requests发起请求
             # 首先尝试DefiLlama API获取TVL和基本数据
@@ -606,7 +659,11 @@ class AiPredictor:
 
                     # 提取相关数据
                     tvl = llama_data.get("tvl", 0)
-                    daily_volume = llama_data.get("volume24h", 0) if "volume24h" in llama_data else 0
+                    daily_volume = (
+                        llama_data.get("volume24h", 0)
+                        if "volume24h" in llama_data
+                        else 0
+                    )
 
                     # 获取安全数据
                     security_data = self._fetch_security_data(protocol_name)
@@ -623,7 +680,7 @@ class AiPredictor:
                         "implementation": "unknown",  # 默认值，理想情况下应从链上数据获取
                         "last_audit_date": security_data["last_audit_date"],
                         "audit_firms": security_data["audit_firms"],
-                        "vulnerabilities": security_data["vulnerabilities"]
+                        "vulnerabilities": security_data["vulnerabilities"],
                     }
 
                     logger.info(f"成功获取{protocol_name}数据")
@@ -654,7 +711,7 @@ class AiPredictor:
                 "implementation": "upgradeable proxy",
                 "last_audit_date": "2023-06-15",
                 "audit_firms": ["CertiK", "OpenZeppelin", "Trail of Bits"],
-                "vulnerabilities": []
+                "vulnerabilities": [],
             },
             "Compound V3": {
                 "tvl": 3_000_000_000,
@@ -667,7 +724,9 @@ class AiPredictor:
                 "implementation": "upgradeable proxy",
                 "last_audit_date": "2023-04-20",
                 "audit_firms": ["Trail of Bits", "OpenZeppelin"],
-                "vulnerabilities": ["Medium severity issue in liquidation mechanism (fixed)"]
+                "vulnerabilities": [
+                    "Medium severity issue in liquidation mechanism (fixed)"
+                ],
             },
             "Curve": {
                 "tvl": 4_000_000_000,
@@ -680,7 +739,7 @@ class AiPredictor:
                 "implementation": "immutable",
                 "last_audit_date": "2023-02-10",
                 "audit_firms": ["CertiK", "Quantstamp"],
-                "vulnerabilities": ["Low severity reentrancy issue (fixed)"]
+                "vulnerabilities": ["Low severity reentrancy issue (fixed)"],
             },
             "Uniswap V2": {
                 "tvl": 2_000_000_000,
@@ -693,23 +752,26 @@ class AiPredictor:
                 "implementation": "immutable",
                 "last_audit_date": "2022-11-05",
                 "audit_firms": ["Trail of Bits", "Consensys Diligence"],
-                "vulnerabilities": []
+                "vulnerabilities": [],
             },
         }
 
-        return default_data.get(protocol_name, {
-            "tvl": 1_000_000_000,
-            "daily_volume": 50_000_000,
-            "audit_score": 80,
-            "decentralization_score": 75,
-            "insurance_coverage": False,
-            "hack_history": [],
-            "governance_token": "Unknown",
-            "implementation": "unknown",
-            "last_audit_date": "未知",
-            "audit_firms": ["未知"],
-            "vulnerabilities": []
-        })
+        return default_data.get(
+            protocol_name,
+            {
+                "tvl": 1_000_000_000,
+                "daily_volume": 50_000_000,
+                "audit_score": 80,
+                "decentralization_score": 75,
+                "insurance_coverage": False,
+                "hack_history": [],
+                "governance_token": "Unknown",
+                "implementation": "unknown",
+                "last_audit_date": "未知",
+                "audit_firms": ["未知"],
+                "vulnerabilities": [],
+            },
+        )
 
     def analyze_defi_protocol_risk(self, protocol_data: Dict) -> Dict:
         """分析DeFi协议风险"""
@@ -797,10 +859,14 @@ class AiPredictor:
                         "audit_details": {
                             "last_audit_date": protocol["last_audit_date"],
                             "audit_firms": protocol["audit_firms"],
-                            "vulnerabilities": protocol["vulnerabilities"]
+                            "vulnerabilities": protocol["vulnerabilities"],
                         },
                         "timestamp": datetime.now().isoformat(),
-                        "data_source": "API" if "tvl" in protocol and protocol["tvl"] > 0 else "Default"
+                        "data_source": (
+                            "API"
+                            if "tvl" in protocol and protocol["tvl"] > 0
+                            else "Default"
+                        ),
                     }
                 )
 
@@ -830,7 +896,7 @@ class AiPredictor:
             "audit_details": {
                 "last_audit_date": "2023-12-01",
                 "audit_firms": ["Basic Security Audit"],
-                "vulnerabilities": []
+                "vulnerabilities": [],
             },
             "risk_factors": ["缺乏实时风险数据", "使用基础风险评估模型"],
             "recommendations": [
@@ -839,7 +905,7 @@ class AiPredictor:
                 "分散投资以降低风险",
             ],
             "timestamp": datetime.now().isoformat(),
-            "data_source": "Default"
+            "data_source": "Default",
         }
 
     def _calculate_ema(self, prices: np.ndarray, period: int) -> np.ndarray:
@@ -852,11 +918,13 @@ class AiPredictor:
 
         multiplier = 2 / (period + 1)
         for i in range(period, len(prices)):
-            ema[i] = (prices[i] - ema[i-1]) * multiplier + ema[i-1]
+            ema[i] = (prices[i] - ema[i - 1]) * multiplier + ema[i - 1]
 
         return ema
 
-    def _calculate_support_levels(self, prices: np.ndarray, current_price: float) -> List[float]:
+    def _calculate_support_levels(
+        self, prices: np.ndarray, current_price: float
+    ) -> List[float]:
         """计算支撑位"""
         if len(prices) < 30:
             return [current_price * 0.95, current_price * 0.9]
@@ -864,7 +932,12 @@ class AiPredictor:
         # 找出局部最低点
         min_points = []
         for i in range(2, len(prices) - 2):
-            if prices[i] < prices[i-1] and prices[i] < prices[i-2] and prices[i] < prices[i+1] and prices[i] < prices[i+2]:
+            if (
+                prices[i] < prices[i - 1]
+                and prices[i] < prices[i - 2]
+                and prices[i] < prices[i + 1]
+                and prices[i] < prices[i + 2]
+            ):
                 min_points.append(prices[i])
 
         # 过滤掉高于当前价格的支撑位
@@ -878,7 +951,9 @@ class AiPredictor:
         support_levels.sort(reverse=True)
         return support_levels[:2]
 
-    def _calculate_resistance_levels(self, prices: np.ndarray, current_price: float) -> List[float]:
+    def _calculate_resistance_levels(
+        self, prices: np.ndarray, current_price: float
+    ) -> List[float]:
         """计算阻力位"""
         if len(prices) < 30:
             return [current_price * 1.05, current_price * 1.1]
@@ -886,7 +961,12 @@ class AiPredictor:
         # 找出局部最高点
         max_points = []
         for i in range(2, len(prices) - 2):
-            if prices[i] > prices[i-1] and prices[i] > prices[i-2] and prices[i] > prices[i+1] and prices[i] > prices[i+2]:
+            if (
+                prices[i] > prices[i - 1]
+                and prices[i] > prices[i - 2]
+                and prices[i] > prices[i + 1]
+                and prices[i] > prices[i + 2]
+            ):
                 max_points.append(prices[i])
 
         # 过滤掉低于当前价格的阻力位
