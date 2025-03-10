@@ -27,35 +27,84 @@ class HistoricalDataCache:
     def __init__(self):
         # 为不同时间周期创建独立的TTLCache
         # 缓存时间设置为数据周期的2倍，确保数据时效性
-        self.cache_1min = TTLCache(maxsize=1000, ttl=120)  # 2分钟
-        self.cache_5min = TTLCache(maxsize=1000, ttl=600)  # 10分钟
-        self.cache_15min = TTLCache(maxsize=1000, ttl=1800)  # 30分钟
-        self.cache_1hour = TTLCache(maxsize=1000, ttl=7200)  # 2小时
-        self.cache_4hour = TTLCache(maxsize=500, ttl=28800)  # 8小时
-        self.cache_1day = TTLCache(maxsize=500, ttl=172800)  # 48小时
+        self.cache_map = {
+            "1m": TTLCache(maxsize=1000, ttl=120),  # 2分钟
+            "5m": TTLCache(maxsize=1000, ttl=600),  # 10分钟
+            "15m": TTLCache(maxsize=1000, ttl=1800),  # 30分钟
+            "1h": TTLCache(maxsize=1000, ttl=7200),  # 2小时
+            "4h": TTLCache(maxsize=500, ttl=28800),  # 8小时
+            "1d": TTLCache(maxsize=500, ttl=172800),  # 48小时
+        }
+        self.logger = logging.getLogger("defi_risk.cache")
 
     def get_cache(self, interval: str) -> TTLCache:
         """获取对应时间周期的缓存"""
-        cache_map = {
-            "1m": self.cache_1min,
-            "5m": self.cache_5min,
-            "15m": self.cache_15min,
-            "1h": self.cache_1hour,
-            "4h": self.cache_4hour,
-            "1d": self.cache_1day,
-        }
-        return cache_map.get(interval)
+        # 确保 interval 是字符串类型
+        interval_str = str(interval)
+
+        # 打印调试信息
+        self.logger.info(f"获取缓存：interval={interval_str}, 类型={type(interval)}")
+        self.logger.info(f"可用的缓存键：{list(self.cache_map.keys())}")
+
+        # 检查 interval 是否在 cache_map 中
+        if interval_str not in self.cache_map:
+            self.logger.warning(f"未找到间隔为 {interval_str} 的缓存")
+            return None
+
+        return self.cache_map[interval_str]
 
     def get(self, key: str, interval: str):
         """获取缓存数据"""
-        cache = self.get_cache(interval)
-        return cache.get(key) if cache else None
+        try:
+            # 确保 interval 是字符串类型
+            interval_str = str(interval)
+
+            # 打印调试信息
+            self.logger.info(
+                f"获取缓存：key={key}, interval={interval_str}, 类型={type(interval)}"
+            )
+
+            # 检查 interval 是否在 cache_map 中
+            if interval_str not in self.cache_map:
+                self.logger.warning(f"获取缓存失败：未找到间隔为 {interval_str} 的缓存")
+                return None
+
+            # 获取缓存
+            value = self.cache_map[interval_str].get(key)
+            if value is None:
+                self.logger.info(f"缓存未命中：key={key}, interval={interval_str}")
+            else:
+                self.logger.info(f"缓存命中：key={key}, interval={interval_str}")
+            return value
+        except Exception as e:
+            self.logger.error(
+                f"获取缓存时出错：key={key}, interval={interval_str}, error={e}"
+            )
+            return None
 
     def set(self, key: str, value, interval: str):
         """设置缓存数据"""
-        cache = self.get_cache(interval)
-        if cache:
-            cache[key] = value
+        try:
+            # 确保 interval 是字符串类型
+            interval_str = str(interval)
+
+            # 打印调试信息
+            self.logger.info(
+                f"设置缓存：key={key}, interval={interval_str}, 类型={type(interval)}"
+            )
+
+            # 检查 interval 是否在 cache_map 中
+            if interval_str not in self.cache_map:
+                self.logger.warning(f"设置缓存失败：未找到间隔为 {interval_str} 的缓存")
+                return
+
+            # 设置缓存
+            self.cache_map[interval_str][key] = value
+            self.logger.info(f"成功设置缓存：key={key}, interval={interval_str}")
+        except Exception as e:
+            self.logger.error(
+                f"设置缓存时出错：key={key}, interval={interval_str}, error={e}"
+            )
 
 
 # 演示数据常量
@@ -179,6 +228,11 @@ class BlockchainService:
             for pos in positions:
                 try:
                     asset = pos.asset.split("/")[0]  # 处理LP token的情况
+
+                    # 跳过 USDT 资产的风险警报
+                    if asset == "USDT":
+                        continue
+
                     ticker_data = await self._get_24h_data(asset)
 
                     if ticker_data:
@@ -193,8 +247,6 @@ class BlockchainService:
 
                         # 计算波动率 (使用高低价差作为波动性指标)
                         volatility = (high_price - low_price) / open_price * 100
-
-                        # rsi = 50  # 默认值
 
                         # 价格波动警报
                         if abs(price_change_24h) > 0.05:  # 5%的价格变化
@@ -482,6 +534,8 @@ class BlockchainService:
             if cached_data is not None:
                 logger.info(f"从缓存获取 {asset} 的历史数据")
                 return cached_data
+            else:
+                logger.info(f"缓存中未找到 {asset} 的历史数据")
 
             # 资产ID映射（不同API可能使用不同的ID）
             asset_ids = {
@@ -505,6 +559,7 @@ class BlockchainService:
             if asset not in asset_ids["binance"]:
                 logger.warning(f"不支持的资产 {asset}，使用演示数据")
                 demo_data = self._get_demo_historical_data(asset)
+                logger.info(f"设置 {asset} 的演示数据到缓存")
                 self.historical_data_cache.set(asset, demo_data, "1d")
                 return demo_data
 
@@ -520,9 +575,11 @@ class BlockchainService:
                         asset, asset_ids["binance"][asset]
                     )
                     if df is not None and not df.empty:
-                        logger.info(f"成功从Binance获取{asset}数据")
+                        logger.info(f"成功从Binance获取{asset}数据，设置到缓存")
                         self.historical_data_cache.set(asset, df, "1d")
                         return df
+                    else:
+                        logger.warning(f"从Binance获取的{asset}数据为空")
                 except Exception as e:
                     error_msg = f"从Binance获取{asset}数据失败: {e}"
                     logger.warning(error_msg)
@@ -533,22 +590,28 @@ class BlockchainService:
                 f"所有数据源获取{asset}数据失败，使用演示数据。错误: {error_messages}"
             )
             demo_data = self._get_demo_historical_data(asset)
+            logger.info(f"设置 {asset} 的演示数据到缓存")
             self.historical_data_cache.set(asset, demo_data, "1d")
             return demo_data
 
         except Exception as e:
             logger.error(f"获取{asset}历史数据时出错: {e}")
             demo_data = self._get_demo_historical_data(asset)
+            logger.info(f"设置 {asset} 的演示数据到缓存（异常处理）")
             self.historical_data_cache.set(asset, demo_data, "1d")
             return demo_data
 
     # 获取24小时数据
-    @cached(cache)
     async def _get_24h_data(
         self,
         asset: str,
     ) -> Optional[Dict]:
         """从Binance API获取24小时行情数据"""
+        # 手动实现缓存逻辑
+        cache_key = f"24h_data_{asset}"
+        if cache_key in cache:
+            return cache[cache_key]
+
         url = "https://api.binance.com/api/v3/ticker/24hr"
 
         asset_ids = {
@@ -583,25 +646,10 @@ class BlockchainService:
                     logger.warning(f"Binance返回的{asset}数据为空")
                     return None
 
-                # 返回24小时行情数据
-                # {
-                #   "symbol": "BTCUSDT",
-                #   "priceChange": "-94.99999800",    //24小时价格变动
-                #   "priceChangePercent": "-95.960",  //24小时价格变动百分比
-                #   "weightedAvgPrice": "0.29628482", //加权平均价
-                #   "lastPrice": "4.00000200",        //最近一次成交价
-                #   "lastQty": "200.00000000",        //最近一次成交额
-                #   "openPrice": "99.00000000",       //24小时内第一次成交的价格
-                #   "highPrice": "100.00000000",      //24小时最高价
-                #   "lowPrice": "0.10000000",         //24小时最低价
-                #   "volume": "8913.30000000",        //24小时成交量
-                #   "quoteVolume": "15.30000000",     //24小时成交额
-                #   "openTime": 1499783499040,        //24小时内，第一笔交易的发生时间
-                #   "closeTime": 1499869899040,       //24小时内，最后一笔交易的发生时间
-                #   "firstId": 28385,   // 首笔成交id
-                #   "lastId": 28460,    // 末笔成交id
-                #   "count": 76         // 成交笔数
-                # }
+                # 将结果存入缓存
+                cache[cache_key] = data
+
+                # 返回数据
                 return data
             else:
                 logger.error(f"Binance API返回错误: {response.status_code}")
@@ -795,28 +843,29 @@ class BlockchainService:
             return None
 
     def _get_demo_historical_data(self, asset: str) -> pd.DataFrame:
-        """生成演示用的历史数据"""
-        dates = pd.date_range(end=datetime.now(), periods=30, freq="D")
-        base_price = DEMO_ASSETS.get(asset, {"price": 100.0})["price"]
-        volatility = DEMO_ASSETS.get(asset, {"volatility": 0.01})["volatility"]
+        """生成usd价格历史数据"""
 
-        np.random.seed(42 + hash(asset) % 100)
-        price_changes = np.random.normal(0, volatility / 2, size=30)
-        prices = base_price * (1 + np.cumsum(price_changes))
-        volumes = np.random.uniform(10000, 100000, size=30)
+        # dates = pd.date_range(end=datetime.now(), periods=30, freq="D")
+        # base_price = DEMO_ASSETS.get(asset, {"price": 100.0})["price"]
+        # volatility = DEMO_ASSETS.get(asset, {"volatility": 0.01})["volatility"]
 
-        df = pd.DataFrame(
-            {
-                "timestamp": dates,
-                "price": prices,
-                "volume": volumes,
-                "market_cap": np.random.uniform(
-                    base_price * 1000000, base_price * 10000000, size=30
-                ),
-            }
-        )
-        df["source"] = "demo"
-        return df
+        # np.random.seed(42 + hash(asset) % 100)
+        # price_changes = np.random.normal(0, volatility / 2, size=30)
+        # prices = base_price * (1 + np.cumsum(price_changes))
+        # volumes = np.random.uniform(10000, 100000, size=30)
+
+        # df = pd.DataFrame(
+        #     {
+        #         "timestamp": dates,
+        #         "price": prices,
+        #         "volume": volumes,
+        #         "market_cap": np.random.uniform(
+        #             base_price * 1000000, base_price * 10000000, size=30
+        #         ),
+        #     }
+        # )
+        # df["source"] = "demo"
+        # return df
 
     def _get_demo_market_alerts(self) -> List[Dict]:
         """返回演示警报数据"""
@@ -1058,7 +1107,7 @@ class BlockchainService:
                     logger.warning(f"Binance返回的{asset}数据为空")
                     return None
 
-                return data["price"]
+                return float(data["price"])
             else:
                 logger.error(f"Binance API返回错误: {response.status_code}")
                 return None
@@ -1747,3 +1796,55 @@ class BlockchainService:
         except Exception as e:
             logger.error(f"获取Uniswap V2头寸时出错: {e}")
             return []
+
+    async def get_gas_price(self) -> float:
+        """获取当前gas价格（单位：Gwei）
+
+        Returns:
+            float: 当前gas价格，单位为Gwei
+        """
+        try:
+            # 首先尝试从以太坊节点获取
+            if self.w3.is_connected():
+                try:
+                    # 获取当前gas价格（单位：Wei）
+                    gas_price_wei = self.w3.eth.gas_price
+                    # max_priority_fee
+                    max_priority_fee = self.w3.eth.max_priority_fee
+                    # 转换为Gwei (1 Gwei = 10^9 Wei)
+                    gas_price_gwei = gas_price_wei / 10**9
+                    logger.info(f"从以太坊节点获取gas价格: {gas_price_gwei:.2f} Gwei")
+                    return gas_price_gwei
+                except Exception as e:
+                    logger.warning(f"从以太坊节点获取gas价格失败: {e}")
+
+            # 尝试从Binance API获取ETH gas价格
+            try:
+                url = "https://api.binance.com/api/v3/ticker/price"
+                params = {"symbol": "ETHUSDT"}  # 使用ETH价格作为参考
+
+                response = requests.get(url, params=params, proxies=proxies)
+                if response.status_code == 200:
+                    data = response.json()
+                    eth_price = float(data["price"])
+
+                    # 使用一个基准gas价格（例如30 Gwei）并根据ETH价格调整
+                    base_gas_price = 30  # 基准gas价格（Gwei）
+                    eth_price_factor = 2000 / eth_price  # 2000美元作为基准ETH价格
+                    adjusted_gas_price = base_gas_price * eth_price_factor
+
+                    logger.info(f"从Binance估算gas价格: {adjusted_gas_price:.2f} Gwei")
+                    return adjusted_gas_price
+                else:
+                    logger.error(f"Binance API返回错误: {response.status_code}")
+            except Exception as e:
+                logger.error(f"从Binance获取gas价格失败: {e}")
+
+            # 如果都失败了，返回一个合理的默认值
+            default_gas_price = 30.0  # 30 Gwei
+            logger.warning(f"无法获取实时gas价格，使用默认值: {default_gas_price} Gwei")
+            return default_gas_price
+
+        except Exception as e:
+            logger.error(f"获取gas价格时出错: {e}")
+            return 30.0  # 返回默认值

@@ -9,3 +9,4 @@ requests==2.31.0
 websockets==12.0
 ccxt==4.1.13
 openai==1.12.0
+cachetools==5.1.0

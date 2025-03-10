@@ -16,7 +16,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
-app = FastAPI(title="DeFi存款分析API")
+app = FastAPI(title="DeFi风险分析API")
 
 # 配置 CORS
 app.add_middleware(
@@ -110,6 +110,8 @@ async def analyze_defi_deposits(request: PortfolioRequest):
         ai_predictions = {}
         for pos in positions:
             asset = pos.asset.split("/")[0]  # 处理LP token的情况
+            if asset == "USDT":
+                continue
             historical_data = await blockchain_service.get_asset_historical_data(asset)
             if not historical_data.empty:
                 prediction = ai_predictor.analyze_market_trend(historical_data, asset)
@@ -163,10 +165,21 @@ async def analyze_defi_deposits(request: PortfolioRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# 增加获取市场警报
+@app.post("/market-alerts")
+async def get_market_alerts(request: PortfolioRequest):
+    """获取市场警报"""
+    return await blockchain_service.get_market_alerts(request.wallet_address)
+
+
 @app.post("/predict/market")
 async def predict_market(request: MarketPredictionRequest):
     """获取市场预测"""
     try:
+        # 跳过 USDT 资产的风险警报
+        if request.asset == "USDT":
+            raise HTTPException(status_code=400, detail="USDT 资产不支持市场预测")
+
         # 获取历史数据
         historical_data = await blockchain_service.get_asset_historical_data(
             request.asset
@@ -179,11 +192,11 @@ async def predict_market(request: MarketPredictionRequest):
         # 获取AI预测
         prediction = ai_predictor.analyze_market_trend(historical_data, request.asset)
 
-        # 获取市场警报
-        alerts = await blockchain_service.get_market_alerts(
-            "0xAbCdEf123456789AbCdEf123456789AbCdEf1234"
-        )  # 使用演示地址获取警报
-        relevant_alerts = [alert for alert in alerts if alert["asset"] == request.asset]
+        # # 获取市场警报
+        # alerts = await blockchain_service.get_market_alerts(
+        #     "0xAbCdEf123456789AbCdEf123456789AbCdEf1234"
+        # )  # 使用演示地址获取警报
+        # relevant_alerts = [alert for alert in alerts if alert["asset"] == request.asset]
 
         return {
             "asset": request.asset,
@@ -210,7 +223,6 @@ async def predict_market(request: MarketPredictionRequest):
                     else prediction.get("resistance_levels", [])
                 ),
             },
-            "alerts": relevant_alerts,
         }
 
     except Exception as e:
@@ -297,6 +309,10 @@ async def get_supported_protocols():
 async def get_market_data(asset: str) -> MarketData:
     """获取资产的市场数据"""
     try:
+        # 跳过 USDT 资产的市场数据
+        if asset == "USDT":
+            raise HTTPException(status_code=400, detail="USDT 资产不支持市场数据")
+
         # 获取历史数据
         historical_data = await blockchain_service.get_asset_historical_data(asset)
         if historical_data.empty:
@@ -320,19 +336,6 @@ async def get_market_data(asset: str) -> MarketData:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/token-price")
-async def get_token_price(request: TokenPrice) -> float:
-    """获取代币价格"""
-    try:
-        price = await blockchain_service.get_token_price(request.token_address)
-        if price == 0:
-            raise HTTPException(status_code=404, detail="未找到代币价格")
-        return price
-    except Exception as e:
-        logger.error(f"获取代币价格时出错: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.get("/gas-price")
 async def get_gas_price() -> float:
     """获取当前gas价格"""
@@ -349,9 +352,10 @@ async def get_market_analysis(positions: List[Position]) -> Dict[str, Any]:
         analysis = {}
         for pos in positions:
             # 获取资产的历史数据
-            historical_data = await blockchain_service.get_asset_historical_data(
-                pos.asset.split("/")[0]
-            )
+            asset = pos.asset.split("/")[0]
+            if asset == "USDT":
+                continue
+            historical_data = await blockchain_service.get_asset_historical_data(asset)
             if not historical_data.empty:
                 latest_data = historical_data.iloc[-1]
                 analysis[pos.asset] = {

@@ -3,7 +3,7 @@
 import React from "react";
 import { Portfolio } from "../services/api";
 import { PieChart } from "react-minimal-pie-chart";
-import { TrendingUp, Wallet, BarChart3, Percent } from "lucide-react";
+import { TrendingUp, Wallet, BarChart3, Percent, ChartBar, Target, DollarSign, ArrowUpDown } from "lucide-react";
 
 interface PortfolioOverviewProps {
   portfolio: Portfolio;
@@ -57,6 +57,39 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
     return acc;
   }, {} as { [key: string]: number });
 
+  // 计算总收益率趋势
+  const calculateAPYTrend = () => {
+    const apyValues = portfolio.positions.map(pos => pos.apy || 0);
+    const avgAPY = apyValues.reduce((sum, apy) => sum + apy, 0) / apyValues.length;
+    const maxAPY = Math.max(...apyValues);
+    const minAPY = Math.min(...apyValues);
+
+    return {
+      average: avgAPY,
+      max: maxAPY,
+      min: minAPY,
+      trend: avgAPY > 0.1 ? "上升" : avgAPY < 0.05 ? "下降" : "稳定"
+    };
+  };
+
+  const apyTrend = calculateAPYTrend();
+
+  // 计算投资组合多样性得分
+  const calculateDiversityScore = () => {
+    const protocolCount = Object.keys(protocolValues).length;
+    const assetTypeCount = Object.keys(assetTypeDistribution).length;
+    const maxProtocolShare = Math.max(...Object.values(protocolValues)) / portfolio.total_value;
+
+    // 多样性得分计算 (0-100)
+    const protocolScore = Math.min(protocolCount * 20, 100);
+    const assetTypeScore = Math.min(assetTypeCount * 25, 100);
+    const concentrationScore = Math.max(0, 100 - maxProtocolShare * 100);
+
+    return Math.round((protocolScore + assetTypeScore + concentrationScore) / 3);
+  };
+
+  const diversityScore = calculateDiversityScore();
+
   return (
     <div>
       <h2 className="text-xl font-semibold mb-6 flex items-center gap-2">
@@ -68,7 +101,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
           <div className="flex items-center gap-2 text-muted mb-2">
-            <Wallet className="h-4 w-4" />
+            <DollarSign className="h-4 w-4" />
             <span className="text-sm">总资产价值</span>
           </div>
           <p className="text-2xl font-bold">${portfolio.total_value.toLocaleString()}</p>
@@ -79,23 +112,41 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
             <Percent className="h-4 w-4" />
             <span className="text-sm">平均APY</span>
           </div>
-          <p className="text-2xl font-bold text-success">{(totalAPY * 100).toFixed(2)}%</p>
+          <div className="flex items-center gap-2">
+            <p className="text-2xl font-bold text-success">{(apyTrend.average * 100).toFixed(2)}%</p>
+            <span className={`text-xs px-2 py-0.5 rounded-full ${apyTrend.trend === "上升" ? "bg-success/10 text-success" : apyTrend.trend === "下降" ? "bg-destructive/10 text-destructive" : "bg-amber-500/10 text-amber-500"}`}>
+              {apyTrend.trend}
+            </span>
+          </div>
+          <div className="mt-1 text-xs text-muted">
+            范围: {(apyTrend.min * 100).toFixed(1)}% - {(apyTrend.max * 100).toFixed(1)}%
+          </div>
+        </div>
+
+        <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
+          <div className="flex items-center gap-2 text-muted mb-2">
+            <Target className="h-4 w-4" />
+            <span className="text-sm">多样性得分</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <p className="text-2xl font-bold">{diversityScore}</p>
+            <span className={`text-xs px-2 py-0.5 rounded-full ${diversityScore >= 80 ? "bg-success/10 text-success" : diversityScore >= 60 ? "bg-amber-500/10 text-amber-500" : "bg-destructive/10 text-destructive"}`}>
+              {diversityScore >= 80 ? "优秀" : diversityScore >= 60 ? "良好" : "需优化"}
+            </span>
+          </div>
         </div>
 
         <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
           <div className="flex items-center gap-2 text-muted mb-2">
             <BarChart3 className="h-4 w-4" />
-            <span className="text-sm">协议数量</span>
-          </div>
-          <p className="text-2xl font-bold">{Object.keys(protocolValues).length}</p>
-        </div>
-
-        <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
-          <div className="flex items-center gap-2 text-muted mb-2">
-            <TrendingUp className="h-4 w-4" />
             <span className="text-sm">资产数量</span>
           </div>
-          <p className="text-2xl font-bold">{portfolio.positions.length}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-2xl font-bold">{portfolio.positions.length}</p>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-muted">
+              {Object.keys(protocolValues).length} 个协议
+            </span>
+          </div>
         </div>
       </div>
 
@@ -103,7 +154,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
         <div className="space-y-6">
           <div>
             <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
-              <BarChart3 className="h-4 w-4 text-primary" />
+              <ChartBar className="h-4 w-4 text-primary" />
               协议分布
             </h3>
             <div className="space-y-4">
@@ -113,7 +164,10 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-baseline">
                       <span className="font-medium group-hover:text-primary transition-colors">{protocol}</span>
-                      <span className="text-sm text-muted">${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                      <div className="text-right">
+                        <span className="text-sm">${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                        <span className="text-xs text-muted ml-2">({((value / portfolio.total_value) * 100).toFixed(1)}%)</span>
+                      </div>
                     </div>
                     <div className="w-full bg-muted/30 rounded-full h-1.5 mt-1.5 overflow-hidden">
                       <div
@@ -132,7 +186,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
 
           <div>
             <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-primary" />
+              <ArrowUpDown className="h-4 w-4 text-primary" />
               资产类型分布
             </h3>
             <div className="space-y-4">
@@ -152,7 +206,10 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-baseline">
                       <span className="font-medium group-hover:text-primary transition-colors">{type}</span>
-                      <span className="text-sm text-muted">${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                      <div className="text-right">
+                        <span className="text-sm">${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                        <span className="text-xs text-muted ml-2">({((value / portfolio.total_value) * 100).toFixed(1)}%)</span>
+                      </div>
                     </div>
                     <div className="w-full bg-muted/30 rounded-full h-1.5 mt-1.5 overflow-hidden">
                       <div
@@ -197,13 +254,19 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
               labelPosition={75}
               className="hover:drop-shadow-xl transition-all"
             />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="text-center">
+                <p className="text-xs text-muted">总资产</p>
+                <p className="text-lg font-bold">${portfolio.total_value.toLocaleString()}</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       <div className="mt-8">
         <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
-          <Wallet className="h-4 w-4 text-primary" />
+          <Target className="h-4 w-4 text-primary" />
           最大头寸
         </h3>
         <div className="space-y-3">
@@ -219,8 +282,6 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
               const marketAnalysis = portfolio.market_analysis[asset];
               const value = position.amount * (marketAnalysis?.current_price || 0);
               const percentOfTotal = (value / portfolio.total_value) * 100;
-
-              // 获取资产价格变化趋势
               const priceChange = marketAnalysis?.price_change_24h || 0;
 
               return (
@@ -244,7 +305,11 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
                     <div className="text-right">
                       <p className="font-medium">${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
                       <div className="flex items-center justify-end gap-2 mt-1">
-                        {position.apy && <span className="text-xs px-2 py-0.5 rounded-full bg-success/10 text-success">APY: {(position.apy * 100).toFixed(2)}%</span>}
+                        {position.apy && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-success/10 text-success">
+                            APY: {(position.apy * 100).toFixed(2)}%
+                          </span>
+                        )}
                         <span className={`text-xs px-2 py-0.5 rounded-full ${priceChange >= 0 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
                           {priceChange >= 0 ? "+" : ""}
                           {priceChange.toFixed(2)}%

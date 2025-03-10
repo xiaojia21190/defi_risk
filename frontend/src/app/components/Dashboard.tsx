@@ -8,7 +8,7 @@ import AlertsList from "./AlertsList";
 import MarketAnalysis from "./MarketAnalysis";
 import { apiService } from "../services/api";
 import { Portfolio, MarketPrediction } from "../services/api";
-import { Loader2, RefreshCw, AlertTriangle } from "lucide-react";
+import { Loader2, RefreshCw, AlertTriangle, Fuel } from "lucide-react";
 
 export const Dashboard: React.FC = () => {
   const { address, isConnected } = useAccount();
@@ -20,6 +20,7 @@ export const Dashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"overview" | "market">("overview");
   const [apiHealthy, setApiHealthy] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [gasPrice, setGasPrice] = useState<number | null>(null);
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -31,6 +32,9 @@ export const Dashboard: React.FC = () => {
       if (!isHealthy) {
         return;
       }
+
+      // 获取当前gas价格
+      fetchGasPrice();
 
       if (isConnected && address) {
         initialized.current = true;
@@ -45,6 +49,15 @@ export const Dashboard: React.FC = () => {
     const isHealthy = await apiService.checkApiHealth();
     setApiHealthy(isHealthy);
     return isHealthy;
+  };
+
+  const fetchGasPrice = async () => {
+    try {
+      const price = await apiService.getGasPrice();
+      setGasPrice(price);
+    } catch (error) {
+      console.error("获取Gas价格失败:", error);
+    }
   };
 
   const fetchPortfolioData = async (walletAddress?: string) => {
@@ -183,7 +196,13 @@ export const Dashboard: React.FC = () => {
       <div className="mb-8">
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-bold">DeFi 投资组合</h1>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            {gasPrice !== null && (
+              <div className="px-3 py-1 rounded-lg bg-muted text-sm flex items-center gap-1 mr-2">
+                <Fuel className="h-4 w-4 text-amber-500" />
+                <span>Gas: {gasPrice.toFixed(0)} Gwei</span>
+              </div>
+            )}
             <button onClick={handleRefresh} disabled={refreshing} className="p-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors" title="刷新数据">
               <RefreshCw className={`h-5 w-5 ${refreshing ? "animate-spin" : ""}`} />
             </button>
@@ -208,7 +227,9 @@ export const Dashboard: React.FC = () => {
             </div>
           </div>
           <div className="bg-card rounded-xl border border-border p-6 shadow-sm hover:shadow-md transition-all">
-            <AlertsList portfolio={portfolio} predictions={marketPredictions} />
+            <AlertsList
+              walletAddress={address || ""}
+            />
           </div>
         </div>
       ) : (

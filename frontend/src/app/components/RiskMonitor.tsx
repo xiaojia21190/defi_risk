@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Portfolio } from "../services/api";
-import { AlertTriangle, Shield, TrendingDown, Zap, BarChart3, DollarSign, Percent } from "lucide-react";
+import { AlertTriangle, Shield, TrendingDown, Zap, BarChart3, DollarSign, Percent, ChartBar, Target, Wallet } from "lucide-react";
 
 interface Position {
   protocol: string;
@@ -158,70 +158,93 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
 
           <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
             <div className="flex items-center gap-2 text-muted mb-2">
-              <BarChart3 className="h-4 w-4" />
+              <Target className="h-4 w-4" />
               <span className="text-sm">风险分布</span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-4">
               <div className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-success"></span>
-                <span className="text-xs text-muted">{riskDistribution.low}</span>
+                <span className="text-xs text-muted">低({riskDistribution.low})</span>
               </div>
               <div className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                <span className="text-xs text-muted">{riskDistribution.medium}</span>
+                <span className="text-xs text-muted">中({riskDistribution.medium})</span>
               </div>
               <div className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-destructive"></span>
-                <span className="text-xs text-muted">{riskDistribution.high}</span>
+                <span className="text-xs text-muted">高({riskDistribution.high})</span>
               </div>
             </div>
           </div>
 
           <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
             <div className="flex items-center gap-2 text-muted mb-2">
-              <DollarSign className="h-4 w-4" />
+              <Wallet className="h-4 w-4" />
               <span className="text-sm">投资组合总值</span>
             </div>
             <p className="text-xl font-bold">${portfolio.total_value.toLocaleString()}</p>
           </div>
         </div>
 
-        <div className="flex flex-col gap-2">
-          <div className="flex justify-between items-center">
-            <span className="text-muted flex items-center gap-1">
-              {icon}
-              <span>总体风险评分</span>
-            </span>
-            <span className={`font-medium ${color}`}>{percent}%</span>
-          </div>
-
-          <div className="w-full h-3 bg-background rounded-full overflow-hidden">
-            <div className={`h-full ${bg} transition-all duration-1000 ease-out`} style={{ width: `${percent}%` }}></div>
-          </div>
-
-          <div className="flex justify-between text-xs text-muted">
-            <span className="flex items-center gap-1">
-              <Shield className="h-3 w-3 text-success" />
-              <span>低</span>
-            </span>
-            <span className="flex items-center gap-1">
-              <AlertTriangle className="h-3 w-3 text-amber-500" />
-              <span>中</span>
-            </span>
-            <span className="flex items-center gap-1">
-              <Zap className="h-3 w-3 text-destructive" />
-              <span>高</span>
-            </span>
-          </div>
-        </div>
-
-        <div className={`p-4 rounded-xl ${bg} ${border} border hover:shadow-md transition-all`}>
-          <div className="flex justify-between items-center">
-            <div>
-              <span className="text-sm text-muted">风险评估</span>
-              <div className={`text-xl font-bold ${color}`}>{level}</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
+            <h3 className="font-medium mb-4 flex items-center gap-2">
+              <ChartBar className="h-4 w-4 text-primary" />
+              风险评分分布
+            </h3>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted">总体风险</span>
+                <span className={`text-sm font-medium ${color}`}>{percent}%</span>
+              </div>
+              <div className="w-full h-2 bg-background rounded-full overflow-hidden">
+                <div className={`h-full ${bg} transition-all duration-1000 ease-out`} style={{ width: `${percent}%` }}></div>
+              </div>
+              <div className="grid grid-cols-3 text-xs text-muted">
+                <div className="flex items-center gap-1">
+                  <Shield className="h-3 w-3 text-success" />
+                  <span>低风险</span>
+                </div>
+                <div className="flex items-center gap-1 justify-center">
+                  <AlertTriangle className="h-3 w-3 text-amber-500" />
+                  <span>中等风险</span>
+                </div>
+                <div className="flex items-center gap-1 justify-end">
+                  <Zap className="h-3 w-3 text-destructive" />
+                  <span>高风险</span>
+                </div>
+              </div>
             </div>
-            <div className={`w-12 h-12 rounded-full ${bg} ${color} flex items-center justify-center`}>{icon}</div>
+          </div>
+
+          <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
+            <h3 className="font-medium mb-4 flex items-center gap-2">
+              <Target className="h-4 w-4 text-primary" />
+              风险类型分布
+            </h3>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted">市场波动风险</span>
+                <span className="text-sm font-medium">{Math.round(riskScore * 100)}%</span>
+              </div>
+              <div className="w-full h-2 bg-background rounded-full overflow-hidden">
+                <div className="h-full bg-amber-500/50" style={{ width: `${Math.round(riskScore * 100)}%` }}></div>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted">清算风险</span>
+                <span className="text-sm font-medium">{Math.round(riskScore * 80)}%</span>
+              </div>
+              <div className="w-full h-2 bg-background rounded-full overflow-hidden">
+                <div className="h-full bg-destructive/50" style={{ width: `${Math.round(riskScore * 80)}%` }}></div>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted">无常损失风险</span>
+                <span className="text-sm font-medium">{Math.round(riskScore * 60)}%</span>
+              </div>
+              <div className="w-full h-2 bg-background rounded-full overflow-hidden">
+                <div className="h-full bg-primary/50" style={{ width: `${Math.round(riskScore * 60)}%` }}></div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -232,24 +255,29 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
               <Shield className="h-4 w-4 text-primary" />
               风险建议
             </h3>
-            <ul className="space-y-2 text-sm">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {portfolio.recommendations.map((rec, index) => (
-                <li key={index} className="flex items-start gap-2 p-2 rounded-lg bg-background/50 hover:bg-background transition-colors">
-                  <span className={`mt-0.5 ${color}`}>{icon}</span>
-                  <span>{rec}</span>
-                </li>
+                <div key={index} className="p-3 rounded-lg bg-background/50 hover:bg-background transition-colors flex items-start gap-2">
+                  <div className={`mt-0.5 w-5 h-5 rounded-full ${bg} ${color} flex items-center justify-center flex-shrink-0 text-xs`}>
+                    {index + 1}
+                  </div>
+                  <p className="text-sm">{rec}</p>
+                </div>
               ))}
-            </ul>
+            </div>
           </div>
         )}
 
+        {/* 头寸风险分析 */}
         <div>
           <div className="flex justify-between items-center mb-4">
             <h3 className="font-medium flex items-center gap-2">
               <BarChart3 className="h-4 w-4 text-primary" />
               头寸风险分析
             </h3>
-            <span className="text-xs px-2 py-1 rounded-md bg-background text-muted">{portfolio.positions.length} 个头寸</span>
+            <span className="text-xs px-2 py-1 rounded-md bg-background text-muted">
+              {portfolio.positions.length} 个头寸
+            </span>
           </div>
 
           <div className="space-y-3">
@@ -257,12 +285,15 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
               const asset = position.asset.split("/")[0];
               const marketData = portfolio.market_analysis[asset];
               const value = position.amount * (marketData?.current_price || 0);
+              const percentOfTotal = (value / portfolio.total_value) * 100;
 
               return (
                 <div key={index} className={`p-4 rounded-xl border ${riskLevel.border} ${riskLevel.bg} hover:shadow-md transition-all group`}>
                   <div className="flex justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <div className={`w-8 h-8 rounded-full ${riskLevel.bg} ${riskLevel.color} flex items-center justify-center text-xs font-medium transition-all group-hover:scale-110`}>{position.asset.substring(0, 2)}</div>
+                      <div className={`w-8 h-8 rounded-full ${riskLevel.bg} ${riskLevel.color} flex items-center justify-center text-xs font-medium transition-all group-hover:scale-110`}>
+                        {position.asset.substring(0, 2)}
+                      </div>
                       <div>
                         <span className="font-medium group-hover:text-primary transition-colors">{position.protocol}</span>
                         <p className="text-xs text-muted">{position.asset}</p>
@@ -273,7 +304,10 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
                         {riskLevel.icon}
                         {riskLevel.level}
                       </span>
-                      <p className="text-xs text-muted">${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+                      <p className="text-xs text-muted">
+                        ${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        <span className="ml-1">({percentOfTotal.toFixed(1)}%)</span>
+                      </p>
                     </div>
                   </div>
 
@@ -287,7 +321,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
                     ></div>
                   </div>
 
-                  <div className="flex flex-wrap gap-2 mt-3">
+                  <div className="flex flex-wrap gap-2">
                     {position.leverage && (
                       <span className={`px-2 py-1 text-xs rounded-md bg-background flex items-center gap-1 ${position.leverage > 1.5 ? "text-amber-500" : "text-muted"}`}>
                         <Zap className="h-3 w-3" />

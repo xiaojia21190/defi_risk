@@ -85,6 +85,10 @@ export interface MarketPrediction {
     resistance: number[];
   };
   alerts: any[];
+  details?: {
+    rsi?: number;
+    [key: string]: any;
+  };
 }
 
 export interface ProtocolRisk {
@@ -308,7 +312,37 @@ class ApiService {
   }
 
   async getProtocolRisk(protocolName: string): Promise<ProtocolRisk> {
-    return this.fetchJson<ProtocolRisk>(`/predict/protocol/${encodeURIComponent(protocolName)}`);
+    try {
+      // 注意：后端暂时没有实现此端点，返回模拟数据
+      console.warn('Protocol risk API endpoint is not implemented in the backend');
+
+      // 返回模拟数据
+      return {
+        risk_score: 0.65,
+        risk_level: "medium",
+        security_score: 0.75,
+        liquidity_score: 0.8,
+        centralization_risk: "medium",
+        audit_status: {
+          score: 0.7,
+          last_audit_date: "2023-12-15",
+          audit_firms: ["CertiK", "Trail of Bits"]
+        },
+        risk_factors: [
+          "中等流动性风险",
+          "智能合约复杂度较高",
+          "治理集中度中等"
+        ],
+        recommendations: [
+          "分散投资以降低风险",
+          "关注协议治理更新",
+          "设置止损以防风险"
+        ]
+      };
+    } catch (error) {
+      console.error(`获取协议风险数据失败: ${error}`);
+      throw error;
+    }
   }
 
   async getGasPrice(): Promise<number> {
@@ -317,16 +351,11 @@ class ApiService {
 
   async getAlerts(address: string): Promise<Alert[]> {
     try {
-      // // 检查是否处于演示模式
-      // const demoMode = await this.isDemoMode();
-
-      // // 如果是演示模式或没有提供地址，使用演示地址
-      // if ((demoMode || !address || address === '') && this._demoAddress) {
-      //   return this.getDemoAlerts();
-      // }
-
       // 使用提供的地址获取警报
-      return this.fetchJson<Alert[]>(`/alerts/${address}`);
+      return this.fetchJson<Alert[]>('/market-alerts', {
+        method: 'POST',
+        body: JSON.stringify({ wallet_address: address }),
+      });
     } catch (error) {
       console.error('获取警报失败:', error);
       // 出错时返回空数组而不是抛出错误
@@ -352,75 +381,154 @@ class ApiService {
 
   async getMarketAnalysis(asset: string): Promise<MarketAnalysis> {
     try {
-      const response = await fetch(`${API_BASE_URL}/market/analysis/${asset}`);
+      // 使用predict/market端点获取市场分析数据
+      const prediction = await this.predictMarket(asset);
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch market analysis');
-      }
-
-      return await response.json();
+      // 将预测数据转换为市场分析格式
+      return {
+        asset: prediction.asset,
+        current_price: prediction.current_price,
+        predicted_price: prediction.predicted_price,
+        price_change_prediction: ((prediction.predicted_price / prediction.current_price) - 1) * 100,
+        volatility: prediction.volatility || 0,
+        rsi: prediction.details?.rsi || 50, // 默认值
+        trend: prediction.trend,
+        risk_level: prediction.risk_level,
+        signals: prediction.signals || []
+      };
     } catch (error) {
-      console.error('Error fetching market analysis:', error);
+      console.error('获取市场分析数据失败:', error);
       throw error;
     }
   }
 
   async getDemoStatus(): Promise<DemoStatus> {
     try {
-      const response = await fetch(`${API_BASE_URL}/demo/status`);
+      // 注意：后端暂时没有实现此端点，返回模拟数据
+      console.warn('Demo status API endpoint is not implemented in the backend');
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch demo status');
-      }
-
-      return await response.json();
+      // 返回模拟数据
+      return {
+        demo_mode: true,
+        timestamp: new Date().toISOString(),
+        environment: {
+          network: "Sepolia",
+          chain_id: "11155111",
+          web3_connected: true
+        },
+        demo_accounts: [
+          {
+            address: "0xAbCdEf123456789AbCdEf123456789AbCdEf1234",
+            type: "demo"
+          }
+        ],
+        supported_assets: ["ETH", "USDC", "DAI", "BTC"],
+        refresh_interval: "30m"
+      };
     } catch (error) {
-      console.error('Error fetching demo status:', error);
+      console.error('获取演示状态失败:', error);
       throw error;
     }
   }
 
   async refreshDemoData(): Promise<{ status: string; message: string; timestamp: string }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/demo/refresh`);
+      // 注意：后端暂时没有实现此端点，返回模拟数据
+      console.warn('Demo refresh API endpoint is not implemented in the backend');
 
-      if (!response.ok) {
-        throw new Error('Failed to refresh demo data');
-      }
-
-      return await response.json();
+      // 返回模拟数据
+      return {
+        status: "success",
+        message: "演示数据已刷新",
+        timestamp: new Date().toISOString()
+      };
     } catch (error) {
-      console.error('Error refreshing demo data:', error);
+      console.error('刷新演示数据失败:', error);
       throw error;
     }
   }
 
   async getSystemHealth(): Promise<SystemHealth> {
     try {
-      const response = await fetch(`${API_BASE_URL}/system/health`);
+      // 注意：后端暂时没有实现此端点，返回模拟数据
+      console.warn('System health API endpoint is not implemented in the backend');
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch system health');
-      }
-
-      return await response.json();
+      // 返回模拟数据
+      return {
+        status: "healthy",
+        timestamp: new Date().toISOString(),
+        components: {
+          web3: {
+            status: "connected",
+            provider: "Alchemy",
+            network: "Sepolia"
+          },
+          assets: {
+            "ETH": true,
+            "USDC": true,
+            "DAI": true,
+            "BTC": true
+          },
+          api_version: "1.0.0",
+          demo_mode: true
+        }
+      };
     } catch (error) {
-      console.error('Error fetching system health:', error);
+      console.error('获取系统健康状态失败:', error);
       throw error;
     }
   }
 
   async getHackathonGuide(): Promise<HackathonGuide> {
     try {
-      const response = await fetch(`${API_BASE_URL}/hackathon-guide`);
+      // 注意：后端暂时没有实现此端点，返回模拟数据
+      console.warn('Hackathon guide API endpoint is not implemented in the backend');
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch hackathon guide');
-      }
-
-      return await response.json();
+      // 返回模拟数据
+      return {
+        title: "DeFi风险分析API指南",
+        description: "本指南将帮助您了解如何使用DeFi风险分析API进行开发",
+        network: {
+          name: "Sepolia",
+          chainId: 11155111,
+          rpcUrl: "https://eth-sepolia.g.alchemy.com/v2/demo",
+          blockExplorer: "https://sepolia.etherscan.io"
+        },
+        demoMode: true,
+        steps: [
+          {
+            step: 1,
+            title: "连接钱包",
+            endpoint: "/",
+            description: "连接您的以太坊钱包以开始使用API",
+            parameters: []
+          },
+          {
+            step: 2,
+            title: "分析投资组合",
+            endpoint: "/analyze",
+            description: "分析您的DeFi投资组合风险",
+            parameters: ["wallet_address"]
+          },
+          {
+            step: 3,
+            title: "获取市场预测",
+            endpoint: "/predict/market",
+            description: "获取特定资产的市场预测",
+            parameters: ["asset", "time_frame"]
+          }
+        ],
+        demoAccounts: [
+          {
+            address: "0xAbCdEf123456789AbCdEf123456789AbCdEf1234",
+            description: "演示账户，包含多种DeFi头寸"
+          }
+        ],
+        supportedAssets: ["ETH", "USDC", "DAI", "BTC"],
+        websiteUrl: "https://defi-risk-monitor.example.com"
+      };
     } catch (error) {
-      console.error('Error fetching hackathon guide:', error);
+      console.error('获取黑客松指南失败:', error);
       throw error;
     }
   }
