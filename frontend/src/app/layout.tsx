@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
 import { Inter } from "next/font/google";
@@ -10,12 +10,16 @@ const inter = Inter({
   variable: "--font-inter",
 });
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
+
 export const metadata: Metadata = {
   title: "DeFi Risk Monitor | 分析和监控您的DeFi投资风险",
   description: "全面的DeFi风险监控平台，帮助您分析和管理加密货币投资组合的风险",
   keywords: "DeFi, 风险监控, 加密货币, 区块链, 投资组合分析",
   authors: [{ name: "DeFi Risk Team" }],
-  viewport: "width=device-width, initial-scale=1",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f8fafc" },
     { media: "(prefers-color-scheme: dark)", color: "#0f172a" },

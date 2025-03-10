@@ -9,6 +9,7 @@ from openai import OpenAI
 import logging
 import json
 from functools import lru_cache
+from cachetools import TTLCache
 
 # 设置日志记录器
 logger = logging.getLogger("defi_risk.ai_predictor")
@@ -16,73 +17,33 @@ logger = logging.getLogger("defi_risk.ai_predictor")
 # 设置代理
 proxies = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
 
+# 在模块级别初始化缓存
+analysis_cache = TTLCache(maxsize=100, ttl=900)  # 15分钟过期时间
 
-class AnalysisCache:
-    def __init__(self, max_size: int = 100, expiration_minutes: int = 15):
-        self.cache = {}
-        self.max_size = max_size
-        self.expiration_minutes = expiration_minutes
-        self.access_order = []  # 用于LRU实现
+# 在模块级别初始化OpenAI客户端
+try:
+    # 创建带有代理的HTTP客户端
+    try:
+        client_http = httpx.Client(proxy="http://127.0.0.1:7890")
+    except TypeError:
+        client_http = httpx.Client()
+        logger.warning("您的httpx版本不支持proxies参数，将使用默认连接")
 
-    def get(self, asset: str) -> Optional[Dict]:
-        """获取缓存的分析结果"""
-        if asset in self.cache:
-            result, timestamp = self.cache[asset]
-            if datetime.now() - timestamp < timedelta(minutes=self.expiration_minutes):
-                # 更新访问顺序
-                self.access_order.remove(asset)
-                self.access_order.append(asset)
-                return result
-            else:
-                # 过期数据，删除
-                del self.cache[asset]
-                self.access_order.remove(asset)
-        return None
-
-    def set(self, asset: str, result: Dict):
-        """设置缓存数据"""
-        # 如果缓存已满，删除最久未使用的项
-        if len(self.cache) >= self.max_size and asset not in self.cache:
-            oldest = self.access_order.pop(0)
-            del self.cache[oldest]
-
-        # 添加或更新缓存
-        self.cache[asset] = (result, datetime.now())
-        if asset in self.access_order:
-            self.access_order.remove(asset)
-        self.access_order.append(asset)
+    client = OpenAI(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("OPENAI_API_URL"),
+        http_client=client_http,
+    )
+    logger.info("成功初始化OpenAI客户端")
+except Exception as e:
+    logger.error(f"初始化OpenAI客户端时出错: {e}")
+    client = None
 
 
 class AiPredictor:
     def __init__(self):
-        try:
-            # 获取API密钥
-            api_key = os.getenv("OPENAI_API_KEY")
-            base_url = os.getenv("OPENAI_API_URL")
-            if not api_key or api_key.startswith("your") or "..." in api_key:
-                logger.warning("未设置有效的OpenAI API密钥，AI预测功能将使用模拟数据")
-                self.client = None
-            else:
-                # 创建带有代理的HTTP客户端
-                try:
-                    client_http = httpx.Client(proxy="http://127.0.0.1:7890")
-                except TypeError:
-                    # 如果是旧版本httpx
-                    client_http = httpx.Client()
-                    logger.warning("您的httpx版本不支持proxies参数，将使用默认连接")
-
-                # 将http_client传递给OpenAI客户端
-                self.client = OpenAI(
-                    api_key=api_key, base_url=base_url, http_client=client_http
-                )
-
-                logger.info("成功初始化OpenAI客户端")
-        except Exception as e:
-            logger.error(f"初始化OpenAI客户端时出错: {e}")
-            self.client = None
-
-        # 初始化分析缓存
-        self.analysis_cache = AnalysisCache(max_size=100, expiration_minutes=15)
+        # 直接使用模块级别的client
+        self.client = client
 
     def _prepare_market_data(
         self, historical_data: pd.DataFrame
@@ -100,7 +61,7 @@ class AiPredictor:
         """分析市场趋势并预测价格走势"""
         try:
             # 首先检查缓存
-            cached_result = self.analysis_cache.get(asset)
+            cached_result = analysis_cache.get(asset)
             if cached_result:
                 logger.info(f"使用缓存的{asset}分析结果")
                 return cached_result
@@ -232,7 +193,7 @@ class AiPredictor:
             )
 
             # 缓存结果
-            self.analysis_cache.set(asset, analysis)
+            analysis_cache[asset] = analysis
             logger.info(f"成功获取 {asset} 的AI市场分析")
             return analysis
 

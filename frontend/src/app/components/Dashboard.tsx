@@ -23,7 +23,6 @@ export const Dashboard: React.FC = () => {
   const initialized = useRef(false);
 
   useEffect(() => {
-    debugger;
     if (initialized.current) return;
 
     const init = async () => {

@@ -1,13 +1,6 @@
-import type { Metadata } from "next";
 import { Dashboard } from "./components/Dashboard";
 import { ConnectButton } from "./components/ConnectButton";
 import ProtocolList from "./components/ProtocolList";
-
-export const metadata: Metadata = {
-  title: "DeFi Risk Monitor",
-  description: "Monitor and analyze your DeFi portfolio risks",
-  metadataBase: new URL("http://localhost:3000"),
-};
 
 export default function Home() {
   return (

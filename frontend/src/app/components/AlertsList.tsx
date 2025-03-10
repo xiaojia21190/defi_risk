@@ -21,6 +21,7 @@ interface Alert {
     value?: number;
     threshold?: number;
     recommendation?: string;
+    [key: string]: any; // 添加索引签名以支持后端返回的其他详情字段
   };
 }
 
@@ -35,12 +36,14 @@ const mapAlertType = (backendType: string): Alert["type"] => {
   const typeMap: Record<string, Alert["type"]> = {
     LIQUIDATION_RISK: "liquidation",
     HIGH_VOLATILITY: "marketVolatility",
+    PRICE_VOLATILITY: "marketVolatility",
     PRICE_CHANGE: "marketVolatility",
     OVERBOUGHT: "technicalSignal",
     OVERSOLD: "technicalSignal",
     MA_CROSS: "technicalSignal",
     APY_CHANGE: "opportunityAlert",
     CORRELATION_CHANGE: "riskWarning",
+    MARKET_TREND: "riskWarning",
   };
 
   return typeMap[backendType] || "riskWarning";
@@ -75,7 +78,7 @@ const AlertsList: React.FC<AlertsListProps> = ({ portfolio, predictions }) => {
       if (prediction.alerts && prediction.alerts.length > 0) {
         for (const apiAlert of prediction.alerts) {
           alerts.push({
-            id: `${apiAlert.type}-${apiAlert.asset}-${apiAlert.timestamp}`,
+            id: `${apiAlert.type}-${apiAlert.asset}-${apiAlert.timestamp}_${apiAlert.protocol}`,
             type: mapAlertType(apiAlert.type),
             severity: mapSeverity(apiAlert.severity),
             message: apiAlert.message,
@@ -84,8 +87,10 @@ const AlertsList: React.FC<AlertsListProps> = ({ portfolio, predictions }) => {
             asset: apiAlert.asset,
             details: {
               recommendation: apiAlert.details?.recommendation,
-              value: apiAlert.details?.value || apiAlert.details?.volatility || apiAlert.details?.leverage,
-              threshold: apiAlert.details?.threshold || apiAlert.details?.safe_leverage,
+              value: apiAlert.details?.value || apiAlert.details?.volatility || apiAlert.details?.leverage || apiAlert.details?.price_change || apiAlert.details?.price_change_24h,
+              threshold: apiAlert.details?.threshold || apiAlert.details?.safe_leverage || apiAlert.details?.liquidation_threshold,
+              // 保存所有详情字段以便在展开视图中使用
+              ...apiAlert.details,
             },
           });
         }
@@ -367,6 +372,128 @@ const AlertsList: React.FC<AlertsListProps> = ({ portfolio, predictions }) => {
                         <span className="font-medium">建议: </span>
                         {alert.details.recommendation}
                       </p>
+                    </div>
+                  )}
+
+                  {/* 显示RSI值 */}
+                  {alert.details?.rsi !== undefined && (
+                    <div className="mt-2 p-2 rounded-lg bg-muted/30">
+                      <p className="text-xs">
+                        <span className="font-medium">RSI: </span>
+                        {alert.details.rsi.toFixed(2)}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 显示波动率 */}
+                  {alert.details?.volatility !== undefined && (
+                    <div className="mt-2 p-2 rounded-lg bg-muted/30">
+                      <p className="text-xs">
+                        <span className="font-medium">波动率: </span>
+                        {alert.details.volatility.toFixed(2)}%
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 显示APY变化 */}
+                  {alert.details?.current_apy !== undefined && alert.details?.previous_apy !== undefined && (
+                    <div className="mt-2 p-2 rounded-lg bg-muted/30">
+                      <p className="text-xs">
+                        <span className="font-medium">当前APY: </span>
+                        {(alert.details.current_apy * 100).toFixed(2)}%
+                      </p>
+                      <p className="text-xs">
+                        <span className="font-medium">之前APY: </span>
+                        {(alert.details.previous_apy * 100).toFixed(2)}%
+                      </p>
+                      <p className="text-xs">
+                        <span className="font-medium">变化: </span>
+                        {(alert.details.apy_change ? alert.details.apy_change * 100 : ((alert.details.current_apy - alert.details.previous_apy) / alert.details.previous_apy) * 100).toFixed(2)}%
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 显示移动平均线信息 */}
+                  {alert.details?.ma7 !== undefined && alert.details?.ma20 !== undefined && (
+                    <div className="mt-2 p-2 rounded-lg bg-muted/30">
+                      <p className="text-xs">
+                        <span className="font-medium">7日均线: </span>
+                        {alert.details.ma7.toFixed(2)}
+                      </p>
+                      <p className="text-xs">
+                        <span className="font-medium">20日均线: </span>
+                        {alert.details.ma20.toFixed(2)}
+                      </p>
+                      {alert.details?.analysis && (
+                        <p className="text-xs">
+                          <span className="font-medium">分析: </span>
+                          {alert.details.analysis}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 显示相关性信息 */}
+                  {alert.details?.correlation !== undefined && (
+                    <div className="mt-2 p-2 rounded-lg bg-muted/30">
+                      <p className="text-xs">
+                        <span className="font-medium">相关性: </span>
+                        {alert.details.correlation.toFixed(2)}
+                      </p>
+                      {alert.details?.period && (
+                        <p className="text-xs">
+                          <span className="font-medium">周期: </span>
+                          {alert.details.period}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 显示杠杆信息 */}
+                  {alert.details?.leverage !== undefined && (
+                    <div className="mt-2 p-2 rounded-lg bg-muted/30">
+                      <p className="text-xs">
+                        <span className="font-medium">当前杠杆: </span>
+                        {alert.details.leverage.toFixed(2)}x
+                      </p>
+                      {alert.details?.safe_leverage && (
+                        <p className="text-xs">
+                          <span className="font-medium">安全杠杆: </span>
+                          {alert.details.safe_leverage.toFixed(2)}x
+                        </p>
+                      )}
+                      {alert.details?.liquidation_threshold && (
+                        <p className="text-xs">
+                          <span className="font-medium">清算阈值: </span>
+                          {alert.details.liquidation_threshold.toFixed(2)}x
+                        </p>
+                      )}
+                      {alert.details?.risk_ratio && (
+                        <p className="text-xs">
+                          <span className="font-medium">风险比率: </span>
+                          {alert.details.risk_ratio.toFixed(2)}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 显示价格信息 */}
+                  {alert.details?.current_price !== undefined && (
+                    <div className="mt-2 p-2 rounded-lg bg-muted/30">
+                      <p className="text-xs">
+                        <span className="font-medium">当前价格: </span>${alert.details.current_price.toFixed(2)}
+                      </p>
+                      {alert.details?.previous_price && (
+                        <p className="text-xs">
+                          <span className="font-medium">之前价格: </span>${alert.details.previous_price.toFixed(2)}
+                        </p>
+                      )}
+                      {alert.details?.price_change_24h && (
+                        <p className="text-xs">
+                          <span className="font-medium">24小时变化: </span>
+                          {alert.details.price_change_24h.toFixed(2)}%
+                        </p>
+                      )}
                     </div>
                   )}
 
