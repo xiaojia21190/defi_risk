@@ -116,6 +116,7 @@ export interface Alert {
     recommendation?: string;
     rsi?: number;
     current_price?: number;
+    previous_price?: number;
     price_change_24h?: number;
     volatility?: number;
     leverage?: number;
@@ -130,6 +131,10 @@ export interface Alert {
     ma7?: number;
     ma20?: number;
     analysis?: string;
+    high_price?: number;
+    low_price?: number;
+    weighted_avg_price?: number;
+    volume?: number;
   };
 }
 

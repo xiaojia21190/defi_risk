@@ -62,7 +62,7 @@ class HistoricalDataCache:
 DEMO_ADDRESS = "0xAbCdEf123456789AbCdEf123456789AbCdEf1234"
 DEMO_ASSETS = {
     "ETH": {"price": 2000.0, "volatility": 0.35},
-    "WBTC": {"price": 40000.0, "volatility": 0.42},
+    "BTC": {"price": 40000.0, "volatility": 0.42},
     "USDC": {"price": 1.0, "volatility": 0.05},
     "USDT": {"price": 1.0, "volatility": 0.05},
 }
@@ -179,45 +179,22 @@ class BlockchainService:
             for pos in positions:
                 try:
                     asset = pos.asset.split("/")[0]  # 处理LP token的情况
-                    historical_data = await self._get_24h_data(asset)
+                    ticker_data = await self._get_24h_data(asset)
 
-                    if len(historical_data) > 1:
-                        # 基本价格变化检测
-                        latest_price = historical_data["price"].iloc[-1]
-                        prev_price = historical_data["price"].iloc[-2]
-                        price_change = (latest_price - prev_price) / prev_price
+                    if ticker_data:
+                        # 使用新的数据格式
+                        latest_price = float(ticker_data["lastPrice"])
+                        open_price = float(ticker_data["openPrice"])
+                        price_change_24h = (
+                            float(ticker_data["priceChangePercent"]) / 100
+                        )  # 转换为小数
+                        high_price = float(ticker_data["highPrice"])
+                        low_price = float(ticker_data["lowPrice"])
 
-                        # 计算24小时价格变化
-                        if len(historical_data) >= 24:
-                            price_24h_ago = historical_data["price"].iloc[-24]
-                            price_change_24h = (
-                                latest_price - price_24h_ago
-                            ) / price_24h_ago
-                        else:
-                            price_change_24h = price_change
+                        # 计算波动率 (使用高低价差作为波动性指标)
+                        volatility = (high_price - low_price) / open_price * 100
 
-                        # 计算波动率
-                        if len(historical_data) >= 7:
-                            recent_prices = historical_data["price"].iloc[-7:].values
-                            volatility = (
-                                np.std(np.diff(recent_prices) / recent_prices[:-1])
-                                * 100
-                            )
-                        else:
-                            volatility = abs(price_change) * 100
-
-                        # 计算RSI指标
-                        if len(historical_data) >= 14:
-                            prices = historical_data["price"].values
-                            delta = np.diff(prices)
-                            gain = np.where(delta > 0, delta, 0)
-                            loss = np.where(delta < 0, -delta, 0)
-                            avg_gain = np.mean(gain[-14:])
-                            avg_loss = np.mean(loss[-14:])
-                            rs = avg_gain / avg_loss if avg_loss != 0 else 0
-                            rsi = 100 - (100 / (1 + rs))
-                        else:
-                            rsi = 50  # 默认值
+                        # rsi = 50  # 默认值
 
                         # 价格波动警报
                         if abs(price_change_24h) > 0.05:  # 5%的价格变化
@@ -235,51 +212,17 @@ class BlockchainService:
                                     "details": {
                                         "price_change": price_change_24h,
                                         "current_price": latest_price,
-                                        "previous_price": (
-                                            price_24h_ago
-                                            if len(historical_data) >= 24
-                                            else prev_price
-                                        ),
+                                        "previous_price": open_price,
                                         "volatility": volatility,
-                                        "rsi": rsi,
+                                        "high_price": high_price,
+                                        "low_price": low_price,
+                                        "weighted_avg_price": float(
+                                            ticker_data["weightedAvgPrice"]
+                                        ),
+                                        "volume": float(ticker_data["volume"]),
                                     },
                                 }
                             )
-
-                        # RSI超买超卖警报
-                        if len(historical_data) >= 14:
-                            if rsi > 70:
-                                alerts.append(
-                                    {
-                                        "type": "OVERBOUGHT",
-                                        "severity": "MEDIUM",
-                                        "asset": asset,
-                                        "protocol": pos.protocol,
-                                        "message": f"{asset}当前RSI为{rsi:.1f}，处于超买区间，可能面临回调风险",
-                                        "timestamp": now,
-                                        "details": {
-                                            "rsi": rsi,
-                                            "current_price": latest_price,
-                                            "price_change_24h": price_change_24h * 100,
-                                        },
-                                    }
-                                )
-                            elif rsi < 30:
-                                alerts.append(
-                                    {
-                                        "type": "OVERSOLD",
-                                        "severity": "MEDIUM",
-                                        "asset": asset,
-                                        "protocol": pos.protocol,
-                                        "message": f"{asset}当前RSI为{rsi:.1f}，处于超卖区间，可能出现反弹",
-                                        "timestamp": now,
-                                        "details": {
-                                            "rsi": rsi,
-                                            "current_price": latest_price,
-                                            "price_change_24h": price_change_24h * 100,
-                                        },
-                                    }
-                                )
 
                         # 高波动率警报
                         if volatility > 10:  # 波动率超过10%
@@ -295,6 +238,8 @@ class BlockchainService:
                                         "volatility": volatility,
                                         "current_price": latest_price,
                                         "price_change_24h": price_change_24h * 100,
+                                        "high_price": high_price,
+                                        "low_price": low_price,
                                     },
                                 }
                             )
@@ -543,7 +488,7 @@ class BlockchainService:
                 # Binance交易对
                 "binance": {
                     "ETH": "ETHUSDT",
-                    "WBTC": "BTCUSDT",  # 使用BTC作为WBTC的代理
+                    "BTC": "BTCUSDT",  # 使用BTC作为BTC的代理
                     "USDC": "USDCUSDT",
                     "USDT": "BUSDUSDT",  # USDT/USDC交易对
                     "AAVE": "AAVEUSDT",
@@ -567,7 +512,7 @@ class BlockchainService:
             df = None
             error_messages = []
 
-            # 3. 尝试Binance API
+            # 1. 尝试Binance API
             if asset in asset_ids["binance"]:
                 try:
                     logger.info(f"尝试从Binance获取{asset}数据")
@@ -582,19 +527,6 @@ class BlockchainService:
                     error_msg = f"从Binance获取{asset}数据失败: {e}"
                     logger.warning(error_msg)
                     error_messages.append(error_msg)
-
-            # 4. 尝试链上数据（通过Chainlink价格预言机）
-            try:
-                logger.info(f"尝试从链上获取{asset}数据")
-                df = await self._get_onchain_data(asset)
-                if df is not None and not df.empty:
-                    logger.info(f"成功从链上获取{asset}数据")
-                    self.historical_data_cache.set(asset, df, "1d")
-                    return df
-            except Exception as e:
-                error_msg = f"从链上获取{asset}数据失败: {e}"
-                logger.warning(error_msg)
-                error_messages.append(error_msg)
 
             # 5. 所有数据源都失败，使用演示数据
             logger.error(
@@ -612,38 +544,34 @@ class BlockchainService:
 
     # 获取24小时数据
     @cached(cache)
-    async def _get_24h_data(self, asset: str, ) -> Optional[pd.DataFrame]:
-        """从Binance API获取历史数据"""
-        url = "https://api.binance.com/api/v3/klines"
+    async def _get_24h_data(
+        self,
+        asset: str,
+    ) -> Optional[Dict]:
+        """从Binance API获取24小时行情数据"""
+        url = "https://api.binance.com/api/v3/ticker/24hr"
 
         asset_ids = {
-                # Binance交易对
-                "binance": {
-                    "ETH": "ETHUSDT",
-                    "WBTC": "BTCUSDT",  # 使用BTC作为WBTC的代理
-                    "USDC": "USDCUSDT",
-                    "USDT": "BUSDUSDT",  # USDT/USDC交易对
-                    "AAVE": "AAVEUSDT",
-                    "COMP": "COMPUSDT",
-                    "UNI": "UNIUSDT",
-                    "LINK": "LINKUSDT",
-                    "SNX": "SNXUSDT",
-                    "MKR": "MKRUSDT",
-                    "YFI": "YFIUSDT",
-                    "SUSHI": "SUSHIUSDT",
-                },
-            }
-        # 计算时间范围（过去24小时）
-        end_time = int(datetime.now().timestamp() * 1000)
-        start_time = end_time - (24 * 60 * 60 * 1000)  # 24小时的毫秒数
+            # Binance交易对
+            "binance": {
+                "ETH": "ETHUSDT",
+                "BTC": "BTCUSDT",  # 使用BTC作为BTC的代理
+                "USDC": "USDCUSDT",
+                "USDT": "BUSDUSDT",  # USDT/USDC交易对
+                "AAVE": "AAVEUSDT",
+                "COMP": "COMPUSDT",
+                "UNI": "UNIUSDT",
+                "LINK": "LINKUSDT",
+                "SNX": "SNXUSDT",
+                "MKR": "MKRUSDT",
+                "YFI": "YFIUSDT",
+                "SUSHI": "SUSHIUSDT",
+            },
+        }
 
         # 设置请求参数
         params = {
-            "symbol": asset_ids["binance"][asset],
-            "interval": "1h",  # 1小时的K线
-            "startTime": start_time,
-            "endTime": end_time,
-            "limit": 24,  # 最多24个数据点
+            "symbol": asset_ids["binance"].get(asset, f"{asset}USDT"),
         }
 
         try:
@@ -655,38 +583,28 @@ class BlockchainService:
                     logger.warning(f"Binance返回的{asset}数据为空")
                     return None
 
-                # 创建DataFrame
-                # Binance K线数据格式:
-                # [
-                #   [
-                #     开盘时间,
-                #     开盘价,
-                #     最高价,
-                #     最低价,
-                #     收盘价,
-                #     成交量,
-                #     收盘时间,
-                #     成交额,
-                #     成交笔数,
-                #     主动买入成交量,
-                #     主动买入成交额,
-                #     忽略
-                #   ]
-                # ]
-                df = pd.DataFrame(
-                    {
-                        "timestamp": [
-                            datetime.fromtimestamp(k[0] / 1000) for k in data
-                        ],
-                        "price": [float(k[4]) for k in data],  # 使用收盘价
-                        "volume": [float(k[5]) for k in data],
-                        "market_cap": [None] * len(data),  # Binance不提供市值数据
-                    }
-                )
-                df["source"] = "binance"
-                return df
+                # 返回24小时行情数据
+                # {
+                #   "symbol": "BTCUSDT",
+                #   "priceChange": "-94.99999800",    //24小时价格变动
+                #   "priceChangePercent": "-95.960",  //24小时价格变动百分比
+                #   "weightedAvgPrice": "0.29628482", //加权平均价
+                #   "lastPrice": "4.00000200",        //最近一次成交价
+                #   "lastQty": "200.00000000",        //最近一次成交额
+                #   "openPrice": "99.00000000",       //24小时内第一次成交的价格
+                #   "highPrice": "100.00000000",      //24小时最高价
+                #   "lowPrice": "0.10000000",         //24小时最低价
+                #   "volume": "8913.30000000",        //24小时成交量
+                #   "quoteVolume": "15.30000000",     //24小时成交额
+                #   "openTime": 1499783499040,        //24小时内，第一笔交易的发生时间
+                #   "closeTime": 1499869899040,       //24小时内，最后一笔交易的发生时间
+                #   "firstId": 28385,   // 首笔成交id
+                #   "lastId": 28460,    // 末笔成交id
+                #   "count": 76         // 成交笔数
+                # }
+                return data
             else:
-                logger.error(f"Binance API返回错误: {response.status}")
+                logger.error(f"Binance API返回错误: {response.status_code}")
                 return None
         except Exception as e:
             logger.error(f"从Binance获取{asset}数据失败: {e}")
@@ -762,7 +680,7 @@ class BlockchainService:
             # 检查是否支持该资产的链上数据
             chainlink_feeds = {
                 "ETH": "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",  # ETH/USD
-                "WBTC": "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c",  # BTC/USD
+                "BTC": "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c",  # BTC/USD
                 "LINK": "0x2c1d072e956AFFC0D435Cb7AC38EF18d24d9127c",  # LINK/USD
                 "AAVE": "0x547a514d5e3769680Ce22B2361c10Ea13619e8a9",  # AAVE/USD
                 "UNI": "0x553303d460EE0afB37EdFf9bE42922D8FF63220e",  # UNI/USD
@@ -959,7 +877,7 @@ class BlockchainService:
                 "ETH": await self.get_asset_price("ETH"),  # 假设当前ETH价格
                 "USDC": await self.get_asset_price("USDC"),
                 "USDT": await self.get_asset_price("USDT"),
-                "WBTC": await self.get_asset_price("WBTC"),  # 假设当前BTC价格
+                "BTC": await self.get_asset_price("BTC"),  # 假设当前BTC价格
                 "LINK": await self.get_asset_price("LINK"),
                 "UNI": await self.get_asset_price("UNI"),
             }
@@ -970,13 +888,13 @@ class BlockchainService:
                     "ETH": (0.01, 0.025),
                     "USDC": (0.03, 0.045),
                     "USDT": (0.025, 0.04),
-                    "WBTC": (0.01, 0.02),
+                    "BTC": (0.01, 0.02),
                 },
                 "Compound V3": {
                     "ETH": (0.015, 0.03),
                     "USDC": (0.035, 0.05),
                     "USDT": (0.03, 0.045),
-                    "WBTC": (0.012, 0.022),
+                    "BTC": (0.012, 0.022),
                 },
                 "Curve": {
                     "USDT": (0.04, 0.06),
@@ -984,7 +902,7 @@ class BlockchainService:
                 },
                 "Uniswap V2": {
                     "ETH": (0.05, 0.12),
-                    "WBTC": (0.04, 0.1),
+                    "BTC": (0.04, 0.1),
                     "LINK": (0.06, 0.15),
                     "UNI": (0.07, 0.18),
                 },
@@ -992,8 +910,8 @@ class BlockchainService:
 
             # 更真实的杠杆率限制
             max_leverage = {
-                "Aave V3": {"ETH": 2.5, "USDC": 1.1, "USDT": 1.1, "WBTC": 2.0},
-                "Compound V3": {"ETH": 2.0, "USDC": 1.0, "USDT": 1.0, "WBTC": 1.8},
+                "Aave V3": {"ETH": 2.5, "USDC": 1.1, "USDT": 1.1, "BTC": 2.0},
+                "Compound V3": {"ETH": 2.0, "USDC": 1.0, "USDT": 1.0, "BTC": 1.8},
             }
 
             # 设置总投资组合价值（美元）
@@ -1004,7 +922,7 @@ class BlockchainService:
                 "ETH": random.uniform(0.3, 0.5),  # 30-50% ETH
                 "USDC": random.uniform(0.2, 0.3),  # 20-30% USDC
                 "USDT": random.uniform(0.1, 0.2),  # 10-20% USDT
-                "WBTC": random.uniform(0.1, 0.25),  # 10-25% WBTC
+                "BTC": random.uniform(0.1, 0.25),  # 10-25% BTC
             }
 
             # 归一化资产分配比例
@@ -1069,17 +987,17 @@ class BlockchainService:
                 )
             )
 
-            # WBTC在Aave
+            # BTC在Aave
             wbtc_amount = (
-                total_portfolio_value * asset_allocation["WBTC"]
-            ) / current_prices["WBTC"]
+                total_portfolio_value * asset_allocation["BTC"]
+            ) / current_prices["BTC"]
             positions.append(
                 ProtocolPosition(
                     protocol="Aave V3",
-                    asset="WBTC",
+                    asset="BTC",
                     amount=round(wbtc_amount, 6),
-                    leverage=random.uniform(1.0, max_leverage["Aave V3"]["WBTC"]),
-                    apy=random.uniform(*apy_ranges["Aave V3"]["WBTC"]),
+                    leverage=random.uniform(1.0, max_leverage["Aave V3"]["BTC"]),
+                    apy=random.uniform(*apy_ranges["Aave V3"]["BTC"]),
                 )
             )
 
@@ -1105,7 +1023,7 @@ class BlockchainService:
                 ),
                 ProtocolPosition(
                     protocol="Aave V3",
-                    asset="WBTC",
+                    asset="BTC",
                     amount=0.15,
                     leverage=1.2,
                     apy=0.015,
@@ -1119,53 +1037,31 @@ class BlockchainService:
         """获取资产的当前价格
 
         Args:
-            asset: 资产符号（例如：'ETH', 'USDC', 'WBTC'等）
+            asset: 资产符号（例如：'ETH', 'USDC', 'BTC'等）
 
         Returns:
             float: 资产的当前美元价格
         """
         try:
-            # 首先尝试从历史数据缓存中获取价格
-            cached_data = self.historical_data_cache.get(asset, "1d")
-            if cached_data is not None:
-                return cached_data["price"].iloc[-1]
-
             # 如果缓存中没有，获取最新的历史数据
-            historical_data = await self.get_asset_historical_data(asset)
-            if not historical_data.empty:
-                return historical_data["price"].iloc[-1]
+            url = "https://api.binance.com/api/v3/ticker/price"
+            if asset == "USDT":
+                params = {"symbol": "BUSDUSDT"}
+            else:
+                params = {"symbol": f"{asset}USDT"}
 
-            # 如果无法获取实时数据，使用预设的价格
-            demo_prices = {
-                "ETH": 3500.0,
-                "WBTC": 60000.0,
-                "USDC": 1.0,
-                "USDT": 1.0,
-                "LINK": 15.0,
-                "UNI": 8.0,
-                "AAVE": 150.0,
-                "COMP": 200.0,
-                "SNX": 3.0,
-                "MKR": 1200.0,
-                "YFI": 15000.0,
-                "SUSHI": 2.0,
-                "CRV": 1.5,
-                "BAL": 6.0,
-                "1INCH": 2.0,
-            }
+            response = requests.get(url, params=params, proxies=proxies)
+            if response.status_code == 200:
+                data = response.json()
 
-            if asset in demo_prices:
-                logger.info(f"使用预设价格: {asset} = ${demo_prices[asset]}")
-                return demo_prices[asset]
+                if not data:
+                    logger.warning(f"Binance返回的{asset}数据为空")
+                    return None
 
-            # 如果是LP代币，尝试解析并返回基础资产的价格
-            if "/" in asset:
-                base_asset = asset.split("/")[0]
-                if base_asset in demo_prices:
-                    return demo_prices[base_asset]
-
-            logger.warning(f"未找到{asset}的价格数据，返回默认价格1.0")
-            return 1.0
+                return data["price"]
+            else:
+                logger.error(f"Binance API返回错误: {response.status_code}")
+                return None
 
         except Exception as e:
             logger.error(f"获取{asset}价格时出错: {e}")
@@ -1486,7 +1382,7 @@ class BlockchainService:
             "WETH": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
             "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
             "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-            "WBTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+            "BTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
             "AAVE": "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9",
             "COMP": "0xc00e94Cb662C3520282E6f5717214004A7f26888",
             "UNI": "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
@@ -1499,7 +1395,7 @@ class BlockchainService:
         # Compound V3抵押品地址
         self.compound_v3_collaterals = {
             "WETH": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-            "WBTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+            "BTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
             "COMP": "0xc00e94Cb662C3520282E6f5717214004A7f26888",
             "UNI": "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
             "LINK": "0x514910771AF9Ca656af840dff83E8264EcF986CA",
@@ -1684,7 +1580,7 @@ class BlockchainService:
                 "0xbEbc44782C7dB0a1A60Cb6fe97d0b483032FF1C7",
                 # stETH/ETH
                 "0xDC24316b9AE028F1497c275EB9192a3Ea0f67022",
-                # ETH/WBTC
+                # ETH/BTC
                 "0xBb2b8038a1640196FbE3e38816F3e67Cba72D940",
                 # ETH/USDT
                 "0x0d4a11d5EEaaC28EC3F61d100daF4d40471f1852",
@@ -1758,7 +1654,7 @@ class BlockchainService:
             common_pairs = [
                 # ETH/USDC
                 "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc",
-                # ETH/WBTC
+                # ETH/BTC
                 "0xBb2b8038a1640196FbE3e38816F3e67Cba72D940",
                 # ETH/USDT
                 "0x0d4a11d5EEaaC28EC3F61d100daF4d40471f1852",

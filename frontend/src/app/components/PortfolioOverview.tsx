@@ -45,7 +45,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
 
     // 简单分类资产类型
     let type = "其他";
-    if (asset === "ETH" || asset === "WETH" || asset === "BTC" || asset === "WBTC") {
+    if (asset === "ETH" || asset === "WETH" || asset === "BTC") {
       type = "主流币";
     } else if (asset === "USDC" || asset === "USDT" || asset === "DAI") {
       type = "稳定币";

@@ -74,7 +74,7 @@ class RiskCalculator:
                 "ETH": 0.4,
                 "USDC": 0.01,
                 "DAI": 0.02,
-                "WBTC": 0.5,
+                "BTC": 0.5,
                 "USDT": 0.01,
             }
 

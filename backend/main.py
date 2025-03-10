@@ -238,7 +238,7 @@ async def get_supported_protocols():
             {
                 "name": "Aave V3",
                 "description": "去中心化借贷协议",
-                "supported_assets": ["ETH", "USDC", "DAI", "WBTC"],
+                "supported_assets": ["ETH", "USDC", "DAI", "BTC"],
                 "features": ["存款", "借贷", "抵押"],
             },
             {
@@ -256,25 +256,25 @@ async def get_supported_protocols():
             {
                 "name": "Uniswap V3",
                 "description": "去中心化交易所",
-                "supported_assets": ["ETH", "USDC", "WBTC", "DAI"],
+                "supported_assets": ["ETH", "USDC", "BTC", "DAI"],
                 "features": ["流动性提供", "交易"],
             },
             {
                 "name": "MakerDAO",
                 "description": "去中心化稳定币协议",
-                "supported_assets": ["ETH", "WBTC"],
+                "supported_assets": ["ETH", "BTC"],
                 "features": ["抵押", "稳定币铸造"],
             },
             {
                 "name": "Balancer",
                 "description": "多资产流动性池",
-                "supported_assets": ["ETH", "USDC", "DAI", "WBTC"],
+                "supported_assets": ["ETH", "USDC", "DAI", "BTC"],
                 "features": ["流动性挖矿", "交易"],
             },
             {
                 "name": "Yearn Finance",
                 "description": "收益聚合器",
-                "supported_assets": ["ETH", "USDC", "DAI", "WBTC"],
+                "supported_assets": ["ETH", "USDC", "DAI", "BTC"],
                 "features": ["收益优化", "自动复投"],
             },
             {
@@ -382,7 +382,7 @@ if __name__ == "__main__":
 
     # 测试数据
     DEMO_ADDRESS = "0xAbCdEf123456789AbCdEf123456789AbCdEf1234"
-    TEST_ASSETS = ["ETH", "USDC", "DAI", "WBTC"]
+    TEST_ASSETS = ["ETH", "USDC", "USDT", "BTC"]
     TEST_PROTOCOLS = ["Aave V3", "Compound V3", "Curve", "Uniswap V2"]
 
     async def test_api_endpoints():
@@ -390,24 +390,30 @@ if __name__ == "__main__":
         try:
             print("\n=== 测试API端点 ===\n")
 
-            # 1. 测试分析DeFi存款
-            print("1. 测试分析DeFi存款")
-            portfolio_request = PortfolioRequest(wallet_address=DEMO_ADDRESS)
-            portfolio_analysis = await analyze_defi_deposits(portfolio_request)
-            print(f"总存款价值: ${portfolio_analysis.total_value:,.2f}")
-            print(f"风险等级: {portfolio_analysis.risk_level}")
-            print("-" * 50)
+            for asset in TEST_ASSETS:
+                _get_24h_data = await blockchain_service._get_24h_data(asset)
+                print(f"24h data for {asset}: {_get_24h_data}")
+                price = await blockchain_service.get_asset_price(asset)
+                print(f"Price for {asset}: {price}")
 
-            # 2. 测试市场预测
-            print("\n2. 测试市场预测")
-            for asset in TEST_ASSETS[:2]:  # 只测试前两个资产
-                prediction_request = MarketPredictionRequest(asset=asset)
-                prediction = await predict_market(prediction_request)
-                print(f"\n{asset} 市场预测:")
-                print(f"当前价格: ${prediction['current_price']:,.2f}")
-                print(f"趋势: {prediction['trend']}")
-                print(f"风险等级: {prediction['risk_level']}")
-            print("-" * 50)
+            # # 1. 测试分析DeFi存款
+            # print("1. 测试分析DeFi存款")
+            # portfolio_request = PortfolioRequest(wallet_address=DEMO_ADDRESS)
+            # portfolio_analysis = await analyze_defi_deposits(portfolio_request)
+            # print(f"总存款价值: ${portfolio_analysis.total_value:,.2f}")
+            # print(f"风险等级: {portfolio_analysis.risk_level}")
+            # print("-" * 50)
+
+            # # 2. 测试市场预测
+            # print("\n2. 测试市场预测")
+            # for asset in TEST_ASSETS[:2]:  # 只测试前两个资产
+            #     prediction_request = MarketPredictionRequest(asset=asset)
+            #     prediction = await predict_market(prediction_request)
+            #     print(f"\n{asset} 市场预测:")
+            #     print(f"当前价格: ${prediction['current_price']:,.2f}")
+            #     print(f"趋势: {prediction['trend']}")
+            #     print(f"风险等级: {prediction['risk_level']}")
+            # print("-" * 50)
 
             # # 3. 测试协议风险分析
             # print("\n3. 测试协议风险分析")
@@ -419,15 +425,15 @@ if __name__ == "__main__":
             #     print(f"安全评分: {risk_analysis['security_score']}")
             # print("-" * 50)
 
-            # 4. 测试市场数据
-            print("\n4. 测试市场数据")
-            for asset in TEST_ASSETS[:2]:  # 只测试前两个资产
-                market_data = await get_market_data(asset)
-                print(f"\n{asset} 市场数据:")
-                print(f"价格: ${market_data.price:,.2f}")
-                print(f"24h成交量: ${market_data.volume_24h:,.2f}")
-                print(f"24h价格变化: {market_data.price_change_24h:.2f}%")
-            print("-" * 50)
+            # # 4. 测试市场数据
+            # print("\n4. 测试市场数据")
+            # for asset in TEST_ASSETS[:2]:  # 只测试前两个资产
+            #     market_data = await get_market_data(asset)
+            #     print(f"\n{asset} 市场数据:")
+            #     print(f"价格: ${market_data.price:,.2f}")
+            #     print(f"24h成交量: ${market_data.volume_24h:,.2f}")
+            #     print(f"24h价格变化: {market_data.price_change_24h:.2f}%")
+            # print("-" * 50)
 
             print("\n所有测试完成!")
 
@@ -438,5 +444,5 @@ if __name__ == "__main__":
     asyncio.run(test_api_endpoints())
 
     # 启动FastAPI服务器
-    print("\n启动FastAPI服务器...")
-    uvicorn.run(app, host="0.0.0.0", port=9000, log_level="info")
+    # print("\n启动FastAPI服务器...")
+    # uvicorn.run(app, host="0.0.0.0", port=9000, log_level="info")

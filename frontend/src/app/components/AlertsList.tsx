@@ -91,6 +91,11 @@ const AlertsList: React.FC<AlertsListProps> = ({ portfolio, predictions }) => {
               threshold: apiAlert.details?.threshold || apiAlert.details?.safe_leverage || apiAlert.details?.liquidation_threshold,
               // 保存所有详情字段以便在展开视图中使用
               ...apiAlert.details,
+              // 确保新字段被正确映射
+              high_price: apiAlert.details?.high_price,
+              low_price: apiAlert.details?.low_price,
+              weighted_avg_price: apiAlert.details?.weighted_avg_price,
+              volume: apiAlert.details?.volume,
             },
           });
         }
@@ -392,6 +397,17 @@ const AlertsList: React.FC<AlertsListProps> = ({ portfolio, predictions }) => {
                         <span className="font-medium">波动率: </span>
                         {alert.details.volatility.toFixed(2)}%
                       </p>
+                      {alert.details?.high_price && alert.details?.low_price && (
+                        <p className="text-xs">
+                          <span className="font-medium">价格区间: </span>${alert.details.low_price.toFixed(2)} - ${alert.details.high_price.toFixed(2)}
+                        </p>
+                      )}
+                      {alert.details?.price_change_24h && (
+                        <p className="text-xs">
+                          <span className="font-medium">24小时变化率: </span>
+                          {alert.details.price_change_24h.toFixed(2)}%
+                        </p>
+                      )}
                     </div>
                   )}
 
@@ -492,6 +508,28 @@ const AlertsList: React.FC<AlertsListProps> = ({ portfolio, predictions }) => {
                         <p className="text-xs">
                           <span className="font-medium">24小时变化: </span>
                           {alert.details.price_change_24h.toFixed(2)}%
+                        </p>
+                      )}
+                      {/* 新增字段显示 */}
+                      {alert.details?.high_price && (
+                        <p className="text-xs">
+                          <span className="font-medium">24小时最高价: </span>${alert.details.high_price.toFixed(2)}
+                        </p>
+                      )}
+                      {alert.details?.low_price && (
+                        <p className="text-xs">
+                          <span className="font-medium">24小时最低价: </span>${alert.details.low_price.toFixed(2)}
+                        </p>
+                      )}
+                      {alert.details?.weighted_avg_price && (
+                        <p className="text-xs">
+                          <span className="font-medium">加权平均价: </span>${alert.details.weighted_avg_price.toFixed(2)}
+                        </p>
+                      )}
+                      {alert.details?.volume && (
+                        <p className="text-xs">
+                          <span className="font-medium">24小时成交量: </span>
+                          {alert.details.volume.toFixed(2)}
                         </p>
                       )}
                     </div>
