@@ -96,7 +96,12 @@ async def analyze_defi_deposits(request: PortfolioRequest):
         risk_assessment = risk_calculator.assess_portfolio_risk(positions)
 
         # 计算总存款价值
-        total_value = sum(position.amount for position in positions)
+        total_value = 0
+        for position in positions:
+            asset_type = position.asset.split("/")[0]  # 处理LP token的情况
+            asset_price = await blockchain_service.get_asset_price(asset_type)
+            position_value = position.amount * asset_price
+            total_value += position_value
 
         # 获取市场分析数据
         market_analysis = await get_market_analysis(positions)
@@ -176,7 +181,7 @@ async def predict_market(request: MarketPredictionRequest):
 
         # 获取市场警报
         alerts = await blockchain_service.get_market_alerts(
-            DEMO_ADDRESS
+            "0xAbCdEf123456789AbCdEf123456789AbCdEf1234"
         )  # 使用演示地址获取警报
         relevant_alerts = [alert for alert in alerts if alert["asset"] == request.asset]
 
@@ -213,16 +218,16 @@ async def predict_market(request: MarketPredictionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/predict/protocol/{protocol_name}")
-async def predict_protocol_risk(protocol_name: str):
-    """分析DeFi协议风险"""
-    try:
-        protocol_data = {"name": protocol_name}
-        risk_analysis = ai_predictor.analyze_defi_protocol_risk(protocol_name)
-        return risk_analysis
-    except Exception as e:
-        logger.error(f"分析协议风险时出错: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# @app.get("/predict/protocol/{protocol_name}")
+# async def predict_protocol_risk(protocol_name: str):
+#     """分析DeFi协议风险"""
+#     try:
+#         protocol_data = {"name": protocol_name}
+#         risk_analysis = ai_predictor.analyze_defi_protocol_risk(protocol_name)
+#         return risk_analysis
+#     except Exception as e:
+#         logger.error(f"分析协议风险时出错: {e}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/protocols")
@@ -249,10 +254,40 @@ async def get_supported_protocols():
                 "features": ["流动性挖矿", "稳定币交换"],
             },
             {
-                "name": "Uniswap V2",
+                "name": "Uniswap V3",
                 "description": "去中心化交易所",
-                "supported_assets": ["ETH/USDC", "ETH/USDT"],
+                "supported_assets": ["ETH", "USDC", "WBTC", "DAI"],
                 "features": ["流动性提供", "交易"],
+            },
+            {
+                "name": "MakerDAO",
+                "description": "去中心化稳定币协议",
+                "supported_assets": ["ETH", "WBTC"],
+                "features": ["抵押", "稳定币铸造"],
+            },
+            {
+                "name": "Balancer",
+                "description": "多资产流动性池",
+                "supported_assets": ["ETH", "USDC", "DAI", "WBTC"],
+                "features": ["流动性挖矿", "交易"],
+            },
+            {
+                "name": "Yearn Finance",
+                "description": "收益聚合器",
+                "supported_assets": ["ETH", "USDC", "DAI", "WBTC"],
+                "features": ["收益优化", "自动复投"],
+            },
+            {
+                "name": "dYdX",
+                "description": "去中心化衍生品交易所",
+                "supported_assets": ["ETH", "USDC"],
+                "features": ["杠杆交易", "永续合约"],
+            },
+            {
+                "name": "Synthetix",
+                "description": "合成资产协议",
+                "supported_assets": ["ETH", "SNX"],
+                "features": ["合成资产", "抵押"],
             },
         ]
     }
@@ -374,15 +409,15 @@ if __name__ == "__main__":
                 print(f"风险等级: {prediction['risk_level']}")
             print("-" * 50)
 
-            # 3. 测试协议风险分析
-            print("\n3. 测试协议风险分析")
-            for protocol in TEST_PROTOCOLS[:2]:  # 只测试前两个协议
-                risk_analysis = await predict_protocol_risk(protocol)
-                print(f"\n{protocol} 风险分析:")
-                print(f"风险评分: {risk_analysis['risk_score']}")
-                print(f"风险等级: {risk_analysis['risk_level']}")
-                print(f"安全评分: {risk_analysis['security_score']}")
-            print("-" * 50)
+            # # 3. 测试协议风险分析
+            # print("\n3. 测试协议风险分析")
+            # for protocol in TEST_PROTOCOLS[:2]:  # 只测试前两个协议
+            #     risk_analysis = await predict_protocol_risk(protocol)
+            #     print(f"\n{protocol} 风险分析:")
+            #     print(f"风险评分: {risk_analysis['risk_score']}")
+            #     print(f"风险等级: {risk_analysis['risk_level']}")
+            #     print(f"安全评分: {risk_analysis['security_score']}")
+            # print("-" * 50)
 
             # 4. 测试市场数据
             print("\n4. 测试市场数据")
@@ -404,4 +439,4 @@ if __name__ == "__main__":
 
     # 启动FastAPI服务器
     print("\n启动FastAPI服务器...")
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=9000, log_level="info")

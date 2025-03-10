@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { Dashboard } from "./components/Dashboard";
 import { ConnectButton } from "./components/ConnectButton";
-import { ProtocolList } from "./components/ProtocolList";
 import Link from "next/link";
+import ProtocolList from "./components/ProtocolList";
 
 export const metadata: Metadata = {
   title: "DeFi Risk Monitor",

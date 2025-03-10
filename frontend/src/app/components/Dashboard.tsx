@@ -7,9 +7,8 @@ import PortfolioOverview from "./PortfolioOverview";
 import AlertsList from "./AlertsList";
 import MarketAnalysis from "./MarketAnalysis";
 import { apiService } from "../services/api";
-import { useRiskMonitor } from "../services/contract";
 import { Portfolio, MarketPrediction } from "../services/api";
-import { Loader2 } from "lucide-react";
+import { Loader2, RefreshCw, AlertTriangle } from "lucide-react";
 
 export const Dashboard: React.FC = () => {
   const { address, isConnected } = useAccount();
@@ -19,22 +18,55 @@ export const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"overview" | "market">("overview");
-
-  // 获取合约数据
-  const riskMonitor = useRiskMonitor();
+  const [apiHealthy, setApiHealthy] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
 
   useEffect(() => {
+    checkApiHealth();
+
     if (isConnected && address) {
       fetchPortfolioData();
+    } else {
+      // 尝试使用演示模式
+      fetchDemoData();
     }
   }, [address, isConnected]);
 
-  const fetchPortfolioData = async () => {
+  const checkApiHealth = async () => {
+    const isHealthy = await apiService.checkApiHealth();
+    setApiHealthy(isHealthy);
+    return isHealthy;
+  };
+
+  const fetchDemoData = async () => {
+    try {
+      const isDemoMode = await apiService.isDemoMode();
+      if (isDemoMode) {
+        const demoAddress = await apiService.getDemoAddress();
+        if (demoAddress) {
+          fetchPortfolioData(demoAddress);
+        }
+      }
+    } catch (error) {
+      console.error("获取演示数据失败:", error);
+    }
+  };
+
+  const fetchPortfolioData = async (walletAddress?: string) => {
     try {
       setLoading(true);
       setError(null);
 
-      const data = await apiService.getPortfolio(address || "");
+      // 检查API健康状态
+      const isHealthy = await checkApiHealth();
+      if (!isHealthy) {
+        setError("API服务不可用，请稍后再试");
+        setLoading(false);
+        return;
+      }
+
+      const targetAddress = walletAddress || address || "";
+      const data = await apiService.getPortfolio(targetAddress);
       setPortfolio(data);
 
       // 获取每个资产的市场预测
@@ -42,33 +74,54 @@ export const Dashboard: React.FC = () => {
       for (const position of data.positions) {
         const asset = position.asset.split("/")[0];
         if (!predictions[asset]) {
-          const prediction = await apiService.predictMarket(asset);
+          try {
+            const prediction = await apiService.predictMarket(asset);
 
-          // 确保警报数据存在
-          if (!prediction.alerts || prediction.alerts.length === 0) {
-            // 尝试获取市场警报
-            try {
-              const alerts = await apiService.getMarketAlerts(address || "");
-              // 过滤出与当前资产相关的警报
-              const assetAlerts = alerts.filter((alert) => alert.asset === asset);
-              prediction.alerts = assetAlerts;
-            } catch (alertError) {
-              console.error("Error fetching market alerts:", alertError);
-              prediction.alerts = [];
-            }
+            predictions[asset] = prediction;
+          } catch (predictionError) {
+            console.error(`获取${asset}预测失败:`, predictionError);
+            // 继续处理其他资产
           }
-
-          predictions[asset] = prediction;
         }
       }
+
       setMarketPredictions(predictions);
+
+      // 设置默认选中的资产
+      if (data.positions.length > 0 && !predictions[selectedAsset]) {
+        const firstAsset = data.positions[0].asset.split("/")[0];
+        setSelectedAsset(firstAsset);
+      }
     } catch (error) {
-      console.error("Error fetching data:", error);
-      setError("获取数据失败");
+      console.error("获取数据失败:", error);
+      setError(typeof error === "object" && error !== null && "message" in error ? (error as Error).message : "获取数据失败，请稍后再试");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    fetchPortfolioData();
+  };
+
+  if (!apiHealthy) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-center">
+          <div className="bg-destructive/10 text-destructive p-3 rounded-full w-12 h-12 mx-auto mb-4 flex items-center justify-center">
+            <AlertTriangle className="h-6 w-6" />
+          </div>
+          <h3 className="text-lg font-medium mb-2">API服务不可用</h3>
+          <p className="text-muted">无法连接到后端服务，请检查服务是否运行</p>
+          <button onClick={checkApiHealth} className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">
+            重试连接
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -86,11 +139,11 @@ export const Dashboard: React.FC = () => {
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
           <div className="bg-destructive/10 text-destructive p-3 rounded-full w-12 h-12 mx-auto mb-4 flex items-center justify-center">
-            <span className="text-2xl">!</span>
+            <AlertTriangle className="h-6 w-6" />
           </div>
           <h3 className="text-lg font-medium mb-2">出错了</h3>
           <p className="text-muted">{error}</p>
-          <button onClick={fetchPortfolioData} className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">
+          <button onClick={() => fetchPortfolioData()} className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">
             重试
           </button>
         </div>
@@ -107,6 +160,9 @@ export const Dashboard: React.FC = () => {
           </div>
           <h3 className="text-lg font-medium mb-2">未连接钱包</h3>
           <p className="text-muted">请连接您的钱包以查看投资组合</p>
+          <button onClick={fetchDemoData} className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">
+            使用演示数据
+          </button>
         </div>
       </div>
     );
@@ -118,6 +174,9 @@ export const Dashboard: React.FC = () => {
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-bold">DeFi 投资组合</h1>
           <div className="flex gap-2">
+            <button onClick={handleRefresh} disabled={refreshing} className="p-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors" title="刷新数据">
+              <RefreshCw className={`h-5 w-5 ${refreshing ? "animate-spin" : ""}`} />
+            </button>
             <button onClick={() => setActiveTab("overview")} className={`px-4 py-2 rounded-lg transition-colors ${activeTab === "overview" ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/80"}`}>
               总览
             </button>
@@ -150,14 +209,24 @@ export const Dashboard: React.FC = () => {
                 选择资产分析
               </label>
               <select id="asset-select" value={selectedAsset} onChange={(e) => setSelectedAsset(e.target.value)} className="block w-full md:w-64 px-4 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all">
-                {portfolio.positions.map((position) => (
-                  <option key={position.asset} value={position.asset.split("/")[0]}>
-                    {position.asset} - {position.protocol}
-                  </option>
-                ))}
+                {portfolio.positions.map((position) => {
+                  const asset = position.asset.split("/")[0];
+                  return (
+                    <option key={position.asset} value={asset}>
+                      {position.asset} - {position.protocol}
+                    </option>
+                  );
+                })}
               </select>
             </div>
-            <MarketAnalysis asset={selectedAsset} prediction={marketPredictions[selectedAsset]} marketAnalysis={portfolio.market_analysis[selectedAsset]} aiPrediction={portfolio.ai_predictions[selectedAsset]} />
+            {marketPredictions[selectedAsset] ? (
+              <MarketAnalysis asset={selectedAsset} prediction={marketPredictions[selectedAsset]} marketAnalysis={portfolio.market_analysis[selectedAsset]} aiPrediction={portfolio.ai_predictions[selectedAsset]} />
+            ) : (
+              <div className="text-center py-8">
+                <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
+                <p className="text-muted">加载市场数据中...</p>
+              </div>
+            )}
           </div>
         </div>
       )}

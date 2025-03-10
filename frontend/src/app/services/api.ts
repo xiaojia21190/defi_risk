@@ -1,3 +1,10 @@
+// 添加process类型定义
+declare const process: {
+  env: {
+    NEXT_PUBLIC_API_URL?: string;
+  };
+};
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export interface Position {
@@ -203,6 +210,8 @@ export interface HackathonGuide {
   websiteUrl: string;
 }
 
+import { demoProtocols } from './protocols';
+
 class ApiService {
   // 检查是否处于演示模式
   private _demoMode: boolean | null = null;
@@ -247,22 +256,39 @@ class ApiService {
   }
 
   private async fetchJson<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    });
+    try {
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+      });
 
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.statusText}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`API Error (${response.status}): ${errorText}`);
+        throw new Error(`API Error: ${response.statusText}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      console.error(`请求失败 (${endpoint}):`, error);
+      throw error;
     }
-
-    return response.json();
   }
 
   async getPortfolio(address: string): Promise<Portfolio> {
+    // 如果没有提供地址，尝试使用演示地址
+    if (!address || address === '') {
+      const demoAddress = await this.getDemoAddress();
+      if (demoAddress) {
+        address = demoAddress;
+      } else {
+        throw new Error('未提供钱包地址');
+      }
+    }
+
     return this.fetchJson<Portfolio>('/analyze', {
       method: 'POST',
       body: JSON.stringify({ wallet_address: address }),
@@ -273,9 +299,6 @@ class ApiService {
     return this.fetchJson<MarketData>(`/market-data/${asset}`);
   }
 
-  async getProtocols(): Promise<{ protocols: Protocol[] }> {
-    return this.fetchJson<{ protocols: Protocol[] }>('/protocols');
-  }
 
   async predictMarket(asset: string, timeFrame: string = '24h'): Promise<MarketPrediction> {
     return this.fetchJson<MarketPrediction>('/predict/market', {
@@ -297,28 +320,17 @@ class ApiService {
       // 检查是否处于演示模式
       const demoMode = await this.isDemoMode();
 
-      // 如果是演示模式且没有提供地址，使用演示地址
-      if (demoMode && (!address || address === '0x0')) {
-        const demoAddress = await this.getDemoAddress();
-        if (demoAddress) {
-          return this.getDemoAlerts();
-        }
+      // 如果是演示模式或没有提供地址，使用演示地址
+      if ((demoMode || !address || address === '') && this._demoAddress) {
+        return this.getDemoAlerts();
       }
 
-      const response = await fetch(`${API_BASE_URL}/alerts/${address}`);
-
-      if (!response.ok) {
-        // 如果请求失败且处于演示模式，返回演示数据
-        if (demoMode) {
-          return this.getDemoAlerts();
-        }
-        throw new Error('Failed to fetch alerts');
-      }
-
-      return await response.json();
+      // 使用提供的地址获取警报
+      return this.fetchJson<Alert[]>(`/alerts/${address}`);
     } catch (error) {
-      console.error('Error fetching alerts:', error);
-      throw error;
+      console.error('获取警报失败:', error);
+      // 出错时返回空数组而不是抛出错误
+      return [];
     }
   }
 
@@ -337,35 +349,6 @@ class ApiService {
     }
   }
 
-  async getMarketAlerts(address: string): Promise<Alert[]> {
-    try {
-      // 检查是否处于演示模式
-      const demoMode = await this.isDemoMode();
-
-      // 如果是演示模式且没有提供地址，使用演示地址
-      if (demoMode && (!address || address === '0x0')) {
-        const demoAddress = await this.getDemoAddress();
-        if (demoAddress) {
-          address = demoAddress;
-        }
-      }
-
-      const response = await fetch(`${API_BASE_URL}/market/alerts/${address}`);
-
-      if (!response.ok) {
-        // 如果请求失败且处于演示模式，返回演示数据
-        if (demoMode) {
-          return this.getDemoAlerts();
-        }
-        throw new Error('Failed to fetch market alerts');
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching market alerts:', error);
-      throw error;
-    }
-  }
 
   async getMarketAnalysis(asset: string): Promise<MarketAnalysis> {
     try {
@@ -454,6 +437,43 @@ class ApiService {
     } catch (error) {
       console.error('Error running quick test:', error);
       throw error;
+    }
+  }
+
+  // 添加一个通用的错误处理方法
+  async safeApiCall<T>(apiCall: () => Promise<T>, fallback: T): Promise<T> {
+    try {
+      return await apiCall();
+    } catch (error) {
+      console.error('API调用失败:', error);
+      return fallback;
+    }
+  }
+
+  // 添加一个健康检查方法
+  async checkApiHealth(): Promise<boolean> {
+    try {
+      await fetch(`${API_BASE_URL}/`);
+      return true;
+    } catch (error) {
+      console.error('API健康检查失败:', error);
+      return false;
+    }
+  }
+
+  async getProtocols(): Promise<{ protocols: Protocol[] }> {
+    try {
+      // 检查是否处于演示模式
+      const demoMode = await this.isDemoMode();
+      if (demoMode) {
+        return { protocols: demoProtocols };
+      }
+
+      return this.fetchJson<{ protocols: Protocol[] }>('/protocols');
+    } catch (error) {
+      console.error('获取协议列表失败:', error);
+      // 出错时返回演示数据
+      return { protocols: demoProtocols };
     }
   }
 }

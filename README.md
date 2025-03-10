@@ -1,122 +1,74 @@
-# DeFi 投资组合风险监控工具
+# DeFi风险监控平台
 
-这是一个用于监控 DeFi 投资组合风险的工具，提供实时风险警报和投资建议。
+这是一个DeFi风险监控平台，用于分析和监控DeFi投资组合的风险。
+
+## 项目结构
+
+项目分为前端和后端两部分：
+
+- `frontend/`: 基于Next.js的前端应用
+- `backend/`: 基于FastAPI的后端API服务
 
 ## 功能特点
 
-- 实时风险监控
-- 多协议支持 (Aave, Uniswap 等)
-- AI 驱动的市场预测
-- 清算风险预警
-- 临时损失计算
-- 投资组合优化建议
+- 投资组合分析和风险评估
+- 资产价格和市场趋势预测
+- 风险监控和警报系统
+- 智能投资建议
+
+## 运行说明
+
+### 后端
+
+1. 进入后端目录：
+   ```bash
+   cd backend
+   ```
+
+2. 安装依赖：
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. 启动后端服务：
+   ```bash
+   uvicorn main:app --reload
+   ```
+
+后端服务将在 http://localhost:8000 上运行。
+
+### 前端
+
+1. 进入前端目录：
+   ```bash
+   cd frontend
+   ```
+
+2. 安装依赖：
+   ```bash
+   npm install
+   ```
+
+3. 启动开发服务器：
+   ```bash
+   npm run dev
+   ```
+
+前端应用将在 http://localhost:3000 上运行。
+
+## 演示模式
+
+系统默认启用演示模式，可以在不连接真实钱包的情况下查看示例数据。
+
+## API文档
+
+后端API文档可以在 http://localhost:8000/docs 访问。
 
 ## 技术栈
 
-### 前端
-- Next.js
-- TypeScript
-- TailwindCSS
-- Web3.js
-- Ethers.js
-
-### 后端
-- Python
-- FastAPI
-- TensorFlow/PyTorch
-- Web3.py
-
-### 智能合约
-- Solidity
-- Hardhat
-
-## 系统要求
-
-- Node.js 16+
-- Python 3.8+
-- Git
-
-## 安装说明
-
-1. 克隆仓库
-```bash
-git clone [repository-url]
-cd defi_risk
-```
-
-2. 安装前端依赖
-```bash
-cd frontend
-npm install
-```
-
-3. 安装后端依赖
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-4. 安装智能合约依赖
-```bash
-cd contracts
-npm install
-```
-
-## 配置
-
-1. 创建 `.env` 文件并设置必要的环境变量：
-```
-NEXT_PUBLIC_INFURA_ID=your_infura_id
-NEXT_PUBLIC_CHAIN_ID=1
-DATABASE_URL=your_database_url
-```
-
-2. 配置区块链网络
-3. 设置 AI 模型参数
-
-## 使用说明
-
-1. 启动前端开发服务器
-```bash
-cd frontend
-npm run dev
-```
-
-2. 启动后端服务器
-```bash
-cd backend
-python main.py
-```
-
-3. 访问 http://localhost:3000 使用应用
-
-## 主要功能模块
-
-1. 投资组合监控
-   - 实时头寸追踪
-   - 风险指标计算
-   - 收益分析
-
-2. 风险预警系统
-   - 清算风险预警
-   - 临时损失预警
-   - 市场波动预警
-
-3. AI 预测模块
-   - 价格趋势预测
-   - 风险评估
-   - 投资建议生成
-
-4. 用户界面
-   - 仪表板
-   - 风险监控面板
-   - 设置界面
-
-## 贡献指南
-
-欢迎提交 Pull Requests 和 Issues。
+- 前端：Next.js, React, TailwindCSS, Recharts
+- 后端：FastAPI, Python, Pandas
+- 区块链交互：Web3.py
 
 ## 许可证
 

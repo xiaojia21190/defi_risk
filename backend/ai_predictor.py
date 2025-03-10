@@ -2,7 +2,7 @@ import httpx
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Tuple, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import requests
 from openai import OpenAI
@@ -15,6 +15,42 @@ logger = logging.getLogger("defi_risk.ai_predictor")
 
 # 设置代理
 proxies = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
+
+
+class AnalysisCache:
+    def __init__(self, max_size: int = 100, expiration_minutes: int = 15):
+        self.cache = {}
+        self.max_size = max_size
+        self.expiration_minutes = expiration_minutes
+        self.access_order = []  # 用于LRU实现
+
+    def get(self, asset: str) -> Optional[Dict]:
+        """获取缓存的分析结果"""
+        if asset in self.cache:
+            result, timestamp = self.cache[asset]
+            if datetime.now() - timestamp < timedelta(minutes=self.expiration_minutes):
+                # 更新访问顺序
+                self.access_order.remove(asset)
+                self.access_order.append(asset)
+                return result
+            else:
+                # 过期数据，删除
+                del self.cache[asset]
+                self.access_order.remove(asset)
+        return None
+
+    def set(self, asset: str, result: Dict):
+        """设置缓存数据"""
+        # 如果缓存已满，删除最久未使用的项
+        if len(self.cache) >= self.max_size and asset not in self.cache:
+            oldest = self.access_order.pop(0)
+            del self.cache[oldest]
+
+        # 添加或更新缓存
+        self.cache[asset] = (result, datetime.now())
+        if asset in self.access_order:
+            self.access_order.remove(asset)
+        self.access_order.append(asset)
 
 
 class AiPredictor:
@@ -45,6 +81,9 @@ class AiPredictor:
             logger.error(f"初始化OpenAI客户端时出错: {e}")
             self.client = None
 
+        # 初始化分析缓存
+        self.analysis_cache = AnalysisCache(max_size=100, expiration_minutes=15)
+
     def _prepare_market_data(
         self, historical_data: pd.DataFrame
     ) -> Tuple[np.ndarray, np.ndarray, float, float, float, float]:
@@ -57,114 +96,15 @@ class AiPredictor:
         rsi = self.calculate_rsi(prices)
         return prices, volumes, current_price, price_change_24h, volatility, rsi
 
-    @lru_cache(maxsize=16)
-    def _get_cached_analysis(
-        self,
-        asset: str,
-        current_price: float,
-        price_change_24h: float,
-        volatility: float,
-        rsi: float,
-        ma7: float,
-        ma30: float,
-        macd_trend: str,
-        bb_position: str,
-        volume_trend: str,
-        volume_strength: str,
-    ) -> Dict:
-        """缓存分析结果的核心逻辑"""
-        try:
-            # 构建市场分析提示
-            prompt = f"""
-分析以下{asset}资产的市场数据，并提供详细的趋势分析和预测：
-
-基本指标：
-- 当前价格: ${current_price:.2f}
-- 24小时价格变化: {price_change_24h:.2f}%
-- 波动率: {volatility:.2f}%
-- RSI指标: {rsi:.2f}（超买>70，超卖<30）
-
-技术指标：
-- 7日均价: ${ma7:.2f}
-- 30日均价: ${ma30:.2f}
-- MACD趋势: {macd_trend}
-- 布林带位置: {bb_position}
-
-成交量分析：
-- 成交量趋势: {volume_trend}
-- 成交量强度: {volume_strength}
-
-请提供以下JSON格式的分析结果：
-{{
-    "trend": "bullish/bearish/neutral",
-    "trend_strength": "strong/moderate/weak",
-    "risk_level": "HIGH/MEDIUM/LOW",
-    "predicted_price_range": {{
-        "24h": [最低预期价格, 最高预期价格],
-        "7d": [最低预期价格, 最高预期价格]
-    }},
-    "technical_analysis": {{
-        "ma_trend": "上升/下降/盘整",
-        "macd_signal": "买入/卖出/观望",
-        "bollinger_signal": "超买/超卖/中性",
-        "volume_analysis": "放量/缩量/平稳"
-    }},
-    "risk_factors": [
-        "主要风险因素1",
-        "主要风险因素2",
-        ...
-    ],
-    "trading_signals": [
-        "交易信号1",
-        "交易信号2",
-        ...
-    ],
-    "key_levels": {{
-        "support": [主要支撑位1, 主要支撑位2],
-        "resistance": [主要阻力位1, 主要阻力位2],
-        "stop_loss": 建议止损价格,
-        "take_profit": [目标获利价格1, 目标获利价格2]
-    }},
-    "analysis_summary": "详细的市场分析总结",
-    "recommendations": [
-        "具体建议1",
-        "具体建议2",
-        ...
-    ]
-}}
-
-注意：
-1. 基于所有技术指标提供综合分析
-2. 考虑价格、成交量和技术指标的配合
-3. 给出明确的交易建议和风险控制措施
-4. 分析要客观且有数据支持
-5. 建议要具体且可操作
-"""
-            if self.client is not None:
-                response = self.client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "你是一个专业的加密货币市场分析师，擅长技术分析和风险评估。",
-                        },
-                        {"role": "user", "content": prompt},
-                    ],
-                    response_format={"type": "json_object"},
-                )
-                return json.loads(response.choices[0].message.content)
-            return self._get_basic_analysis(
-                asset, current_price, price_change_24h, volatility, rsi
-            )
-        except Exception as e:
-            logger.error(f"获取缓存分析时出错: {e}")
-            return self._get_basic_analysis(
-                asset, current_price, price_change_24h, volatility, rsi
-            )
-
     def analyze_market_trend(self, historical_data: pd.DataFrame, asset: str) -> Dict:
         """分析市场趋势并预测价格走势"""
         try:
+            # 首先检查缓存
+            cached_result = self.analysis_cache.get(asset)
+            if cached_result:
+                logger.info(f"使用缓存的{asset}分析结果")
+                return cached_result
+
             # 准备市场数据
             prices, volumes, current_price, price_change_24h, volatility, rsi = (
                 self._prepare_market_data(historical_data)
@@ -291,6 +231,8 @@ class AiPredictor:
                 }
             )
 
+            # 缓存结果
+            self.analysis_cache.set(asset, analysis)
             logger.info(f"成功获取 {asset} 的AI市场分析")
             return analysis
 
@@ -348,6 +290,110 @@ class AiPredictor:
         except Exception as e:
             logger.error(f"计算布林带时出错: {e}")
             return prices, prices, prices
+
+    def _get_cached_analysis(
+        self,
+        asset: str,
+        current_price: float,
+        price_change_24h: float,
+        volatility: float,
+        rsi: float,
+        ma7: float,
+        ma30: float,
+        macd_trend: str,
+        bb_position: str,
+        volume_trend: str,
+        volume_strength: str,
+    ) -> Dict:
+        """缓存分析结果的核心逻辑"""
+        try:
+            # 构建市场分析提示
+            prompt = f"""
+分析以下{asset}资产的市场数据，并提供详细的趋势分析和预测：
+
+基本指标：
+- 当前价格: ${current_price:.2f}
+- 24小时价格变化: {price_change_24h:.2f}%
+- 波动率: {volatility:.2f}%
+- RSI指标: {rsi:.2f}（超买>70，超卖<30）
+
+技术指标：
+- 7日均价: ${ma7:.2f}
+- 30日均价: ${ma30:.2f}
+- MACD趋势: {macd_trend}
+- 布林带位置: {bb_position}
+
+成交量分析：
+- 成交量趋势: {volume_trend}
+- 成交量强度: {volume_strength}
+
+请提供以下JSON格式的分析结果：
+{{
+    "trend": "bullish/bearish/neutral",
+    "trend_strength": "strong/moderate/weak",
+    "risk_level": "HIGH/MEDIUM/LOW",
+    "predicted_price_range": {{
+        "24h": [最低预期价格, 最高预期价格],
+        "7d": [最低预期价格, 最高预期价格]
+    }},
+    "technical_analysis": {{
+        "ma_trend": "上升/下降/盘整",
+        "macd_signal": "买入/卖出/观望",
+        "bollinger_signal": "超买/超卖/中性",
+        "volume_analysis": "放量/缩量/平稳"
+    }},
+    "risk_factors": [
+        "主要风险因素1",
+        "主要风险因素2",
+        ...
+    ],
+    "trading_signals": [
+        "交易信号1",
+        "交易信号2",
+        ...
+    ],
+    "key_levels": {{
+        "support": [主要支撑位1, 主要支撑位2],
+        "resistance": [主要阻力位1, 主要阻力位2],
+        "stop_loss": 建议止损价格,
+        "take_profit": [目标获利价格1, 目标获利价格2]
+    }},
+    "analysis_summary": "详细的市场分析总结",
+    "recommendations": [
+        "具体建议1",
+        "具体建议2",
+        ...
+    ]
+}}
+
+注意：
+1. 基于所有技术指标提供综合分析
+2. 考虑价格、成交量和技术指标的配合
+3. 给出明确的交易建议和风险控制措施
+4. 分析要客观且有数据支持
+5. 建议要具体且可操作
+"""
+            if self.client is not None:
+                response = self.client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "你是一个专业的加密货币市场分析师，擅长技术分析和风险评估。",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                )
+                return json.loads(response.choices[0].message.content)
+            return self._get_basic_analysis(
+                asset, current_price, price_change_24h, volatility, rsi
+            )
+        except Exception as e:
+            logger.error(f"获取缓存分析时出错: {e}")
+            return self._get_basic_analysis(
+                asset, current_price, price_change_24h, volatility, rsi
+            )
 
     def _get_basic_analysis(
         self,

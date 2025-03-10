@@ -3,6 +3,7 @@
 import React from "react";
 import { Portfolio } from "../services/api";
 import { PieChart } from "react-minimal-pie-chart";
+import { TrendingUp, Wallet, BarChart3, Percent } from "lucide-react";
 
 interface PortfolioOverviewProps {
   portfolio: Portfolio;
@@ -27,60 +28,166 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
       "#dc2626", // red-600
       "#9333ea", // purple-600
       "#ea580c", // orange-600
-    ][index % 5],
+      "#0891b2", // cyan-600
+      "#4f46e5", // indigo-600
+      "#db2777", // pink-600
+    ][index % 8],
   }));
 
   // 计算总收益率
   const totalAPY = portfolio.positions.reduce((sum, pos) => sum + (pos.apy || 0), 0) / portfolio.positions.length;
 
+  // 计算资产类型分布
+  const assetTypeDistribution = portfolio.positions.reduce((acc, pos) => {
+    const asset = pos.asset.split("/")[0];
+    const marketAnalysis = portfolio.market_analysis[asset];
+    const value = pos.amount * (marketAnalysis?.current_price || 0);
+
+    // 简单分类资产类型
+    let type = "其他";
+    if (asset === "ETH" || asset === "WETH" || asset === "BTC" || asset === "WBTC") {
+      type = "主流币";
+    } else if (asset === "USDC" || asset === "USDT" || asset === "DAI") {
+      type = "稳定币";
+    } else if (pos.asset.includes("/")) {
+      type = "LP代币";
+    }
+
+    acc[type] = (acc[type] || 0) + value;
+    return acc;
+  }, {} as { [key: string]: number });
+
   return (
     <div>
-      <h2 className="text-xl font-semibold mb-6">投资组合概览</h2>
+      <h2 className="text-xl font-semibold mb-6 flex items-center gap-2">
+        <Wallet className="h-5 w-5 text-primary" />
+        投资组合概览
+      </h2>
+
+      {/* 总览卡片 */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
+          <div className="flex items-center gap-2 text-muted mb-2">
+            <Wallet className="h-4 w-4" />
+            <span className="text-sm">总资产价值</span>
+          </div>
+          <p className="text-2xl font-bold">${portfolio.total_value.toLocaleString()}</p>
+        </div>
+
+        <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
+          <div className="flex items-center gap-2 text-muted mb-2">
+            <Percent className="h-4 w-4" />
+            <span className="text-sm">平均APY</span>
+          </div>
+          <p className="text-2xl font-bold text-success">{(totalAPY * 100).toFixed(2)}%</p>
+        </div>
+
+        <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
+          <div className="flex items-center gap-2 text-muted mb-2">
+            <BarChart3 className="h-4 w-4" />
+            <span className="text-sm">协议数量</span>
+          </div>
+          <p className="text-2xl font-bold">{Object.keys(protocolValues).length}</p>
+        </div>
+
+        <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
+          <div className="flex items-center gap-2 text-muted mb-2">
+            <TrendingUp className="h-4 w-4" />
+            <span className="text-sm">资产数量</span>
+          </div>
+          <p className="text-2xl font-bold">{portfolio.positions.length}</p>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div>
-          <div className="mb-6">
-            <div className="flex justify-between items-baseline mb-2">
-              <h3 className="font-medium">总资产价值</h3>
-              <span className="text-2xl font-bold">${portfolio.total_value.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between items-center text-sm text-muted">
-              <span>平均APY</span>
-              <span className="text-success">{(totalAPY * 100).toFixed(2)}%</span>
+        <div className="space-y-6">
+          <div>
+            <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
+              <BarChart3 className="h-4 w-4 text-primary" />
+              协议分布
+            </h3>
+            <div className="space-y-4">
+              {Object.entries(protocolValues).map(([protocol, value], index) => (
+                <div key={protocol} className="flex items-center gap-3 group">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: pieData[index].color }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-baseline">
+                      <span className="font-medium group-hover:text-primary transition-colors">{protocol}</span>
+                      <span className="text-sm text-muted">${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                    </div>
+                    <div className="w-full bg-muted/30 rounded-full h-1.5 mt-1.5 overflow-hidden">
+                      <div
+                        className="h-1.5 rounded-full transition-all duration-500 ease-out group-hover:opacity-90"
+                        style={{
+                          width: `${(value / portfolio.total_value) * 100}%`,
+                          backgroundColor: pieData[index].color,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
-          <div className="space-y-4">
-            {Object.entries(protocolValues).map(([protocol, value], index) => (
-              <div key={protocol} className="flex items-center gap-3">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: pieData[index].color }} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-baseline">
-                    <span className="font-medium">{protocol}</span>
-                    <span className="text-sm text-muted">${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                  </div>
-                  <div className="w-full bg-muted/30 rounded-full h-1 mt-1">
-                    <div
-                      className="h-1 rounded-full"
-                      style={{
-                        width: `${(value / portfolio.total_value) * 100}%`,
-                        backgroundColor: pieData[index].color,
-                      }}
-                    />
+          <div>
+            <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-primary" />
+              资产类型分布
+            </h3>
+            <div className="space-y-4">
+              {Object.entries(assetTypeDistribution).map(([type, value], index) => (
+                <div key={type} className="flex items-center gap-3 group">
+                  <div
+                    className="w-3 h-3 rounded-full"
+                    style={{
+                      backgroundColor: [
+                        "#2563eb", // 主流币 - 蓝色
+                        "#16a34a", // 稳定币 - 绿色
+                        "#9333ea", // LP代币 - 紫色
+                        "#ea580c", // 其他 - 橙色
+                      ][index % 4],
+                    }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-baseline">
+                      <span className="font-medium group-hover:text-primary transition-colors">{type}</span>
+                      <span className="text-sm text-muted">${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                    </div>
+                    <div className="w-full bg-muted/30 rounded-full h-1.5 mt-1.5 overflow-hidden">
+                      <div
+                        className="h-1.5 rounded-full transition-all duration-500 ease-out group-hover:opacity-90"
+                        style={{
+                          width: `${(value / portfolio.total_value) * 100}%`,
+                          backgroundColor: [
+                            "#2563eb", // 主流币 - 蓝色
+                            "#16a34a", // 稳定币 - 绿色
+                            "#9333ea", // LP代币 - 紫色
+                            "#ea580c", // 其他 - 橙色
+                          ][index % 4],
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
 
         <div>
+          <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
+            <Percent className="h-4 w-4 text-primary" />
+            资产占比
+          </h3>
           <div className="relative aspect-square">
             <PieChart
               data={pieData}
               lineWidth={20}
               paddingAngle={2}
               rounded
+              animate
+              animationDuration={500}
               label={({ dataEntry }) => `${((dataEntry.value / portfolio.total_value) * 100).toFixed(1)}%`}
               labelStyle={{
                 fontSize: "6px",
@@ -88,13 +195,17 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
                 fontWeight: "bold",
               }}
               labelPosition={75}
+              className="hover:drop-shadow-xl transition-all"
             />
           </div>
         </div>
       </div>
 
       <div className="mt-8">
-        <h3 className="font-medium mb-4">最大头寸</h3>
+        <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
+          <Wallet className="h-4 w-4 text-primary" />
+          最大头寸
+        </h3>
         <div className="space-y-3">
           {[...portfolio.positions]
             .sort((a, b) => {
@@ -104,13 +215,27 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
             })
             .slice(0, 3)
             .map((position, index) => {
-              const marketAnalysis = portfolio.market_analysis[position.asset.split("/")[0]];
+              const asset = position.asset.split("/")[0];
+              const marketAnalysis = portfolio.market_analysis[asset];
               const value = position.amount * (marketAnalysis?.current_price || 0);
+              const percentOfTotal = (value / portfolio.total_value) * 100;
+
+              // 获取资产价格变化趋势
+              const priceChange = marketAnalysis?.price_change_24h || 0;
+
               return (
-                <div key={index} className="p-4 rounded-lg border border-border bg-card/50 hover:bg-card transition-colors">
+                <div key={index} className="p-4 rounded-lg border border-border bg-card/50 hover:bg-card hover:shadow-md transition-all">
                   <div className="flex justify-between items-center">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-medium">{position.asset.substring(0, 2)}</div>
+                      <div
+                        className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium"
+                        style={{
+                          background: `linear-gradient(135deg, ${pieData[index % pieData.length].color}33, ${pieData[index % pieData.length].color}66)`,
+                          color: pieData[index % pieData.length].color,
+                        }}
+                      >
+                        {position.asset.substring(0, 2)}
+                      </div>
                       <div>
                         <h4 className="font-medium">{position.protocol}</h4>
                         <p className="text-sm text-muted">{position.asset}</p>
@@ -118,9 +243,25 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
                     </div>
                     <div className="text-right">
                       <p className="font-medium">${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
-                      {position.apy && <p className="text-sm text-success">APY: {(position.apy * 100).toFixed(2)}%</p>}
+                      <div className="flex items-center justify-end gap-2 mt-1">
+                        {position.apy && <span className="text-xs px-2 py-0.5 rounded-full bg-success/10 text-success">APY: {(position.apy * 100).toFixed(2)}%</span>}
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${priceChange >= 0 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
+                          {priceChange >= 0 ? "+" : ""}
+                          {priceChange.toFixed(2)}%
+                        </span>
+                      </div>
                     </div>
                   </div>
+                  <div className="mt-2 w-full bg-muted/30 rounded-full h-1 overflow-hidden">
+                    <div
+                      className="h-1 rounded-full"
+                      style={{
+                        width: `${percentOfTotal}%`,
+                        backgroundColor: pieData[index % pieData.length].color,
+                      }}
+                    />
+                  </div>
+                  <div className="mt-1 text-xs text-muted text-right">占总资产 {percentOfTotal.toFixed(2)}%</div>
                 </div>
               );
             })}
