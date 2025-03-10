@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useAccount } from "wagmi";
 import RiskMonitor from "./RiskMonitor";
 import PortfolioOverview from "./PortfolioOverview";
@@ -20,16 +20,26 @@ export const Dashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"overview" | "market">("overview");
   const [apiHealthy, setApiHealthy] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const initialized = useRef(false);
 
   useEffect(() => {
-    checkApiHealth();
+    debugger;
+    if (initialized.current) return;
 
-    if (isConnected && address) {
-      fetchPortfolioData();
-    } else {
-      // 尝试使用演示模式
-      fetchDemoData();
-    }
+    const init = async () => {
+      const isHealthy = await checkApiHealth();
+
+      if (!isHealthy) {
+        return;
+      }
+
+      if (isConnected && address) {
+        initialized.current = true;
+        fetchPortfolioData(address);
+      }
+    };
+
+    init();
   }, [address, isConnected]);
 
   const checkApiHealth = async () => {
@@ -38,34 +48,18 @@ export const Dashboard: React.FC = () => {
     return isHealthy;
   };
 
-  const fetchDemoData = async () => {
-    try {
-      const isDemoMode = await apiService.isDemoMode();
-      if (isDemoMode) {
-        const demoAddress = await apiService.getDemoAddress();
-        if (demoAddress) {
-          fetchPortfolioData(demoAddress);
-        }
-      }
-    } catch (error) {
-      console.error("获取演示数据失败:", error);
-    }
-  };
-
   const fetchPortfolioData = async (walletAddress?: string) => {
     try {
       setLoading(true);
       setError(null);
 
-      // 检查API健康状态
-      const isHealthy = await checkApiHealth();
-      if (!isHealthy) {
-        setError("API服务不可用，请稍后再试");
+      const targetAddress = walletAddress || address || "";
+      if (!targetAddress) {
+        setError("请连接钱包以查看数据");
         setLoading(false);
         return;
       }
 
-      const targetAddress = walletAddress || address || "";
       const data = await apiService.getPortfolio(targetAddress);
       setPortfolio(data);
 
@@ -151,7 +145,7 @@ export const Dashboard: React.FC = () => {
     );
   }
 
-  if (!portfolio) {
+  if (!isConnected) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
@@ -160,13 +154,30 @@ export const Dashboard: React.FC = () => {
           </div>
           <h3 className="text-lg font-medium mb-2">未连接钱包</h3>
           <p className="text-muted">请连接您的钱包以查看投资组合</p>
-          <button onClick={fetchDemoData} className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">
-            使用演示数据
+        </div>
+      </div>
+    );
+  }
+
+  if (!portfolio) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-center">
+          <div className="bg-muted p-3 rounded-full w-12 h-12 mx-auto mb-4 flex items-center justify-center">
+            <span className="text-2xl">📊</span>
+          </div>
+          <h3 className="text-lg font-medium mb-2">暂无数据</h3>
+          <p className="text-muted">未找到投资组合数据</p>
+          <button onClick={() => fetchPortfolioData(address)} className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors">
+            刷新数据
           </button>
         </div>
       </div>
     );
   }
+
+  // 确保portfolio不为null后再使用
+  const { positions, total_value, risk_level } = portfolio;
 
   return (
     <div className="container mx-auto px-4 py-8">

@@ -15,8 +15,10 @@
     "next": "15.2.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-error-boundary": "^5.0.0",
     "react-minimal-pie-chart": "^9.1.0",
     "recharts": "^2.15.1",
+    "viem": "^2.23.9",
     "wagmi": "^2.14.12"
   },
   "devDependencies": {

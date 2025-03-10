@@ -6,9 +6,9 @@ import { http } from "viem";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const config = createConfig({
-  chains: [sepolia],
+  chains: [mainnet],
   transports: {
-    [sepolia.id]: http(),
+    [mainnet.id]: http(),
   },
 });
 

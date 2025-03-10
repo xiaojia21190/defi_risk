@@ -375,7 +375,7 @@ class AiPredictor:
 """
             if self.client is not None:
                 response = self.client.chat.completions.create(
-                    model="gpt-4o",
+                    model="gpt-4o-mini",
                     messages=[
                         {
                             "role": "system",
@@ -882,7 +882,7 @@ class AiPredictor:
             if self.client is not None:
                 # 调用OpenAI API
                 response = self.client.chat.completions.create(
-                    model="gpt-4o",
+                    model="gpt-4o-mini",
                     messages=[
                         {
                             "role": "system",

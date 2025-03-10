@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Dashboard } from "./components/Dashboard";
 import { ConnectButton } from "./components/ConnectButton";
-import Link from "next/link";
 import ProtocolList from "./components/ProtocolList";
 
 export const metadata: Metadata = {
@@ -26,9 +25,6 @@ export default function Home() {
             <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">DeFi Risk Monitor</h1>
           </div>
           <div className="flex items-center space-x-4">
-            <Link href="/guide" className="px-4 py-2 rounded-full bg-accent/10 text-accent text-sm font-medium hover:bg-accent/20 transition-colors">
-              黑客松指南
-            </Link>
             <ConnectButton />
           </div>
         </div>

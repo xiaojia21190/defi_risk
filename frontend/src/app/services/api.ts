@@ -279,14 +279,9 @@ class ApiService {
   }
 
   async getPortfolio(address: string): Promise<Portfolio> {
-    // 如果没有提供地址，尝试使用演示地址
+    // 移除演示模式相关逻辑
     if (!address || address === '') {
-      const demoAddress = await this.getDemoAddress();
-      if (demoAddress) {
-        address = demoAddress;
-      } else {
-        throw new Error('未提供钱包地址');
-      }
+      throw new Error('未提供钱包地址');
     }
 
     return this.fetchJson<Portfolio>('/analyze', {
@@ -317,13 +312,13 @@ class ApiService {
 
   async getAlerts(address: string): Promise<Alert[]> {
     try {
-      // 检查是否处于演示模式
-      const demoMode = await this.isDemoMode();
+      // // 检查是否处于演示模式
+      // const demoMode = await this.isDemoMode();
 
-      // 如果是演示模式或没有提供地址，使用演示地址
-      if ((demoMode || !address || address === '') && this._demoAddress) {
-        return this.getDemoAlerts();
-      }
+      // // 如果是演示模式或没有提供地址，使用演示地址
+      // if ((demoMode || !address || address === '') && this._demoAddress) {
+      //   return this.getDemoAlerts();
+      // }
 
       // 使用提供的地址获取警报
       return this.fetchJson<Alert[]>(`/alerts/${address}`);
@@ -463,11 +458,11 @@ class ApiService {
 
   async getProtocols(): Promise<{ protocols: Protocol[] }> {
     try {
-      // 检查是否处于演示模式
-      const demoMode = await this.isDemoMode();
-      if (demoMode) {
-        return { protocols: demoProtocols };
-      }
+      // // 检查是否处于演示模式
+      // const demoMode = await this.isDemoMode();
+      // if (demoMode) {
+      //   return { protocols: demoProtocols };
+      // }
 
       return this.fetchJson<{ protocols: Protocol[] }>('/protocols');
     } catch (error) {

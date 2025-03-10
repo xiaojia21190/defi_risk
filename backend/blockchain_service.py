@@ -9,6 +9,8 @@ import numpy as np
 import logging
 import random
 from collections import OrderedDict
+import asyncio
+import aiohttp
 
 # 设置日志记录器
 logger = logging.getLogger("defi_risk.blockchain")
@@ -18,27 +20,48 @@ proxies = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
 
 
 class HistoricalDataCache:
-    def __init__(self, max_size: int = 100, expiration_minutes: int = 5):
-        self.cache = OrderedDict()
+    def __init__(
+        self, max_size: int = 100, expiration_minutes: int = 30
+    ):  # 增加缓存时间
+        self.cache = {}
         self.max_size = max_size
-        self.expiration_minutes = expiration_minutes
+        self.expiration_delta = timedelta(minutes=expiration_minutes)
+        self.access_times = {}  # 记录访问时间用于LRU策略
 
     def get(self, key: str) -> Optional[Tuple[pd.DataFrame, datetime]]:
-        """获取缓存的数据和时间戳"""
+        """获取缓存数据，增加访问记录"""
         if key in self.cache:
             data, timestamp = self.cache[key]
-            if datetime.now() - timestamp < timedelta(minutes=self.expiration_minutes):
+            now = datetime.now()
+
+            # 更新访问时间
+            self.access_times[key] = now
+
+            # 检查是否过期
+            if now - timestamp < self.expiration_delta:
+                logger.debug(f"从缓存获取 {key} 的历史数据")
                 return data
             else:
-                del self.cache[key]
+                logger.debug(f"{key} 的缓存数据已过期")
+                return None
         return None
 
     def set(self, key: str, data: pd.DataFrame):
-        """设置缓存数据"""
-        if len(self.cache) >= self.max_size:
-            # 移除最旧的项目
-            self.cache.popitem(last=False)
-        self.cache[key] = (data, datetime.now())
+        """设置缓存数据，实现LRU淘汰策略"""
+        now = datetime.now()
+
+        # 如果缓存已满，删除最久未访问的项
+        if len(self.cache) >= self.max_size and key not in self.cache:
+            # 按最后访问时间排序
+            oldest_key = min(self.access_times.items(), key=lambda x: x[1])[0]
+            del self.cache[oldest_key]
+            del self.access_times[oldest_key]
+            logger.debug(f"缓存已满，删除最久未访问的项: {oldest_key}")
+
+        # 添加新数据到缓存
+        self.cache[key] = (data, now)
+        self.access_times[key] = now
+        logger.debug(f"添加 {key} 的历史数据到缓存")
 
 
 # 演示数据常量
@@ -74,8 +97,18 @@ class BlockchainService:
         self.w3 = Web3(Web3.HTTPProvider(web3_provider_url))
         self.demo_mode = True  # 将演示模式设置为False
         self.historical_data_cache = HistoricalDataCache(
-            max_size=100, expiration_minutes=5
+            max_size=100, expiration_minutes=30
         )
+        self.data_fetch_locks = {}  # 用于防止并发获取相同数据
+        self.pending_requests = {}  # 用于合并请求
+
+        # 配置日志
+        self.logger = logging.getLogger("blockchain_service")
+        # 只在开发环境设置为DEBUG，生产环境设置为INFO或WARNING
+        if os.environ.get("ENVIRONMENT") == "development":
+            self.logger.setLevel(logging.DEBUG)
+        else:
+            self.logger.setLevel(logging.INFO)
 
     async def get_all_positions(self, address: str) -> List[ProtocolPosition]:
         """获取用户在所有支持的DeFi协议中的存款头寸"""
@@ -479,15 +512,33 @@ class BlockchainService:
             return self._get_demo_market_alerts()
 
     async def get_asset_historical_data(self, asset: str) -> pd.DataFrame:
-        """获取资产的历史价格数据
+        """获取资产的历史价格数据，实现请求合并"""
+        # 创建锁，如果不存在
+        if asset not in self.data_fetch_locks:
+            self.data_fetch_locks[asset] = asyncio.Lock()
 
-        支持多种数据源，按优先级尝试：
-        1. CoinGecko API
-        2. CoinMarketCap API
-        3. Binance API
-        4. 链上数据（通过Chainlink价格预言机）
-        5. 演示数据（如果所有API都失败）
-        """
+        # 使用锁防止并发获取相同数据
+        async with self.data_fetch_locks[asset]:
+            # 检查是否有正在处理的请求
+            if asset in self.pending_requests:
+                # 等待现有请求完成并返回结果
+                logger.info(f"合并 {asset} 的历史数据请求")
+                return await self.pending_requests[asset]
+
+            # 创建新的请求任务
+            request_task = asyncio.create_task(self._fetch_historical_data(asset))
+            self.pending_requests[asset] = request_task
+
+            try:
+                # 执行请求
+                result = await request_task
+                return result
+            finally:
+                # 清理
+                del self.pending_requests[asset]
+
+    async def _fetch_historical_data(self, asset: str) -> pd.DataFrame:
+        """实际获取历史数据的方法"""
         try:
             # 检查缓存
             cached_data = self.historical_data_cache.get(asset)
@@ -507,6 +558,10 @@ class BlockchainService:
                     "COMP": "compound-governance-token",
                     "UNI": "uniswap",
                     "LINK": "chainlink",
+                    "SNX": "synthetix-network-token",
+                    "MKR": "maker",
+                    "YFI": "yearn-finance",
+                    "SUSHI": "sushi",
                 },
                 # CoinMarketCap IDs (通常使用数字ID)
                 "coinmarketcap": {
@@ -518,6 +573,10 @@ class BlockchainService:
                     "COMP": "5692",
                     "UNI": "7083",
                     "LINK": "1975",
+                    "SNX": "2586",
+                    "MKR": "1518",
+                    "YFI": "5864",
+                    "SUSHI": "6758",
                 },
                 # Binance交易对
                 "binance": {
@@ -529,6 +588,10 @@ class BlockchainService:
                     "COMP": "COMPUSDT",
                     "UNI": "UNIUSDT",
                     "LINK": "LINKUSDT",
+                    "SNX": "SNXUSDT",
+                    "MKR": "MKRUSDT",
+                    "YFI": "YFIUSDT",
+                    "SUSHI": "SUSHIUSDT",
                 },
             }
 
@@ -546,42 +609,46 @@ class BlockchainService:
             df = None
             error_messages = []
 
-            # 1. 尝试CoinGecko API
-            if asset in asset_ids["coingecko"]:
-                try:
-                    logger.info(f"尝试从CoinGecko获取{asset}数据")
-                    df = self._get_coingecko_data(asset, asset_ids["coingecko"][asset])
-                    if df is not None:
-                        logger.info(f"成功从CoinGecko获取{asset}数据")
-                        self.historical_data_cache.set(asset, df)
-                        return df
-                except Exception as e:
-                    error_msg = f"从CoinGecko获取{asset}数据失败: {e}"
-                    logger.warning(error_msg)
-                    error_messages.append(error_msg)
+            # # 1. 尝试CoinGecko API
+            # if asset in asset_ids["coingecko"]:
+            #     try:
+            #         logger.info(f"尝试从CoinGecko获取{asset}数据")
+            #         df = await self._get_coingecko_data(
+            #             asset, asset_ids["coingecko"][asset]
+            #         )
+            #         if df is not None and not df.empty:
+            #             logger.info(f"成功从CoinGecko获取{asset}数据")
+            #             self.historical_data_cache.set(asset, df)
+            #             return df
+            #     except Exception as e:
+            #         error_msg = f"从CoinGecko获取{asset}数据失败: {e}"
+            #         logger.warning(error_msg)
+            #         error_messages.append(error_msg)
 
-            # 2. 尝试CoinMarketCap API
-            if asset in asset_ids["coinmarketcap"]:
-                try:
-                    logger.info(f"尝试从CoinMarketCap获取{asset}数据")
-                    df = self._get_coinmarketcap_data(
-                        asset, asset_ids["coinmarketcap"][asset]
-                    )
-                    if df is not None:
-                        logger.info(f"成功从CoinMarketCap获取{asset}数据")
-                        self.historical_data_cache.set(asset, df)
-                        return df
-                except Exception as e:
-                    error_msg = f"从CoinMarketCap获取{asset}数据失败: {e}"
-                    logger.warning(error_msg)
-                    error_messages.append(error_msg)
+            # # 2. 尝试CoinMarketCap API
+            # if asset in asset_ids["coinmarketcap"]:
+            #     try:
+            #         logger.info(f"尝试从CoinMarketCap获取{asset}数据")
+            #         df = await self._get_coinmarketcap_data(
+            #             asset, asset_ids["coinmarketcap"][asset]
+            #         )
+            #         if df is not None and not df.empty:
+            #             logger.info(f"成功从CoinMarketCap获取{asset}数据")
+            #             self.historical_data_cache.set(asset, df)
+            #             return df
+            #     except Exception as e:
+            #         error_msg = f"从CoinMarketCap获取{asset}数据失败: {e}"
+            #         logger.warning(error_msg)
+            #         error_messages.append(error_msg)
 
             # 3. 尝试Binance API
             if asset in asset_ids["binance"]:
                 try:
                     logger.info(f"尝试从Binance获取{asset}数据")
-                    df = self._get_binance_data(asset, asset_ids["binance"][asset])
-                    if df is not None:
+                    df = await self._get_binance_data(
+                        asset, asset_ids["binance"][asset]
+                    )
+                    if df is not None and not df.empty:
                         logger.info(f"成功从Binance获取{asset}数据")
                         self.historical_data_cache.set(asset, df)
                         return df
@@ -594,7 +661,7 @@ class BlockchainService:
             try:
                 logger.info(f"尝试从链上获取{asset}数据")
                 df = await self._get_onchain_data(asset)
-                if df is not None:
+                if df is not None and not df.empty:
                     logger.info(f"成功从链上获取{asset}数据")
                     self.historical_data_cache.set(asset, df)
                     return df
@@ -617,199 +684,349 @@ class BlockchainService:
             self.historical_data_cache.set(asset, demo_data)
             return demo_data
 
-    def _get_coingecko_data(self, asset: str, asset_id: str) -> Optional[pd.DataFrame]:
-        """从CoinGecko API获取历史数据"""
-        url = f"https://pro-api.coingecko.com/api/v3/coins/{asset_id}/market_chart"
-        headers = {
-            "accept": "application/json",
-            "x-cg-pro-api-key": "CG-2TiEpWzWzfnpD5hnRzk4ufDg",
-        }
-        params = {"vs_currency": "usd", "days": "30", "interval": "daily"}
-
-        try:
-            response = requests.get(
-                url, params=params, headers=headers, proxies=proxies
-            )
-            if response.status_code == 200:
-                data = response.json()
-                df = pd.DataFrame(
-                    {
-                        "timestamp": [
-                            datetime.fromtimestamp(p[0] / 1000) for p in data["prices"]
-                        ],
-                        "price": [p[1] for p in data["prices"]],
-                        "volume": [v[1] for v in data["total_volumes"]],
-                        "market_cap": [m[1] for m in data["market_caps"]],
-                    }
-                )
-                df["source"] = "coingecko"
-                return df
-            else:
-                logger.warning(f"CoinGecko API返回状态码: {response.status_code}")
-                return None
-        except Exception as e:
-            logger.error(f"从CoinGecko获取数据时出错: {e}")
-            return None
-
-    def _get_coinmarketcap_data(
+    async def _get_coingecko_data(
         self, asset: str, asset_id: str
     ) -> Optional[pd.DataFrame]:
-        """从CoinMarketCap API获取历史数据"""
-        # 注意：CoinMarketCap API需要API密钥
-        api_key = os.getenv("COINMARKETCAP_API_KEY")
-        if not api_key:
-            logger.warning("未设置COINMARKETCAP_API_KEY环境变量")
-            return None
+        """优化CoinGecko API调用"""
+        # 实现指数退避重试
+        max_retries = 3
+        retry_delay = 1  # 初始延迟1秒
 
-        url = "https://pro-api.coinmarketcap.com/v2/cryptocurrency/quotes/historical"
-        params = {
-            "id": asset_id,
-            "time_start": (datetime.now() - timedelta(days=30)).strftime(
-                "%Y-%m-%dT%H:%M:%S.%fZ"
-            ),
-            "time_end": datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
-            "interval": "daily",
-        }
-        headers = {"X-CMC_PRO_API_KEY": api_key}
-
-        try:
-            response = requests.get(
-                url, params=params, headers=headers, proxies=proxies
-            )
-            if response.status_code == 200:
-                data = response.json()
-                quotes = data["data"]["quotes"]
-
-                df = pd.DataFrame(
-                    {
-                        "timestamp": [
-                            datetime.fromisoformat(
-                                q["timestamp"].replace("Z", "+00:00")
-                            )
-                            for q in quotes
-                        ],
-                        "price": [q["quote"]["USD"]["price"] for q in quotes],
-                        "volume": [q["quote"]["USD"]["volume_24h"] for q in quotes],
-                        "market_cap": [q["quote"]["USD"]["market_cap"] for q in quotes],
+        for attempt in range(max_retries):
+            try:
+                # 使用aiohttp进行异步请求
+                async with aiohttp.ClientSession() as session:
+                    # 获取过去30天的数据，以天为单位
+                    url = f"https://api.coingecko.com/api/v3/coins/{asset_id}/market_chart"
+                    params = {
+                        "vs_currency": "usd",
+                        "days": "30",
+                        "interval": "daily",
                     }
-                )
-                df["source"] = "coinmarketcap"
-                return df
-            else:
-                logger.warning(f"CoinMarketCap API返回状态码: {response.status_code}")
+
+                    # 添加API密钥（如果有）
+                    if hasattr(self, "coingecko_api_key") and self.coingecko_api_key:
+                        params["x_cg_pro_api_key"] = self.coingecko_api_key
+
+                    async with session.get(url, params=params) as response:
+                        if response.status == 200:
+                            data = await response.json()
+
+                            # 处理数据
+                            prices = data.get("prices", [])
+                            market_caps = data.get("market_caps", [])
+                            total_volumes = data.get("total_volumes", [])
+
+                            if not prices:
+                                logger.warning(f"CoinGecko返回的{asset}价格数据为空")
+                                return None
+
+                            # 创建DataFrame
+                            df = pd.DataFrame(
+                                {
+                                    "timestamp": [
+                                        datetime.fromtimestamp(p[0] / 1000)
+                                        for p in prices
+                                    ],
+                                    "price": [p[1] for p in prices],
+                                    "market_cap": (
+                                        [m[1] for m in market_caps]
+                                        if market_caps
+                                        else [None] * len(prices)
+                                    ),
+                                    "volume": (
+                                        [v[1] for v in total_volumes]
+                                        if total_volumes
+                                        else [None] * len(prices)
+                                    ),
+                                }
+                            )
+                            df["source"] = "coingecko"
+                            return df
+                        elif response.status == 429:  # 速率限制
+                            wait_time = retry_delay * (2**attempt)
+                            logger.warning(
+                                f"CoinGecko API速率限制，等待{wait_time}秒后重试"
+                            )
+                            await asyncio.sleep(wait_time)
+                        else:
+                            logger.error(f"CoinGecko API返回错误: {response.status}")
+                            return None
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2**attempt)
+                    logger.warning(
+                        f"CoinGecko API请求失败，等待{wait_time}秒后重试: {e}"
+                    )
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"CoinGecko API请求失败，已达到最大重试次数: {e}")
+                    return None
+
+        return None
+
+    async def _get_coinmarketcap_data(
+        self, asset: str, asset_id: str
+    ) -> Optional[pd.DataFrame]:
+        """从CoinMarketCap获取历史数据"""
+        try:
+            # 检查是否配置了API密钥
+            if (
+                not hasattr(self, "coinmarketcap_api_key")
+                or not self.coinmarketcap_api_key
+            ):
+                logger.warning("未配置CoinMarketCap API密钥，跳过")
                 return None
+
+            # 使用aiohttp进行异步请求
+            async with aiohttp.ClientSession() as session:
+                # CoinMarketCap API端点
+                url = "https://pro-api.coinmarketcap.com/v2/cryptocurrency/quotes/historical"
+
+                # 计算时间范围（过去30天）
+                end_date = datetime.now()
+                start_date = end_date - timedelta(days=30)
+
+                # 设置请求参数
+                params = {
+                    "id": asset_id,
+                    "time_start": start_date.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                    "time_end": end_date.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                    "interval": "1d",  # 每天一个数据点
+                    "convert": "USD",
+                }
+
+                headers = {
+                    "X-CMC_PRO_API_KEY": self.coinmarketcap_api_key,
+                    "Accept": "application/json",
+                }
+
+                async with session.get(url, params=params, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+
+                        # 解析响应数据
+                        quotes = data.get("data", {}).get("quotes", [])
+                        if not quotes:
+                            logger.warning(f"CoinMarketCap返回的{asset}数据为空")
+                            return None
+
+                        # 创建DataFrame
+                        timestamps = []
+                        prices = []
+                        market_caps = []
+                        volumes = []
+
+                        for quote in quotes:
+                            quote_time = datetime.fromisoformat(
+                                quote.get("timestamp").replace("Z", "+00:00")
+                            )
+                            quote_data = quote.get("quote", {}).get("USD", {})
+
+                            timestamps.append(quote_time)
+                            prices.append(quote_data.get("price"))
+                            market_caps.append(quote_data.get("market_cap"))
+                            volumes.append(quote_data.get("volume_24h"))
+
+                        df = pd.DataFrame(
+                            {
+                                "timestamp": timestamps,
+                                "price": prices,
+                                "market_cap": market_caps,
+                                "volume": volumes,
+                            }
+                        )
+                        df["source"] = "coinmarketcap"
+                        return df
+                    else:
+                        logger.error(f"CoinMarketCap API返回错误: {response.status}")
+                        return None
         except Exception as e:
-            logger.error(f"从CoinMarketCap获取数据时出错: {e}")
+            logger.error(f"从CoinMarketCap获取{asset}数据失败: {e}")
             return None
 
-    def _get_binance_data(
-        self, asset: str, trading_pair: str
+    async def _get_binance_data(
+        self, asset: str, symbol: str
     ) -> Optional[pd.DataFrame]:
         """从Binance API获取历史数据"""
         url = "https://api.binance.com/api/v3/klines"
-        params = {"symbol": trading_pair, "interval": "1d", "limit": 30}
+        # 计算时间范围（过去30天）
+        end_time = int(datetime.now().timestamp() * 1000)
+        start_time = end_time - (30 * 24 * 60 * 60 * 1000)  # 30天的毫秒数
+
+        # 设置请求参数
+        params = {
+            "symbol": symbol,
+            "interval": "1d",  # 1天的K线
+            "startTime": start_time,
+            "endTime": end_time,
+            "limit": 30,  # 最多30个数据点
+        }
 
         try:
             response = requests.get(url, params=params, proxies=proxies)
             if response.status_code == 200:
                 data = response.json()
 
+                if not data:
+                    logger.warning(f"Binance返回的{asset}数据为空")
+                    return None
+
+                # 创建DataFrame
+                # Binance K线数据格式:
+                # [
+                #   [
+                #     开盘时间,
+                #     开盘价,
+                #     最高价,
+                #     最低价,
+                #     收盘价,
+                #     成交量,
+                #     收盘时间,
+                #     成交额,
+                #     成交笔数,
+                #     主动买入成交量,
+                #     主动买入成交额,
+                #     忽略
+                #   ]
+                # ]
                 df = pd.DataFrame(
                     {
                         "timestamp": [
                             datetime.fromtimestamp(k[0] / 1000) for k in data
                         ],
-                        "price": [float(k[4]) for k in data],  # 收盘价
-                        "volume": [float(k[5]) for k in data],  # 交易量
-                        "market_cap": [0.0] * len(data),  # Binance不提供市值数据
+                        "price": [float(k[4]) for k in data],  # 使用收盘价
+                        "volume": [float(k[5]) for k in data],
+                        "market_cap": [None] * len(data),  # Binance不提供市值数据
                     }
                 )
                 df["source"] = "binance"
                 return df
             else:
-                logger.warning(f"Binance API返回状态码: {response.status_code}")
+                logger.error(f"Binance API返回错误: {response.status}")
                 return None
         except Exception as e:
-            logger.error(f"从Binance获取数据时出错: {e}")
+            logger.error(f"从Binance获取{asset}数据失败: {e}")
             return None
 
     async def _get_onchain_data(self, asset: str) -> Optional[pd.DataFrame]:
         """从链上获取历史数据（通过Chainlink价格预言机）"""
-        if not self.w3.is_connected():
-            logger.warning("Web3连接不可用，无法获取链上数据")
-            return None
-
-        # Chainlink价格预言机地址映射
-        chainlink_feeds = {
-            "ETH": "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
-            "WBTC": "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c",
-            "USDC": "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6",
-            "DAI": "0xAed0c38402a5d19df6E4c03F4E2DceD6e29c1ee9",
-            "AAVE": "0x547a514d5e3769680Ce22B2361c10Ea13619e8a9",
-            "COMP": "0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5",
-            "UNI": "0x553303d460EE0afB37EdFf9bE42922D8FF63220e",
-            "LINK": "0x2c1d072e956AFFC0D435Cb7AC38EF18d24d9127c",
-        }
-
-        if asset not in chainlink_feeds:
-            logger.warning(f"没有{asset}的Chainlink价格预言机")
-            return None
-
-        # Chainlink价格预言机ABI（简化版）
-        abi = [
-            {
-                "inputs": [],
-                "name": "latestRoundData",
-                "outputs": [
-                    {"name": "roundId", "type": "uint80"},
-                    {"name": "answer", "type": "int256"},
-                    {"name": "startedAt", "type": "uint256"},
-                    {"name": "updatedAt", "type": "uint256"},
-                    {"name": "answeredInRound", "type": "uint80"},
-                ],
-                "stateMutability": "view",
-                "type": "function",
-            }
-        ]
-
-        # 由于链上数据通常只能获取当前价格，我们需要模拟历史数据
-        # 在实际应用中，可以使用历史区块号查询历史价格，或使用事件日志
-        contract = self.w3.eth.contract(address=chainlink_feeds[asset], abi=abi)
-
         try:
-            # 获取当前价格
-            round_data = contract.functions.latestRoundData().call()
-            current_price = round_data[1] / 10**8  # 假设8位小数
-            current_time = datetime.fromtimestamp(round_data[3])
+            # 检查是否支持该资产的链上数据
+            chainlink_feeds = {
+                "ETH": "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",  # ETH/USD
+                "WBTC": "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c",  # BTC/USD
+                "LINK": "0x2c1d072e956AFFC0D435Cb7AC38EF18d24d9127c",  # LINK/USD
+                "AAVE": "0x547a514d5e3769680Ce22B2361c10Ea13619e8a9",  # AAVE/USD
+                "UNI": "0x553303d460EE0afB37EdFf9bE42922D8FF63220e",  # UNI/USD
+                "SNX": "0xDC3EA94CD0AC27d9A86C180091e7f78C683d3699",  # SNX/USD
+                "COMP": "0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5",  # COMP/USD
+                "YFI": "0xA027702dbb89fbd58938e4324ac03B58d812b0E1",  # YFI/USD
+                "SUSHI": "0xCc70F09A6CC17553b2E31954cD36E4A2d89501f7",  # SUSHI/USD
+                "MKR": "0xec1D1B3b0443256cc3860e24a46F108e699484Aa",  # MKR/USD
+                "DAI": "0xAed0c38402a5d19df6E4c03F4E2DceD6e29c1ee9",  # DAI/USD
+                "USDC": "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6",  # USDC/USD
+            }
 
-            # 模拟30天的历史数据（在实际应用中应该查询历史区块）
-            dates = pd.date_range(end=current_time, periods=30, freq="D")
+            if asset not in chainlink_feeds:
+                logger.warning(f"不支持{asset}的链上数据")
+                return None
 
-            # 使用当前价格作为基准，添加一些随机波动
-            np.random.seed(42 + hash(asset) % 100)
-            volatility = DEMO_ASSETS.get(asset, {"volatility": 0.01})["volatility"]
-            price_changes = np.random.normal(0, volatility / 2, size=30)
+            # 获取Chainlink价格预言机合约地址
+            feed_address = chainlink_feeds[asset]
 
-            # 确保最后一个价格是当前价格
-            prices = current_price * (1 + np.cumsum(price_changes))
-            price_factor = current_price / prices[-1]
-            prices = prices * price_factor
+            # 创建合约实例
+            abi = [
+                {
+                    "inputs": [],
+                    "name": "latestRoundData",
+                    "outputs": [
+                        {"name": "roundId", "type": "uint80"},
+                        {"name": "answer", "type": "int256"},
+                        {"name": "startedAt", "type": "uint256"},
+                        {"name": "updatedAt", "type": "uint256"},
+                        {"name": "answeredInRound", "type": "uint80"},
+                    ],
+                    "stateMutability": "view",
+                    "type": "function",
+                },
+                {
+                    "inputs": [{"name": "roundId", "type": "uint80"}],
+                    "name": "getRoundData",
+                    "outputs": [
+                        {"name": "roundId", "type": "uint80"},
+                        {"name": "answer", "type": "int256"},
+                        {"name": "startedAt", "type": "uint256"},
+                        {"name": "updatedAt", "type": "uint256"},
+                        {"name": "answeredInRound", "type": "uint80"},
+                    ],
+                    "stateMutability": "view",
+                    "type": "function",
+                },
+            ]
 
-            volumes = np.random.uniform(10000, 100000, size=30)
+            contract = self.w3.eth.contract(address=feed_address, abi=abi)
 
+            # 获取最新轮次数据
+            latest_data = await self.w3.eth.call_async(
+                contract.functions.latestRoundData().build_transaction(
+                    {
+                        "from": self.w3.eth.default_account
+                        or "0x0000000000000000000000000000000000000000"
+                    }
+                )
+            )
+            latest_round_id = latest_data[0]
+
+            # 收集历史数据（尝试获取30天的数据点）
+            timestamps = []
+            prices = []
+
+            # 从最新轮次向前查询30个数据点
+            for i in range(30):
+                try:
+                    round_id = max(1, latest_round_id - i)
+                    round_data = await self.w3.eth.call_async(
+                        contract.functions.getRoundData(round_id).build_transaction(
+                            {
+                                "from": self.w3.eth.default_account
+                                or "0x0000000000000000000000000000000000000000"
+                            }
+                        )
+                    )
+
+                    # 解析数据
+                    # Chainlink价格通常有8位小数
+                    price = round_data[1] / 10**8
+                    timestamp = datetime.fromtimestamp(round_data[3])
+
+                    timestamps.append(timestamp)
+                    prices.append(price)
+                except Exception as e:
+                    logger.warning(f"获取{asset}轮次{round_id}数据失败: {e}")
+                    continue
+
+            if not timestamps:
+                logger.warning(f"未能获取{asset}的链上历史数据")
+                return None
+
+            # 创建DataFrame
             df = pd.DataFrame(
                 {
-                    "timestamp": dates,
+                    "timestamp": timestamps,
                     "price": prices,
-                    "volume": volumes,
-                    "market_cap": [0.0] * 30,  # 链上数据通常不提供市值
+                    "volume": [None] * len(timestamps),  # 链上数据没有交易量
+                    "market_cap": [None] * len(timestamps),  # 链上数据没有市值
                 }
             )
-            df["source"] = "onchain"
-            return df
+            df["source"] = "chainlink"
 
+            # 按时间排序
+            df = df.sort_values("timestamp")
+
+            return df
         except Exception as e:
-            logger.error(f"获取链上价格数据时出错: {e}")
+            logger.error(f"从链上获取{asset}数据失败: {e}")
             return None
 
     def _get_demo_historical_data(self, asset: str) -> pd.DataFrame:

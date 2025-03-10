@@ -58,7 +58,7 @@ export function ConnectButton() {
           }}
           className="flex items-center gap-2 px-4 py-2 rounded-full bg-card border border-border shadow-sm hover:shadow-md transition-all group"
         >
-          <div className="w-2 h-2 rounded-full bg-success animate-pulse"></div>
+          <span className="w-2 h-2 rounded-full bg-success animate-pulse"></span>
           <span className="font-medium group-hover:text-primary transition-colors">{`${address.slice(0, 6)}...${address.slice(-4)}`}</span>
           <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isDropdownOpen ? "rotate-180" : ""}`} />
         </button>
