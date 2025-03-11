@@ -29,31 +29,6 @@ export interface Portfolio {
       volatility_30d: number;
     };
   };
-  ai_predictions: {
-    [key: string]: {
-      trend: string;
-      trend_strength: string;
-      risk_level: string;
-      predicted_price_range: {
-        "24h": [number, number];
-        "7d": [number, number];
-      };
-      technical_analysis: {
-        ma_trend: string;
-        macd_signal: string;
-        bollinger_signal: string;
-        volume_analysis: string;
-      };
-      recommendations: string[];
-      trading_signals: string[];
-      key_levels: {
-        support: number[];
-        resistance: number[];
-        stop_loss: number;
-        take_profit: number[];
-      };
-    };
-  };
 }
 
 export interface MarketData {
@@ -72,23 +47,28 @@ export interface Protocol {
 }
 
 export interface MarketPrediction {
-  asset: string;
-  current_price: number;
-  predicted_price: number;
   trend: string;
+  trend_strength: string;
   risk_level: string;
-  volatility: number;
+  predicted_price_range: {
+    "24h": [number, number];
+    "7d": [number, number];
+  };
+  technical_analysis: {
+    ma_trend: string;
+    macd_signal: string;
+    bollinger_signal: string;
+    volume_analysis: string;
+  };
   recommendations: string[];
-  signals: string[];
-  key_price_levels: {
+  trading_signals: string[];
+  key_levels?: {
     support: number[];
     resistance: number[];
+    stop_loss?: number;
+    take_profit?: number[];
   };
-  alerts: any[];
-  details?: {
-    rsi?: number;
-    [key: string]: any;
-  };
+  alerts?: Array<{ message: string }>;
 }
 
 export interface ProtocolRisk {
@@ -383,18 +363,19 @@ class ApiService {
     try {
       // 使用predict/market端点获取市场分析数据
       const prediction = await this.predictMarket(asset);
+      const marketData = await this.getMarketData(asset);
 
-      // 将预测数据转换为市场分析格式
+      // 将预测数据和市场数据转换为市场分析格式
       return {
-        asset: prediction.asset,
-        current_price: prediction.current_price,
-        predicted_price: prediction.predicted_price,
-        price_change_prediction: ((prediction.predicted_price / prediction.current_price) - 1) * 100,
-        volatility: prediction.volatility || 0,
-        rsi: prediction.details?.rsi || 50, // 默认值
+        asset,
+        current_price: marketData.price,
+        predicted_price: prediction.predicted_price_range["24h"][1], // 使用24小时预测区间的上限作为预测价格
+        price_change_prediction: ((prediction.predicted_price_range["24h"][1] / marketData.price) - 1) * 100,
+        volatility: marketData.price_change_24h,
+        rsi: 50, // 默认值，因为新接口不再提供RSI
         trend: prediction.trend,
         risk_level: prediction.risk_level,
-        signals: prediction.signals || []
+        signals: prediction.trading_signals
       };
     } catch (error) {
       console.error('获取市场分析数据失败:', error);

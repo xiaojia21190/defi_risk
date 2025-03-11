@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
-import { MarketPrediction } from "../services/api";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 import { Loader2, TrendingUp, TrendingDown, AlertTriangle, Info } from "lucide-react";
+import type { MarketPrediction } from "../services/api";
 
 interface MarketAnalysisProps {
   asset: string;
@@ -15,35 +15,12 @@ interface MarketAnalysisProps {
     price_change_24h: number;
     volatility_30d: number;
   };
-  aiPrediction?: {
-    trend: string;
-    trend_strength: string;
-    risk_level: string;
-    predicted_price_range: {
-      "24h": [number, number];
-      "7d": [number, number];
-    };
-    technical_analysis: {
-      ma_trend: string;
-      macd_signal: string;
-      bollinger_signal: string;
-      volume_analysis: string;
-    };
-    recommendations: string[];
-    trading_signals: string[];
-    key_levels?: {
-      support: number[];
-      resistance: number[];
-      stop_loss?: number;
-      take_profit?: number[];
-    };
-  };
 }
 
-const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ asset, prediction, marketAnalysis, aiPrediction }) => {
+const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ asset, prediction, marketAnalysis }) => {
   const [timeFrame, setTimeFrame] = useState<"24h" | "7d">("24h");
 
-  if (!marketAnalysis || !aiPrediction) {
+  if (!marketAnalysis || !prediction) {
     return (
       <div className="text-center py-8">
         <div className="w-12 h-12 rounded-full bg-muted mx-auto mb-4 flex items-center justify-center">
@@ -103,7 +80,7 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ asset, prediction, mark
   // 生成模拟价格图表数据
   const generateChartData = () => {
     const currentPrice = marketAnalysis.current_price;
-    const predictedRange = aiPrediction.predicted_price_range[timeFrame];
+    const predictedRange = prediction.predicted_price_range[timeFrame];
     const midPoint = (predictedRange[0] + predictedRange[1]) / 2;
 
     // 生成7天或24小时的数据点
@@ -161,7 +138,7 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ asset, prediction, mark
         <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
           <h4 className="text-sm font-medium text-muted mb-2">30天波动率</h4>
           <p className="text-2xl font-semibold">{marketAnalysis.volatility_30d.toFixed(2)}%</p>
-          <span className={`text-xs px-2 py-0.5 rounded-full ${getRiskColor(aiPrediction.risk_level)}`}>{aiPrediction.risk_level}风险</span>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${getRiskColor(prediction.risk_level)}`}>{prediction.risk_level}风险</span>
         </div>
       </div>
 
@@ -195,23 +172,23 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ asset, prediction, mark
             </AreaChart>
           </ResponsiveContainer>
         </div>
-        {aiPrediction.key_levels && (
+        {prediction.key_levels && (
           <div className="mt-4 space-y-3">
             <div className="flex flex-wrap gap-3">
-              {aiPrediction.key_levels.support.length > 0 && (
+              {prediction.key_levels.support.length > 0 && (
                 <div className="text-sm">
                   <span className="text-muted mr-2">支撑位:</span>
-                  {aiPrediction.key_levels.support.map((level, i) => (
+                  {prediction.key_levels.support.map((level: number, i: number) => (
                     <span key={i} className="px-2 py-1 bg-success/10 text-success rounded-lg mr-2">
                       ${level.toFixed(2)}
                     </span>
                   ))}
                 </div>
               )}
-              {aiPrediction.key_levels.resistance.length > 0 && (
+              {prediction.key_levels.resistance.length > 0 && (
                 <div className="text-sm">
                   <span className="text-muted mr-2">阻力位:</span>
-                  {aiPrediction.key_levels.resistance.map((level, i) => (
+                  {prediction.key_levels.resistance.map((level: number, i: number) => (
                     <span key={i} className="px-2 py-1 bg-destructive/10 text-destructive rounded-lg mr-2">
                       ${level.toFixed(2)}
                     </span>
@@ -220,18 +197,16 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ asset, prediction, mark
               )}
             </div>
             <div className="flex flex-wrap gap-3">
-              {aiPrediction.key_levels.stop_loss && (
+              {prediction.key_levels.stop_loss && (
                 <div className="text-sm">
                   <span className="text-muted mr-2">建议止损:</span>
-                  <span className="px-2 py-1 bg-destructive/10 text-destructive rounded-lg">
-                    ${aiPrediction.key_levels.stop_loss.toFixed(2)}
-                  </span>
+                  <span className="px-2 py-1 bg-destructive/10 text-destructive rounded-lg">${prediction.key_levels.stop_loss.toFixed(2)}</span>
                 </div>
               )}
-              {aiPrediction.key_levels.take_profit && aiPrediction.key_levels.take_profit.length > 0 && (
+              {prediction.key_levels.take_profit && prediction.key_levels.take_profit.length > 0 && (
                 <div className="text-sm">
                   <span className="text-muted mr-2">建议止盈:</span>
-                  {aiPrediction.key_levels.take_profit.map((level, i) => (
+                  {prediction.key_levels.take_profit.map((level: number, i: number) => (
                     <span key={i} className="px-2 py-1 bg-success/10 text-success rounded-lg mr-2">
                       ${level.toFixed(2)}
                     </span>
@@ -252,32 +227,28 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ asset, prediction, mark
               <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
                 <div className="flex justify-between items-center mb-2">
                   <h4 className="font-medium">市场趋势</h4>
-                  <span className={`px-2 py-1 text-sm rounded-full flex items-center gap-1 ${getTrendColor(aiPrediction.trend)} bg-card`}>
-                    {getTrendIcon(aiPrediction.trend)}
-                    {aiPrediction.trend_strength} {aiPrediction.trend}
+                  <span className={`px-2 py-1 text-sm rounded-full flex items-center gap-1 ${getTrendColor(prediction.trend)} bg-card`}>
+                    {getTrendIcon(prediction.trend)}
+                    {prediction.trend_strength} {prediction.trend}
                   </span>
                 </div>
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted">24h预测区间</span>
                     <div>
-                      <span className={`px-2 py-1 rounded-lg ${getTrendColor(aiPrediction.trend)}`}>
-                        ${aiPrediction.predicted_price_range["24h"][0].toFixed(2)} - ${aiPrediction.predicted_price_range["24h"][1].toFixed(2)}
+                      <span className={`px-2 py-1 rounded-lg ${getTrendColor(prediction.trend)}`}>
+                        ${prediction.predicted_price_range["24h"][0].toFixed(2)} - ${prediction.predicted_price_range["24h"][1].toFixed(2)}
                       </span>
-                      <span className="text-xs text-muted ml-2">
-                        ({((aiPrediction.predicted_price_range["24h"][1] / marketAnalysis.current_price - 1) * 100).toFixed(2)}%)
-                      </span>
+                      <span className="text-xs text-muted ml-2">({((prediction.predicted_price_range["24h"][1] / marketAnalysis.current_price - 1) * 100).toFixed(2)}%)</span>
                     </div>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted">7d预测区间</span>
                     <div>
-                      <span className={`px-2 py-1 rounded-lg ${getTrendColor(aiPrediction.trend)}`}>
-                        ${aiPrediction.predicted_price_range["7d"][0].toFixed(2)} - ${aiPrediction.predicted_price_range["7d"][1].toFixed(2)}
+                      <span className={`px-2 py-1 rounded-lg ${getTrendColor(prediction.trend)}`}>
+                        ${prediction.predicted_price_range["7d"][0].toFixed(2)} - ${prediction.predicted_price_range["7d"][1].toFixed(2)}
                       </span>
-                      <span className="text-xs text-muted ml-2">
-                        ({((aiPrediction.predicted_price_range["7d"][1] / marketAnalysis.current_price - 1) * 100).toFixed(2)}%)
-                      </span>
+                      <span className="text-xs text-muted ml-2">({((prediction.predicted_price_range["7d"][1] / marketAnalysis.current_price - 1) * 100).toFixed(2)}%)</span>
                     </div>
                   </div>
                 </div>
@@ -289,28 +260,24 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ asset, prediction, mark
                   <div className="flex justify-between items-center">
                     <span className="text-muted">MA趋势</span>
                     <div className="flex items-center gap-2">
-                      <span className={getTrendColor(aiPrediction.technical_analysis.ma_trend)}>{aiPrediction.technical_analysis.ma_trend}</span>
-                      {getTrendIcon(aiPrediction.technical_analysis.ma_trend)}
+                      <span className={getTrendColor(prediction.technical_analysis.ma_trend)}>{prediction.technical_analysis.ma_trend}</span>
+                      {getTrendIcon(prediction.technical_analysis.ma_trend)}
                     </div>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-muted">MACD信号</span>
                     <div className="flex items-center gap-2">
-                      <span className={getTrendColor(aiPrediction.technical_analysis.macd_signal)}>{aiPrediction.technical_analysis.macd_signal}</span>
-                      {getTrendIcon(aiPrediction.technical_analysis.macd_signal)}
+                      <span className={getTrendColor(prediction.technical_analysis.macd_signal)}>{prediction.technical_analysis.macd_signal}</span>
+                      {getTrendIcon(prediction.technical_analysis.macd_signal)}
                     </div>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-muted">布林带位置</span>
-                    <span className={`px-2 py-1 rounded-lg ${getRiskColor(aiPrediction.risk_level)}`}>
-                      {aiPrediction.technical_analysis.bollinger_signal}
-                    </span>
+                    <span className={`px-2 py-1 rounded-lg ${getRiskColor(prediction.risk_level)}`}>{prediction.technical_analysis.bollinger_signal}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-muted">成交量分析</span>
-                    <span className={`px-2 py-1 rounded-lg ${getTrendColor(aiPrediction.technical_analysis.volume_analysis)}`}>
-                      {aiPrediction.technical_analysis.volume_analysis}
-                    </span>
+                    <span className={`px-2 py-1 rounded-lg ${getTrendColor(prediction.technical_analysis.volume_analysis)}`}>{prediction.technical_analysis.volume_analysis}</span>
                   </div>
                 </div>
               </div>
@@ -320,7 +287,7 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ asset, prediction, mark
           <div>
             <h4 className="font-medium mb-3">交易信号</h4>
             <div className="space-y-2">
-              {aiPrediction.trading_signals.map((signal, index) => (
+              {prediction.trading_signals.map((signal: string, index: number) => (
                 <div key={index} className="p-3 rounded-lg bg-muted text-sm flex items-start gap-2">
                   <div className="mt-0.5">
                     {signal.toLowerCase().includes("买入") || signal.toLowerCase().includes("buy") ? (
@@ -341,7 +308,7 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ asset, prediction, mark
         <div>
           <h3 className="text-lg font-semibold mb-4">投资建议</h3>
           <div className="space-y-4">
-            {aiPrediction.recommendations.map((recommendation, index) => (
+            {prediction.recommendations.map((recommendation: string, index: number) => (
               <div key={index} className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all flex items-start gap-3">
                 <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">{index + 1}</div>
                 <p className="text-sm">{recommendation}</p>
@@ -353,7 +320,7 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ asset, prediction, mark
             <div className="mt-6">
               <h4 className="font-medium mb-3">市场警报</h4>
               <div className="space-y-3">
-                {prediction.alerts.map((alert, index) => (
+                {prediction.alerts.map((alert: { message: string }, index: number) => (
                   <div key={index} className="p-3 rounded-lg bg-destructive/10 text-sm flex items-start gap-2">
                     <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
                     <span>{alert.message}</span>

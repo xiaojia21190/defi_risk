@@ -55,7 +55,6 @@ class PortfolioAnalysis(BaseModel):
     risk_level: str
     recommendations: List[str]
     market_analysis: Dict[str, Any]
-    ai_predictions: Dict[str, Any]
 
 
 class MarketData(BaseModel):
@@ -106,38 +105,6 @@ async def analyze_defi_deposits(request: PortfolioRequest):
         # 获取市场分析数据
         market_analysis = await get_market_analysis(positions)
 
-        # 获取AI预测数据
-        ai_predictions = {}
-        for pos in positions:
-            asset = pos.asset.split("/")[0]  # 处理LP token的情况
-            if asset == "USDT":
-                continue
-            historical_data = await blockchain_service.get_asset_historical_data(asset)
-            if not historical_data.empty:
-                prediction = ai_predictor.analyze_market_trend(historical_data, asset)
-                # 确保预测数据包含前端需要的字段
-                if (
-                    "predicted_price_range" in prediction
-                    and "24h" in prediction["predicted_price_range"]
-                ):
-                    prediction["predicted_price"] = (
-                        prediction["predicted_price_range"]["24h"][0]
-                        + prediction["predicted_price_range"]["24h"][1]
-                    ) / 2
-
-                # 确保key_price_levels结构正确
-                if "key_levels" in prediction and "key_price_levels" not in prediction:
-                    prediction["key_price_levels"] = {
-                        "support": prediction["key_levels"]["support"],
-                        "resistance": prediction["key_levels"]["resistance"],
-                    }
-
-                # 确保signals字段存在
-                if "trading_signals" in prediction and "signals" not in prediction:
-                    prediction["signals"] = prediction["trading_signals"]
-
-                ai_predictions[asset] = prediction
-
         # 转换为响应格式
         defi_positions = [
             DefiPosition(
@@ -154,10 +121,9 @@ async def analyze_defi_deposits(request: PortfolioRequest):
         return PortfolioAnalysis(
             total_value=total_value,
             positions=defi_positions,
-            risk_level=risk_assessment["risk_level"],
-            recommendations=risk_assessment["recommendations"],
+            risk_level=risk_assessment.risk_level,
+            recommendations=risk_assessment.recommendations,
             market_analysis=market_analysis,
-            ai_predictions=ai_predictions,
         )
 
     except Exception as e:
@@ -230,16 +196,15 @@ async def predict_market(request: MarketPredictionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# @app.get("/predict/protocol/{protocol_name}")
-# async def predict_protocol_risk(protocol_name: str):
-#     """分析DeFi协议风险"""
-#     try:
-#         protocol_data = {"name": protocol_name}
-#         risk_analysis = ai_predictor.analyze_defi_protocol_risk(protocol_name)
-#         return risk_analysis
-#     except Exception as e:
-#         logger.error(f"分析协议风险时出错: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
+@app.get("/predict/protocol/{protocol_name}")
+async def predict_protocol_risk(protocol_name: str):
+    """分析DeFi协议风险"""
+    try:
+        risk_analysis = ai_predictor.analyze_defi_protocol_risk(protocol_name)
+        return risk_analysis
+    except Exception as e:
+        logger.error(f"分析协议风险时出错: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/protocols")
@@ -248,13 +213,13 @@ async def get_supported_protocols():
     return {
         "protocols": [
             {
-                "name": "Aave V3",
+                "name": "Aave-V3",
                 "description": "去中心化借贷协议",
                 "supported_assets": ["ETH", "USDC", "DAI", "BTC"],
                 "features": ["存款", "借贷", "抵押"],
             },
             {
-                "name": "Compound V3",
+                "name": "Compound-V3",
                 "description": "去中心化借贷协议",
                 "supported_assets": ["ETH", "USDC", "DAI"],
                 "features": ["存款", "借贷"],
@@ -266,7 +231,7 @@ async def get_supported_protocols():
                 "features": ["流动性挖矿", "稳定币交换"],
             },
             {
-                "name": "Uniswap V3",
+                "name": "Uniswap-V3",
                 "description": "去中心化交易所",
                 "supported_assets": ["ETH", "USDC", "BTC", "DAI"],
                 "features": ["流动性提供", "交易"],
@@ -284,7 +249,7 @@ async def get_supported_protocols():
                 "features": ["流动性挖矿", "交易"],
             },
             {
-                "name": "Yearn Finance",
+                "name": "Yearn-Finance",
                 "description": "收益聚合器",
                 "supported_assets": ["ETH", "USDC", "DAI", "BTC"],
                 "features": ["收益优化", "自动复投"],
@@ -387,26 +352,27 @@ if __name__ == "__main__":
     # 测试数据
     DEMO_ADDRESS = "0xAbCdEf123456789AbCdEf123456789AbCdEf1234"
     TEST_ASSETS = ["ETH", "USDC", "USDT", "BTC"]
-    TEST_PROTOCOLS = ["Aave V3", "Compound V3", "Curve", "Uniswap V2"]
+    TEST_PROTOCOLS = ["Aave-V3", "Compound-V3", "Curve", "Uniswap-V2"]
 
     async def test_api_endpoints():
         """测试主要API端点"""
         try:
             print("\n=== 测试API端点 ===\n")
 
-            for asset in TEST_ASSETS:
-                _get_24h_data = await blockchain_service._get_24h_data(asset)
-                print(f"24h data for {asset}: {_get_24h_data}")
-                price = await blockchain_service.get_asset_price(asset)
-                print(f"Price for {asset}: {price}")
+            # for asset in TEST_ASSETS:
+            #     _get_24h_data = await blockchain_service._get_24h_data(asset)
+            #     print(f"24h data for {asset}: {_get_24h_data}")
+            #     price = await blockchain_service.get_asset_price(asset)
+            #     print(f"Price for {asset}: {price}")
 
-            # # 1. 测试分析DeFi存款
-            # print("1. 测试分析DeFi存款")
-            # portfolio_request = PortfolioRequest(wallet_address=DEMO_ADDRESS)
-            # portfolio_analysis = await analyze_defi_deposits(portfolio_request)
-            # print(f"总存款价值: ${portfolio_analysis.total_value:,.2f}")
-            # print(f"风险等级: {portfolio_analysis.risk_level}")
-            # print("-" * 50)
+            # 1. 测试分析DeFi存款
+            print("1. 测试分析DeFi存款")
+            portfolio_request = PortfolioRequest(wallet_address=DEMO_ADDRESS)
+            portfolio_analysis = await analyze_defi_deposits(portfolio_request)
+            print("portfolio_analysis", portfolio_analysis)
+            print(f"总存款价值: ${portfolio_analysis.total_value:,.2f}")
+            print(f"风险等级: {portfolio_analysis.risk_level}")
+            print("-" * 50)
 
             # # 2. 测试市场预测
             # print("\n2. 测试市场预测")
@@ -424,9 +390,10 @@ if __name__ == "__main__":
             # for protocol in TEST_PROTOCOLS[:2]:  # 只测试前两个协议
             #     risk_analysis = await predict_protocol_risk(protocol)
             #     print(f"\n{protocol} 风险分析:")
-            #     print(f"风险评分: {risk_analysis['risk_score']}")
-            #     print(f"风险等级: {risk_analysis['risk_level']}")
-            #     print(f"安全评分: {risk_analysis['security_score']}")
+            #     print(
+            #         "risk_analysis.ai_risk_analysis",
+            #         risk_analysis["ai_risk_analysis"]["risk_score"],
+            #     )
             # print("-" * 50)
 
             # # 4. 测试市场数据

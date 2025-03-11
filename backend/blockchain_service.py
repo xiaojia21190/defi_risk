@@ -933,13 +933,13 @@ class BlockchainService:
 
             # 更真实的APY范围（基于当前市场情况）
             apy_ranges = {
-                "Aave V3": {
+                "Aave-V3": {
                     "ETH": (0.01, 0.025),
                     "USDC": (0.03, 0.045),
                     "USDT": (0.025, 0.04),
                     "BTC": (0.01, 0.02),
                 },
-                "Compound V3": {
+                "Compound-V3": {
                     "ETH": (0.015, 0.03),
                     "USDC": (0.035, 0.05),
                     "USDT": (0.03, 0.045),
@@ -949,7 +949,7 @@ class BlockchainService:
                     "USDT": (0.04, 0.06),
                     "USDC": (0.04, 0.06),
                 },
-                "Uniswap V2": {
+                "Uniswap-V2": {
                     "ETH": (0.05, 0.12),
                     "BTC": (0.04, 0.1),
                     "LINK": (0.06, 0.15),
@@ -959,8 +959,8 @@ class BlockchainService:
 
             # 更真实的杠杆率限制
             max_leverage = {
-                "Aave V3": {"ETH": 2.5, "USDC": 1.1, "USDT": 1.1, "BTC": 2.0},
-                "Compound V3": {"ETH": 2.0, "USDC": 1.0, "USDT": 1.0, "BTC": 1.8},
+                "Aave-V3": {"ETH": 2.5, "USDC": 1.1, "USDT": 1.1, "BTC": 2.0},
+                "Compound-V3": {"ETH": 2.0, "USDC": 1.0, "USDT": 1.0, "BTC": 1.8},
             }
 
             # 设置总投资组合价值（美元）
@@ -988,11 +988,11 @@ class BlockchainService:
             ) / current_prices["ETH"]
             positions.append(
                 ProtocolPosition(
-                    protocol="Aave V3",
+                    protocol="Aave-V3",
                     asset="ETH",
                     amount=round(eth_aave_amount, 4),
-                    leverage=random.uniform(1.0, max_leverage["Aave V3"]["ETH"]),
-                    apy=random.uniform(*apy_ranges["Aave V3"]["ETH"]),
+                    leverage=random.uniform(1.0, max_leverage["Aave-V3"]["ETH"]),
+                    apy=random.uniform(*apy_ranges["Aave-V3"]["ETH"]),
                 )
             )
 
@@ -1002,10 +1002,10 @@ class BlockchainService:
             ) / current_prices["ETH"]
             positions.append(
                 ProtocolPosition(
-                    protocol="Uniswap V2",
+                    protocol="Uniswap-V2",
                     asset="ETH/USDC",  # LP代币
                     amount=round(eth_uni_amount, 4),
-                    apy=random.uniform(*apy_ranges["Uniswap V2"]["ETH"]),
+                    apy=random.uniform(*apy_ranges["Uniswap-V2"]["ETH"]),
                 )
             )
 
@@ -1015,11 +1015,11 @@ class BlockchainService:
             ) / current_prices["USDC"]
             positions.append(
                 ProtocolPosition(
-                    protocol="Compound V3",
+                    protocol="Compound-V3",
                     asset="USDC",
                     amount=round(usdc_amount, 2),
                     leverage=1.0,
-                    apy=random.uniform(*apy_ranges["Compound V3"]["USDC"]),
+                    apy=random.uniform(*apy_ranges["Compound-V3"]["USDC"]),
                 )
             )
 
@@ -1042,11 +1042,11 @@ class BlockchainService:
             ) / current_prices["BTC"]
             positions.append(
                 ProtocolPosition(
-                    protocol="Aave V3",
+                    protocol="Aave-V3",
                     asset="BTC",
                     amount=round(wbtc_amount, 6),
-                    leverage=random.uniform(1.0, max_leverage["Aave V3"]["BTC"]),
-                    apy=random.uniform(*apy_ranges["Aave V3"]["BTC"]),
+                    leverage=random.uniform(1.0, max_leverage["Aave-V3"]["BTC"]),
+                    apy=random.uniform(*apy_ranges["Aave-V3"]["BTC"]),
                 )
             )
 
@@ -1058,10 +1058,14 @@ class BlockchainService:
             # 提供一个备用的固定数据集
             return [
                 ProtocolPosition(
-                    protocol="Aave V3", asset="ETH", amount=1.2, leverage=1.5, apy=0.02
+                    protocol="Aave-V3",
+                    asset="ETH",
+                    amount=1.2,
+                    leverage=1.5,
+                    apy=0.02,
                 ),
                 ProtocolPosition(
-                    protocol="Compound V3",
+                    protocol="Compound-V3",
                     asset="USDC",
                     amount=12000,
                     leverage=1.0,
@@ -1078,7 +1082,7 @@ class BlockchainService:
                     apy=0.015,
                 ),
                 ProtocolPosition(
-                    protocol="Uniswap V2", asset="ETH/USDC", amount=0.8, apy=0.08
+                    protocol="Uniswap-V2", asset="ETH/USDC", amount=0.8, apy=0.08
                 ),
             ]
 

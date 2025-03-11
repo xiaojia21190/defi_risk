@@ -1,15 +1,16 @@
 import httpx
 import numpy as np
 import pandas as pd
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Union
 from datetime import datetime, timedelta
 import os
-import requests
 from openai import OpenAI
 import logging
 import json
 from functools import lru_cache
 from cachetools import TTLCache
+from dfllama import DefiLlamaClient, Coin
+
 
 # 设置日志记录器
 logger = logging.getLogger("defi_risk.ai_predictor")
@@ -19,6 +20,9 @@ proxies = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
 
 # 在模块级别初始化缓存
 analysis_cache = TTLCache(maxsize=100, ttl=900)  # 15分钟过期时间
+
+# 在模块级别初始化 DeFiLlama 客户端
+llama = DefiLlamaClient()
 
 # 在模块级别初始化OpenAI客户端
 try:
@@ -42,7 +46,6 @@ except Exception as e:
 
 class AiPredictor:
     def __init__(self):
-        # 直接使用模块级别的client
         self.client = client
 
     def _prepare_market_data(
@@ -340,7 +343,7 @@ class AiPredictor:
                     messages=[
                         {
                             "role": "system",
-                            "content": "你是一个专业的加密货币市场分析师，擅长技术分析和风险评估。",
+                            "content": "你是一个专业的DeFi风险分析师，擅长评估协议安全性、流动性和去中心化程度。请基于详细的数据指标和深度分析结果，提供全面的风险评估。重点关注技术指标和多维度风险因素。",
                         },
                         {"role": "user", "content": prompt},
                     ],
@@ -449,471 +452,726 @@ class AiPredictor:
             logger.error(f"计算RSI时出错: {e}")
             return 50  # 返回默认中性RSI
 
-    def _fetch_security_data(self, protocol_name: str) -> Dict:
-        """从安全审计API获取协议安全数据
-
-        尝试从安全审计API获取协议的安全评分、审计历史和漏洞记录
-        """
-        try:
-            # 协议名称到安全API标识符的映射
-            security_identifiers = {
-                "Aave V3": "aave-v3",
-                "Compound V3": "compound-v3",
-                "Curve": "curve",
-                "Uniswap V2": "uniswap-v2",
-                # 可以添加更多协议
-            }
-
-            protocol_id = security_identifiers.get(
-                protocol_name, protocol_name.lower().replace(" ", "-")
-            )
-
-            # 尝试从CertiK API获取数据
-            certik_data = self._fetch_certik_data(protocol_id)
-            if certik_data:
-                logger.info(f"成功从CertiK获取{protocol_name}安全数据")
-                return certik_data
-
-            # 尝试从DeFiSafety获取数据
-            defi_safety_data = self._fetch_defi_safety_data(protocol_id)
-            if defi_safety_data:
-                logger.info(f"成功从DeFiSafety获取{protocol_name}安全数据")
-                return defi_safety_data
-
-            # 尝试从Immunefi获取数据
-            immunefi_data = self._fetch_immunefi_data(protocol_id)
-            if immunefi_data:
-                logger.info(f"成功从Immunefi获取{protocol_name}安全数据")
-                return immunefi_data
-
-            # 如果所有API调用失败，使用模拟数据
-            # 模拟数据
-            security_data = {
-                "aave-v3": {
-                    "audit_score": 95,
-                    "last_audit_date": "2023-06-15",
-                    "audit_firms": ["CertiK", "OpenZeppelin", "Trail of Bits"],
-                    "vulnerabilities": [],
-                    "security_incidents": [],
-                },
-                "compound-v3": {
-                    "audit_score": 92,
-                    "last_audit_date": "2023-04-20",
-                    "audit_firms": ["Trail of Bits", "OpenZeppelin"],
-                    "vulnerabilities": [
-                        "Medium severity issue in liquidation mechanism (fixed)"
-                    ],
-                    "security_incidents": [],
-                },
-                "curve": {
-                    "audit_score": 90,
-                    "last_audit_date": "2023-02-10",
-                    "audit_firms": ["CertiK", "Quantstamp"],
-                    "vulnerabilities": ["Low severity reentrancy issue (fixed)"],
-                    "security_incidents": [],
-                },
-                "uniswap-v2": {
-                    "audit_score": 94,
-                    "last_audit_date": "2022-11-05",
-                    "audit_firms": ["Trail of Bits", "Consensys Diligence"],
-                    "vulnerabilities": [],
-                    "security_incidents": [],
-                },
-            }
-
-            if protocol_id in security_data:
-                logger.info(f"使用模拟数据获取{protocol_name}安全数据")
-                return security_data[protocol_id]
-            else:
-                logger.warning(f"未找到{protocol_name}的安全数据")
-                return {
-                    "audit_score": 80,
-                    "last_audit_date": "未知",
-                    "audit_firms": ["未知"],
-                    "vulnerabilities": [],
-                    "security_incidents": [],
-                }
-
-        except Exception as e:
-            logger.error(f"获取安全数据时出错: {e}")
-            return {
-                "audit_score": 80,
-                "last_audit_date": "未知",
-                "audit_firms": ["未知"],
-                "vulnerabilities": [],
-                "security_incidents": [],
-            }
-
-    def _fetch_certik_data(self, protocol_id: str) -> Optional[Dict]:
-        """从CertiK API获取安全数据"""
-        try:
-            # 实际实现中，应该使用真实的API端点和密钥
-            certik_api_key = os.getenv("CERTIK_API_KEY")
-            if not certik_api_key:
-                logger.warning("未找到CERTIK_API_KEY环境变量")
-                return None
-
-            certik_url = f"https://api.certik.com/projects/{protocol_id}"
-            headers = {"Authorization": f"Bearer {certik_api_key}"}
-
-            response = requests.get(
-                certik_url, headers=headers, proxies=proxies, timeout=10
-            )
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    "audit_score": data.get("security_score", 80),
-                    "last_audit_date": data.get("last_audit_date", "未知"),
-                    "audit_firms": data.get("auditors", ["CertiK"]),
-                    "vulnerabilities": data.get("vulnerabilities", []),
-                    "security_incidents": data.get("incidents", []),
-                }
-            else:
-                logger.warning(f"CertiK API返回状态码: {response.status_code}")
-                return None
-        except Exception as e:
-            logger.warning(f"从CertiK获取数据失败: {e}")
-            return None
-
-    def _fetch_defi_safety_data(self, protocol_id: str) -> Optional[Dict]:
-        """从DeFiSafety获取安全数据"""
-        try:
-            defi_safety_url = f"https://api.defisafety.com/v1/projects/{protocol_id}"
-            response = requests.get(defi_safety_url, proxies=proxies, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    "audit_score": data.get("total_score", 80),
-                    "last_audit_date": data.get("last_reviewed", "未知"),
-                    "audit_firms": data.get("auditors", ["DeFiSafety"]),
-                    "vulnerabilities": [],
-                    "security_incidents": [],
-                }
-            else:
-                logger.warning(f"DeFiSafety API返回状态码: {response.status_code}")
-                return None
-        except Exception as e:
-            logger.warning(f"从DeFiSafety获取数据失败: {e}")
-            return None
-
-    def _fetch_immunefi_data(self, protocol_id: str) -> Optional[Dict]:
-        """从Immunefi获取安全数据"""
-        try:
-            # 注意：Immunefi可能没有公开API，这里仅作为示例
-            immunefi_api_key = os.getenv("IMMUNEFI_API_KEY")
-            if not immunefi_api_key:
-                logger.warning("未找到IMMUNEFI_API_KEY环境变量")
-                return None
-
-            immunefi_url = f"https://api.immunefi.com/v1/projects/{protocol_id}"
-            headers = {"Authorization": f"Bearer {immunefi_api_key}"}
-
-            response = requests.get(
-                immunefi_url, headers=headers, proxies=proxies, timeout=10
-            )
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    "audit_score": data.get("security_score", 80),
-                    "last_audit_date": data.get("last_audit", "未知"),
-                    "audit_firms": data.get("auditors", ["未知"]),
-                    "vulnerabilities": data.get("disclosed_vulnerabilities", []),
-                    "security_incidents": data.get("incidents", []),
-                }
-            else:
-                logger.warning(f"Immunefi API返回状态码: {response.status_code}")
-                return None
-        except Exception as e:
-            logger.warning(f"从Immunefi获取数据失败: {e}")
-            return None
-
-    def _fetch_protocol_data(self, protocol_name: str) -> Dict:
-        """从链上或API获取协议数据
-
-        使用DeFi数据API（如DefiLlama、DeFi Pulse等）获取实时协议数据
-        """
-        try:
-            # 创建一个基础URL字典，用于不同的API端点
-            api_endpoints = {
-                "defillama": "https://api.llama.fi/protocol/",
-                "defi_pulse": "https://data-api.defipulse.com/api/v1/defipulse/api/",
-                "dune": "https://api.dune.com/api/v1/query/",  # 需要API密钥
-            }
-
-            # 协议名称到API标识符的映射
-            protocol_identifiers = {
-                "Aave V3": "aave-v3",
-                "Compound V3": "compound-v3",
-                "Curve": "curve-dex",
-                "Uniswap V2": "uniswap-v2",
-                # 可以添加更多协议
-            }
-
-            # 获取协议标识符
-            protocol_id = protocol_identifiers.get(
-                protocol_name, protocol_name.lower().replace(" ", "-")
-            )
-
-            # 使用requests发起请求
-            # 首先尝试DefiLlama API获取TVL和基本数据
-            defillama_url = f"{api_endpoints['defillama']}{protocol_id}"
-            logger.info(f"正在从DefiLlama获取{protocol_name}数据: {defillama_url}")
-
-            try:
-                response = requests.get(defillama_url, timeout=10.0, proxies=proxies)
-                if response.status_code == 200:
-                    llama_data = response.json()
-
-                    # 提取相关数据
-                    tvl = llama_data.get("tvl", 0)
-                    daily_volume = (
-                        llama_data.get("volume24h", 0)
-                        if "volume24h" in llama_data
-                        else 0
-                    )
-
-                    # 获取安全数据
-                    security_data = self._fetch_security_data(protocol_name)
-
-                    # 构建协议数据
-                    protocol_data = {
-                        "tvl": tvl,
-                        "daily_volume": daily_volume,
-                        "audit_score": security_data["audit_score"],
-                        "decentralization_score": 80,  # 默认值，理想情况下应从治理API获取
-                        "insurance_coverage": False,  # 默认值，理想情况下应从保险协议API获取
-                        "hack_history": security_data["security_incidents"],
-                        "governance_token": llama_data.get("symbol", ""),
-                        "implementation": "unknown",  # 默认值，理想情况下应从链上数据获取
-                        "last_audit_date": security_data["last_audit_date"],
-                        "audit_firms": security_data["audit_firms"],
-                        "vulnerabilities": security_data["vulnerabilities"],
-                    }
-
-                    logger.info(f"成功获取{protocol_name}数据")
-                    return protocol_data
-                else:
-                    logger.warning(f"DefiLlama API返回状态码: {response.status_code}")
-                    # 如果API调用失败，返回默认数据
-                    return self._get_default_protocol_data(protocol_name)
-            except requests.exceptions.RequestException as e:
-                logger.error(f"请求DefiLlama API时出错: {e}")
-                return self._get_default_protocol_data(protocol_name)
-
-        except Exception as e:
-            logger.error(f"获取协议数据时出错: {e}")
-            return self._get_default_protocol_data(protocol_name)
-
-    def _get_default_protocol_data(self, protocol_name: str) -> Dict:
-        """当API调用失败时返回默认协议数据"""
-        default_data = {
-            "Aave V3": {
-                "tvl": 5_000_000_000,
-                "daily_volume": 100_000_000,
-                "audit_score": 95,
-                "decentralization_score": 85,
-                "insurance_coverage": True,
-                "hack_history": [],
-                "governance_token": "AAVE",
-                "implementation": "upgradeable proxy",
-                "last_audit_date": "2023-06-15",
-                "audit_firms": ["CertiK", "OpenZeppelin", "Trail of Bits"],
-                "vulnerabilities": [],
-            },
-            "Compound V3": {
-                "tvl": 3_000_000_000,
-                "daily_volume": 80_000_000,
-                "audit_score": 90,
-                "decentralization_score": 80,
-                "insurance_coverage": True,
-                "hack_history": [],
-                "governance_token": "COMP",
-                "implementation": "upgradeable proxy",
-                "last_audit_date": "2023-04-20",
-                "audit_firms": ["Trail of Bits", "OpenZeppelin"],
-                "vulnerabilities": [
-                    "Medium severity issue in liquidation mechanism (fixed)"
-                ],
-            },
-            "Curve": {
-                "tvl": 4_000_000_000,
-                "daily_volume": 200_000_000,
-                "audit_score": 88,
-                "decentralization_score": 90,
-                "insurance_coverage": False,
-                "hack_history": [],
-                "governance_token": "CRV",
-                "implementation": "immutable",
-                "last_audit_date": "2023-02-10",
-                "audit_firms": ["CertiK", "Quantstamp"],
-                "vulnerabilities": ["Low severity reentrancy issue (fixed)"],
-            },
-            "Uniswap V2": {
-                "tvl": 2_000_000_000,
-                "daily_volume": 150_000_000,
-                "audit_score": 92,
-                "decentralization_score": 95,
-                "insurance_coverage": False,
-                "hack_history": [],
-                "governance_token": "UNI",
-                "implementation": "immutable",
-                "last_audit_date": "2022-11-05",
-                "audit_firms": ["Trail of Bits", "Consensys Diligence"],
-                "vulnerabilities": [],
-            },
-        }
-
-        return default_data.get(
-            protocol_name,
-            {
-                "tvl": 1_000_000_000,
-                "daily_volume": 50_000_000,
-                "audit_score": 80,
-                "decentralization_score": 75,
-                "insurance_coverage": False,
-                "hack_history": [],
-                "governance_token": "Unknown",
-                "implementation": "unknown",
-                "last_audit_date": "未知",
-                "audit_firms": ["未知"],
-                "vulnerabilities": [],
-            },
-        )
-
-    def analyze_defi_protocol_risk(self, protocol_data: Dict) -> Dict:
+    def analyze_defi_protocol_risk(self, protocol_name: str) -> Dict:
         """分析DeFi协议风险"""
         try:
-            protocol_name = protocol_data.get("name", "")
-
-            # 从链上或API获取协议数据
-            protocol = self._fetch_protocol_data(protocol_name)
-
-            if not protocol:
+            # 获取DefiLlama数据
+            defillama_data = self._fetch_defillama_data(protocol_name)
+            if not defillama_data:
+                logger.warning(f"无法获取{protocol_name}的DefiLlama数据，使用默认数据")
                 return self._get_basic_protocol_risk_analysis(protocol_name)
 
-            # 构建风险分析提示
-            prompt = f"""
-分析以下DeFi协议的风险状况：
-
+            # 构建AI分析提示
+            # 将复杂的嵌套表达式拆分为多个部分
+            basic_data_section = f"""
 协议名称：{protocol_name}
-基础数据：
-- 总锁仓价值(TVL)：${protocol['tvl']:,}
-- 日交易量：${protocol['daily_volume']:,}
-- 审计评分：{protocol['audit_score']}/100
-- 去中心化评分：{protocol['decentralization_score']}/100
-- 保险覆盖：{'是' if protocol['insurance_coverage'] else '否'}
-- 历史安全事件：{len(protocol['hack_history'])}次
-- 治理代币：{protocol['governance_token']}
-- 实现方式：{protocol['implementation']}
-- 最近审计日期：{protocol['last_audit_date']}
-- 审计公司：{', '.join(protocol['audit_firms'])}
-- 已知漏洞：{len(protocol['vulnerabilities'])}个
 
-请提供以下JSON格式的风险分析结果：
-{
-    "risk_score": 0-100之间的综合风险评分,
+基础数据：
+- 当前TVL：${defillama_data['basic_data']['current_tvl']:,.2f}
+- 24小时TVL变化：{defillama_data['basic_data']['tvl_change_24h']:.2f}%
+- 市值/TVL比率：{defillama_data['basic_data']['mcap_tvl_ratio']:.2f}
+- 支持链数量：{defillama_data['basic_data']['chain_count']}
+- 审计次数：{defillama_data['basic_data']['audit_count']}"""
+
+            tvl_analysis_section = f"""
+TVL分析：
+- 7日增长率：{defillama_data['risk_metrics']['tvl_metrics']['tvl_growth_7d']:.2f}%
+- TVL波动率：{defillama_data['risk_metrics']['tvl_metrics']['tvl_volatility']:.4f}
+- 趋势方向：{defillama_data['risk_metrics']['tvl_metrics']['trend']}
+- TVL均值：${defillama_data['tvl_analysis']['summary_stats']['mean']:,.2f}
+- TVL标准差：${defillama_data['tvl_analysis']['summary_stats']['std']:,.2f}"""
+
+            technical_indicators_section = f"""
+技术指标：
+- MACD趋势：{defillama_data['tvl_analysis']['trend_analysis']['trend']}
+- 趋势强度：{defillama_data['tvl_analysis']['trend_analysis']['strength']}
+- RSI指标：{defillama_data['tvl_analysis']['trend_analysis']['rsi']:.2f}"""
+
+            chain_distribution_section = f"""
+链分布分析：
+- 最高链集中度：{defillama_data['risk_metrics']['chain_metrics']['max_chain_concentration']:.2f}%
+- 高风险链数量：{defillama_data['risk_metrics']['chain_metrics']['high_risk_chains']}
+- 多链分散度：{defillama_data['risk_metrics']['chain_metrics']['diversification_score']:.2f}"""
+
+            # 删除相关性部分，直接显示风险评分
+            risk_score_section = f"""
+综合风险评分：{defillama_data['risk_score']}/100"""
+
+            # 将各部分组合成完整的提示
+            prompt = f"""
+分析以下DeFi协议的风险状况，基于DefiLlama实时数据和深度分析结果：
+{basic_data_section}
+{tvl_analysis_section}
+{technical_indicators_section}
+{chain_distribution_section}
+{risk_score_section}
+
+请提供以下JSON格式的详细风险分析：
+{{
+    "risk_score": 0-100的综合风险评分,
     "risk_level": "LOW/MEDIUM/HIGH",
-    "security_score": 0-100的安全性评分,
-    "liquidity_score": 0-100的流动性评分,
-    "centralization_risk": "LOW/MEDIUM/HIGH",
-    "audit_status": {
-        "score": 0-100的审计评分,
-        "last_audit_date": "最近审计日期",
-        "audit_firms": ["审计公司列表"]
-    },
-    "risk_factors": [
-        "主要风险因素1",
-        "主要风险因素2",
-        ...
-    ],
+    "risk_factors": {{
+        "tvl_risk": {{
+            "score": 0-100的TVL风险评分,
+            "analysis": "基于TVL数据、趋势和波动性的深度分析",
+            "factors": ["具体风险因素"]
+        }},
+        "chain_risk": {{
+            "score": 0-100的跨链风险评分,
+            "analysis": "基于链分布和集中度的风险分析",
+            "factors": ["具体风险因素"]
+        }},
+        "market_risk": {{
+            "score": 0-100的市场风险评分,
+            "analysis": "基于市场趋势的分析",
+            "factors": ["具体风险因素"]
+        }},
+        "technical_risk": {{
+            "score": 0-100的技术风险评分,
+            "analysis": "基于技术指标的风险分析",
+            "factors": ["具体风险因素"]
+        }},
+    }},
+    "trend_analysis": {{
+        "short_term": "短期趋势预测",
+        "medium_term": "中期趋势预测",
+        "key_indicators": {{
+            "macd_signal": "MACD信号解读",
+            "rsi_signal": "RSI信号解读",
+            "volume_analysis": "交易量分析"
+        }}
+    }},
     "recommendations": [
-        "风险缓解建议1",
-        "风险缓解建议2",
-        ...
+        "具体建议1",
+        "具体建议2"
+    ],
+    "risk_mitigation_strategies": [
+        "风险缓解策略1",
+        "风险缓解策略2"
+    ],
+    "monitoring_points": [
+        "需要持续监控的关键指标1",
+        "需要持续监控的关键指标2"
     ]
-}
+}}
 
 注意：
-1. 综合考虑TVL、流动性、安全性等多个维度
-2. 特别关注中心化风险和智能合约风险
-3. 考虑历史安全记录和审计状况
-4. 提供具体的风险缓解建议
+1. 重点关注TVL变化趋势和技术指标的组合信号
+2. 评估跨链风险和链间分布的集中度
+3. 考虑市场周期和宏观环境因素
+4. 提供具体可行的风险缓解建议
+5. 特别关注异常的技术指标信号
+6. 评估审计情况对安全性的影响
 """
 
             if self.client is not None:
-                # 调用OpenAI API
+                # 调用OpenAI API进行分析
                 response = self.client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
                         {
                             "role": "system",
-                            "content": "你是一个专业的DeFi风险分析师，擅长评估协议安全性、流动性和去中心化程度。",
+                            "content": "你是一个专业的DeFi风险分析师，擅长评估协议安全性、流动性和去中心化程度。请基于详细的数据指标和深度分析结果，提供全面的风险评估。重点关注技术指标和多维度风险因素。",
                         },
                         {"role": "user", "content": prompt},
                     ],
                     response_format={"type": "json_object"},
                 )
 
-                # 解析响应
-                analysis = json.loads(response.choices[0].message.content)
+                # 解析AI分析结果
+                ai_analysis = json.loads(response.choices[0].message.content)
 
-                # 添加基础数据
-                analysis.update(
-                    {
-                        "protocol_name": protocol_name,
-                        "tvl": protocol["tvl"],
-                        "daily_volume": protocol["daily_volume"],
-                        "audit_details": {
-                            "last_audit_date": protocol["last_audit_date"],
-                            "audit_firms": protocol["audit_firms"],
-                            "vulnerabilities": protocol["vulnerabilities"],
-                        },
-                        "timestamp": datetime.now().isoformat(),
-                        "data_source": (
-                            "API"
-                            if "tvl" in protocol and protocol["tvl"] > 0
-                            else "Default"
-                        ),
-                    }
-                )
+                # 合并所有数据
+                final_analysis = {
+                    "protocol_info": defillama_data["basic_data"],
+                    "defi_llama_data": defillama_data,
+                    "ai_risk_analysis": ai_analysis,
+                    "timestamp": datetime.now().isoformat(),
+                    "data_source": "DefiLlama + AI Analysis",
+                }
 
-                logger.info(f"成功分析 {protocol_name} 协议风险")
-                return analysis
+                logger.info(f"成功完成 {protocol_name} 的综合风险分析")
+                return final_analysis
             else:
+                logger.warning("AI客户端未初始化，返回基础分析结果")
                 return self._get_basic_protocol_risk_analysis(protocol_name)
 
         except Exception as e:
             logger.error(f"分析协议风险时出错: {e}")
             return self._get_basic_protocol_risk_analysis(protocol_name)
 
-    def _get_basic_protocol_risk_analysis(self, protocol_name: str) -> Dict:
-        """生成基本的协议风险分析结果"""
-        return {
-            "protocol_name": protocol_name,
-            "risk_score": 50,
-            "risk_level": "MEDIUM",
-            "security_score": 75,
-            "liquidity_score": 70,
-            "centralization_risk": "MEDIUM",
-            "audit_status": {
-                "score": 80,
-                "last_audit_date": "2023-12-01",
-                "audit_firms": ["Basic Security Audit"],
-            },
-            "audit_details": {
-                "last_audit_date": "2023-12-01",
-                "audit_firms": ["Basic Security Audit"],
-                "vulnerabilities": [],
-            },
-            "risk_factors": ["缺乏实时风险数据", "使用基础风险评估模型"],
-            "recommendations": [
-                "建议进行更深入的风险评估",
-                "关注协议的最新更新和审计报告",
-                "分散投资以降低风险",
-            ],
-            "timestamp": datetime.now().isoformat(),
-            "data_source": "Default",
-        }
+    def _process_tvl_data(self, tvl_history: List[Dict]) -> pd.DataFrame:
+        """将TVL历史数据转换为pandas DataFrame并进行分析"""
+        try:
+            # 创建DataFrame
+            df = pd.DataFrame(tvl_history)
+            df["date"] = pd.to_datetime(df["date"], unit="s")
+            df.set_index("date", inplace=True)
+
+            # 计算统计指标
+            df["tvl"] = df["totalLiquidityUSD"]
+            df["tvl_change"] = df["tvl"].pct_change()
+            df["volatility"] = df["tvl_change"].rolling(window=7).std()
+            df["ma7"] = df["tvl"].rolling(window=7).mean()
+            df["ma30"] = df["tvl"].rolling(window=30).mean()
+
+            return df
+        except Exception as e:
+            logger.error(f"处理TVL数据时出错: {e}")
+            return pd.DataFrame()
+
+    def _analyze_chain_distribution(self, chain_tvls: Dict) -> pd.DataFrame:
+        """分析链分布数据"""
+        try:
+            # 提取每条链的最新TVL和历史数据
+            chain_analysis = {}
+            for chain, data in chain_tvls.items():
+                if isinstance(data, dict):
+                    chain_data = {
+                        "tvl_history": [],
+                        "token_distribution": {},
+                        "token_count": 0,
+                        "stablecoin_ratio": 0,
+                        "tvl_growth_7d": 0,
+                        "tvl_volatility": 0,
+                    }
+
+                    # 处理TVL历史数据
+                if "tvl" in data and isinstance(data["tvl"], list):
+                    tvl_data = data["tvl"]
+                    if tvl_data:
+                        # 获取最新TVL
+                        current_tvl = tvl_data[-1]["totalLiquidityUSD"]
+                        chain_data["current_tvl"] = current_tvl
+
+                        # 计算7天增长率
+                        if len(tvl_data) >= 7:
+                            week_ago_tvl = tvl_data[-7]["totalLiquidityUSD"]
+                            # 修复除零错误
+                            if week_ago_tvl > 0:
+                                chain_data["tvl_growth_7d"] = (
+                                    (current_tvl / week_ago_tvl) - 1
+                                ) * 100
+                            else:
+                                chain_data["tvl_growth_7d"] = 0
+
+                        # 计算波动率
+                        tvl_values = [d["totalLiquidityUSD"] for d in tvl_data[-30:]]
+                        if tvl_values:
+                            # 修复除零错误
+                            mean_tvl = np.mean(tvl_values)
+                            if mean_tvl > 0:
+                                chain_data["tvl_volatility"] = (
+                                    np.std(tvl_values) / mean_tvl
+                                )
+                            else:
+                                chain_data["tvl_volatility"] = 0
+                    # 处理代币分布数据
+                    if "tokensInUsd" in data and isinstance(data["tokensInUsd"], list):
+                        latest_tokens = (
+                            data["tokensInUsd"][-1] if data["tokensInUsd"] else None
+                        )
+                        if latest_tokens and "tokens" in latest_tokens:
+                            tokens = latest_tokens["tokens"]
+                            total_value = sum(tokens.values())
+
+                            # 计算代币分布
+                            if total_value > 0:
+                                chain_data["token_distribution"] = {
+                                    token: value / total_value * 100
+                                    for token, value in tokens.items()
+                                }
+
+                            # 计算代币数量
+                            chain_data["token_count"] = len(tokens)
+
+                            # 计算稳定币比例
+                            stablecoin_value = sum(
+                                value
+                                for token, value in tokens.items()
+                                if any(
+                                    stable in token.upper()
+                                    for stable in ["USDT", "USDC", "DAI", "UST", "BUSD"]
+                                )
+                            )
+                            chain_data["stablecoin_ratio"] = (
+                                (stablecoin_value / total_value * 100)
+                                if total_value > 0
+                                else 0
+                            )
+
+                    chain_analysis[chain] = chain_data
+
+            # 创建DataFrame
+            rows = []
+            for chain, analysis in chain_analysis.items():
+                row = {
+                    "chain": chain,
+                    "tvl": analysis.get("current_tvl", 0),
+                    "tvl_growth_7d": analysis.get("tvl_growth_7d", 0),
+                    "tvl_volatility": analysis.get("tvl_volatility", 0),
+                    "token_count": analysis.get("token_count", 0),
+                    "stablecoin_ratio": analysis.get("stablecoin_ratio", 0),
+                }
+                rows.append(row)
+
+            df = pd.DataFrame(rows)
+            if df.empty:
+                return pd.DataFrame(
+                    columns=["chain", "tvl", "percentage", "risk_metrics"]
+                )
+
+            # 计算基础指标
+            total_tvl = df["tvl"].sum()
+            if total_tvl > 0:
+                df["percentage"] = df["tvl"] / total_tvl * 100
+            else:
+                df["percentage"] = 0
+            df["hhi_contribution"] = (df["percentage"] / 100) ** 2
+
+            # 计算链风险评级
+            chain_risk_levels = {
+                "Ethereum": "LOW",
+                "BSC": "MEDIUM",
+                "Polygon": "LOW",
+                "Avalanche": "MEDIUM",
+                "Arbitrum": "LOW",
+                "Optimism": "LOW",
+                "Fantom": "MEDIUM",
+                "Solana": "MEDIUM",
+                "Terra2": "HIGH",
+                "Neutron": "MEDIUM",
+                "Injective": "MEDIUM",
+                "Sei": "HIGH",
+            }
+            df["chain_risk"] = df["chain"].map(
+                lambda x: chain_risk_levels.get(x, "HIGH")
+            )
+
+            # 计算综合风险指标
+            df["concentration_risk"] = df["percentage"].apply(
+                lambda x: "HIGH" if x > 50 else ("MEDIUM" if x > 20 else "LOW")
+            )
+
+            # 计算代币多样性风险
+            df["token_diversity_risk"] = df["token_count"].apply(
+                lambda x: "HIGH" if x < 3 else ("MEDIUM" if x < 5 else "LOW")
+            )
+
+            # 计算稳定币风险
+            df["stablecoin_risk"] = df["stablecoin_ratio"].apply(
+                lambda x: "HIGH" if x > 80 else ("MEDIUM" if x > 50 else "LOW")
+            )
+
+            # 计算TVL增长风险
+            df["growth_risk"] = df["tvl_growth_7d"].apply(
+                lambda x: "HIGH" if x < -20 else ("MEDIUM" if x < 0 else "LOW")
+            )
+
+            # 计算波动性风险
+            df["volatility_risk"] = df["tvl_volatility"].apply(
+                lambda x: "HIGH" if x > 0.5 else ("MEDIUM" if x > 0.2 else "LOW")
+            )
+
+            # 计算综合风险评分
+            risk_scores = {"LOW": 1, "MEDIUM": 2, "HIGH": 3}
+            risk_weights = {
+                "chain_risk": 0.2,
+                "concentration_risk": 0.2,
+                "token_diversity_risk": 0.15,
+                "stablecoin_risk": 0.15,
+                "growth_risk": 0.15,
+                "volatility_risk": 0.15,
+            }
+
+            for risk_type in risk_weights.keys():
+                df[f"{risk_type}_score"] = df[risk_type].map(risk_scores)
+
+            df["risk_score"] = sum(
+                df[f"{risk_type}_score"] * weight
+                for risk_type, weight in risk_weights.items()
+            )
+
+            # 添加风险评估结果
+            df["risk_metrics"] = df.apply(
+                lambda row: {
+                    "overall_risk_score": row["risk_score"],
+                    "risk_factors": [
+                        f"链风险: {row['chain_risk']}",
+                        f"集中度风险: {row['concentration_risk']}",
+                        f"代币多样性风险: {row['token_diversity_risk']}",
+                        f"稳定币风险: {row['stablecoin_risk']}",
+                        f"增长风险: {row['growth_risk']}",
+                        f"波动性风险: {row['volatility_risk']}",
+                    ],
+                    "metrics": {
+                        "tvl_growth_7d": row["tvl_growth_7d"],
+                        "tvl_volatility": row["tvl_volatility"],
+                        "token_count": row["token_count"],
+                        "stablecoin_ratio": row["stablecoin_ratio"],
+                    },
+                },
+                axis=1,
+            )
+
+            # 排序并返回结果
+            return df.sort_values("tvl", ascending=False)
+
+        except Exception as e:
+            logger.error(f"分析链分布时出错: {e}")
+            return pd.DataFrame(columns=["chain", "tvl", "percentage", "risk_metrics"])
+
+    def _calculate_risk_metrics(
+        self, tvl_df: pd.DataFrame, chain_df: pd.DataFrame
+    ) -> Dict:
+        """计算综合风险指标"""
+        try:
+            # TVL相关指标
+            current_tvl = tvl_df["tvl"].iloc[-1] if not tvl_df.empty else 0
+            tvl_growth_7d = (
+                (tvl_df["tvl"].iloc[-1] / tvl_df["tvl"].iloc[-7] - 1) * 100
+                if len(tvl_df) >= 7
+                else 0
+            )
+            tvl_growth_30d = (
+                (tvl_df["tvl"].iloc[-1] / tvl_df["tvl"].iloc[-30] - 1) * 100
+                if len(tvl_df) >= 30
+                else 0
+            )
+
+            # 计算波动率（标准差/均值）
+            volatility = (
+                tvl_df["tvl"].std() / tvl_df["tvl"].mean() if not tvl_df.empty else 0
+            )
+
+            # 趋势分析
+            ma7 = tvl_df["tvl"].rolling(window=7).mean()
+            ma30 = tvl_df["tvl"].rolling(window=30).mean()
+            current_trend = (
+                "up"
+                if ma7.iloc[-1] > ma30.iloc[-1]
+                else "down" if not tvl_df.empty else "neutral"
+            )
+
+            # 计算TVL稳定性指标
+            tvl_stability = (
+                1 - (tvl_df["tvl"].std() / tvl_df["tvl"].mean())
+                if not tvl_df.empty
+                else 0
+            )
+
+            # 链分布指标
+            chain_metrics = {
+                "chain_count": len(chain_df),
+                "max_chain_concentration": (
+                    chain_df["percentage"].max() if not chain_df.empty else 0
+                ),
+                "high_risk_chains": (
+                    len(chain_df[chain_df["concentration_risk"] == "HIGH"])
+                    if not chain_df.empty and "concentration_risk" in chain_df.columns
+                    else 0
+                ),
+                "diversification_score": (
+                    1 - chain_df["hhi_contribution"].sum()
+                    if not chain_df.empty and "hhi_contribution" in chain_df.columns
+                    else 0
+                ),
+                "avg_chain_risk": (
+                    chain_df["risk_score"].mean()
+                    if not chain_df.empty and "risk_score" in chain_df.columns
+                    else 3
+                ),
+                "chain_stability": (
+                    1 - chain_df["percentage"].std() / 100
+                    if not chain_df.empty and "percentage" in chain_df.columns
+                    else 0
+                ),
+            }
+
+            # 计算综合风险指标
+            risk_metrics = {
+                "tvl_metrics": {
+                    "current_tvl": current_tvl,
+                    "tvl_growth_7d": tvl_growth_7d,
+                    "tvl_growth_30d": tvl_growth_30d,
+                    "tvl_volatility": volatility,
+                    "tvl_stability": tvl_stability,
+                    "trend": current_trend,
+                },
+                "chain_metrics": chain_metrics,
+                "composite_metrics": {
+                    "overall_stability": (
+                        tvl_stability + chain_metrics["chain_stability"]
+                    )
+                    / 2,
+                    "growth_score": (max(min(tvl_growth_7d, 100), -100) + 100) / 200,
+                    "risk_score": (
+                        0.4 * (1 - tvl_stability)
+                        + 0.3 * (chain_metrics["avg_chain_risk"] / 3)
+                        + 0.3 * (1 - chain_metrics["diversification_score"])
+                    ),
+                },
+            }
+
+            return risk_metrics
+        except Exception as e:
+            logger.error(f"计算风险指标时出错: {e}")
+            return {}
+
+    def get_protocol_data(self, protocol_name: str) -> Dict:
+        """从DefiLlama获取协议数据"""
+        try:
+
+            # 加入缓存
+            cache_key = f"protocol_data_{protocol_name}"
+            if analysis_cache.get(cache_key):
+                return analysis_cache[cache_key]
+
+            # 获取协议基本信息
+            protocol_data = llama.get_protocol(protocol_name)
+            if not protocol_data:
+                logger.warning(f"无法获取{protocol_name}的基本信息")
+                return None
+
+            # 转换为字典格式
+            protocol_data = {
+                "name": protocol_data.get("name", ""),
+                "symbol": protocol_data.get("symbol", ""),
+                "description": protocol_data.get("description", ""),
+                "url": protocol_data.get("url", ""),
+                "tvl": protocol_data.get("tvl", 0),
+                "mcap": protocol_data.get("mcap", 0),
+                "audits": protocol_data.get("audits", 0),
+                "audit_note": protocol_data.get("audit_note", ""),
+                "audit_links": protocol_data.get("audit_links", []),
+                "chains": protocol_data.get("chains", []),
+                "chainTvls": protocol_data.get("chainTvls", {}),
+                "currentChainTvls": protocol_data.get("currentChainTvls", {}),
+                "category": protocol_data.get("category", ""),
+                "methodology": protocol_data.get("methodology", ""),
+                "twitter": protocol_data.get("twitter", ""),
+                "github": protocol_data.get("github", ""),
+                "openSource": protocol_data.get("openSource", False),
+                "listedAt": protocol_data.get("listedAt", 0),
+                "gecko_id": protocol_data.get("gecko_id", ""),
+                "cmcId": protocol_data.get("cmcId", ""),
+            }
+            analysis_cache[cache_key] = protocol_data
+            return protocol_data
+        except Exception as e:
+            logger.error(f"获取协议数据时出错: {e}")
+            return None
+
+    def _fetch_defillama_data(self, protocol_name: str) -> Dict:
+        """处理协议数据并进行分析"""
+        try:
+            # 如果输入是字符串（协议名称），先获取协议数据
+            if protocol_name == "Curve":
+                protocol_name = "CRV"
+            protocol_data = self.get_protocol_data(protocol_name)
+
+            if not protocol_data:
+                logger.warning(f"无法获取{protocol_data}的数据")
+                return None
+
+            # 处理TVL历史数据
+            tvl_history = protocol_data.get("tvl", [])
+            tvl_df = self._process_tvl_data(tvl_history)
+
+            current_tvl = tvl_df["tvl"].iloc[-1]
+            # 处理基础数据
+            tvl_24h_ago = tvl_df["tvl"].iloc[-2] if len(tvl_df) > 1 else current_tvl
+            tvl_change_24h = (
+                ((current_tvl - tvl_24h_ago) / tvl_24h_ago * 100) if tvl_24h_ago else 0
+            )
+            mcap = protocol_data.get("mcap", 0)
+            tvl_ratio = mcap / current_tvl if current_tvl and mcap else 0
+
+            # 获取链分布
+            chains = protocol_data.get("chains", [])
+            chain_tvls = protocol_data.get("chainTvls", {})
+
+            # 分析链分布
+            chain_df = self._analyze_chain_distribution(chain_tvls)
+
+            # 计算风险指标
+            risk_metrics = self._calculate_risk_metrics(tvl_df, chain_df)
+
+            # 分析趋势
+            trend_analysis = self._analyze_trend(tvl_df)
+
+            # 更新风险指标
+            risk_metrics.update({"trend_analysis": trend_analysis})
+
+            # 计算综合风险评分
+            risk_score = self._calculate_risk_score(
+                {
+                    "tvl_metrics": risk_metrics["tvl_metrics"],
+                    "chain_metrics": risk_metrics["chain_metrics"],
+                    "audit_info": {"count": int(protocol_data.get("audits", 0))},
+                }
+            )
+
+            result = {
+                "basic_data": {
+                    "name": protocol_data.get("name", ""),
+                    "symbol": protocol_data.get("symbol", ""),
+                    "description": protocol_data.get("description", ""),
+                    "category": protocol_data.get("category", ""),
+                    "url": protocol_data.get("url", ""),
+                    "current_tvl": current_tvl,
+                    "tvl_change_24h": tvl_change_24h,
+                    "mcap_tvl_ratio": tvl_ratio,
+                    "chain_count": len(chains),
+                    "audit_count": int(protocol_data.get("audits", 0)),
+                    "methodology": protocol_data.get("methodology", ""),
+                },
+                "chain_distribution": chain_df.to_dict("records"),
+                "risk_metrics": risk_metrics,
+                "risk_score": risk_score,
+                "tvl_analysis": {
+                    "historical_data": tvl_df.to_dict("records"),
+                    "summary_stats": {
+                        "mean": tvl_df["tvl"].mean(),
+                        "std": tvl_df["tvl"].std(),
+                        "min": tvl_df["tvl"].min(),
+                        "max": tvl_df["tvl"].max(),
+                        "current_percentile": np.percentile(tvl_df["tvl"], 75),
+                    },
+                    "trend_analysis": trend_analysis,
+                },
+                "correlation_analysis": {},
+                "audit_info": {
+                    "count": int(protocol_data.get("audits", 0)),
+                    "note": protocol_data.get("audit_note", ""),
+                    "links": protocol_data.get("audit_links", []),
+                },
+                "additional_info": {
+                    "github": protocol_data.get("github", []),
+                    "twitter": protocol_data.get("twitter", ""),
+                    "open_source": protocol_data.get("openSource", False),
+                    "listed_at": protocol_data.get("listedAt", 0),
+                    "gecko_id": protocol_data.get("gecko_id", ""),
+                    "cmc_id": protocol_data.get("cmcId", ""),
+                },
+            }
+
+            return result
+
+        except Exception as e:
+            logger.error(f"处理协议数据时出错: {e}")
+            return None
+
+    def _analyze_trend(self, tvl_df: pd.DataFrame) -> Dict:
+        """分析TVL趋势"""
+        try:
+            if tvl_df.empty:
+                return {
+                    "trend": "neutral",
+                    "strength": "weak",
+                    "rsi": 50,
+                    "indicators": {},
+                }
+
+            df = tvl_df.copy()
+
+            # 计算移动平均线
+            df["ma7"] = df["tvl"].rolling(window=7).mean()
+            df["ma30"] = df["tvl"].rolling(window=30).mean()
+            df["ma90"] = df["tvl"].rolling(window=90).mean()
+
+            # 计算MACD
+            exp1 = df["tvl"].ewm(span=12, adjust=False).mean()
+            exp2 = df["tvl"].ewm(span=26, adjust=False).mean()
+            macd = exp1 - exp2
+            signal = macd.ewm(span=9, adjust=False).mean()
+            histogram = macd - signal
+
+            # 计算RSI
+            delta = df["tvl"].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
+
+            # 计算布林带
+            df["bb_middle"] = df["tvl"].rolling(window=20).mean()
+            df["bb_std"] = df["tvl"].rolling(window=20).std()
+            df["bb_upper"] = df["bb_middle"] + (df["bb_std"] * 2)
+            df["bb_lower"] = df["bb_middle"] - (df["bb_std"] * 2)
+
+            # 趋势强度分析
+            current_trend = "bullish" if macd.iloc[-1] > signal.iloc[-1] else "bearish"
+            trend_strength = abs(macd.iloc[-1] - signal.iloc[-1]) / df["tvl"].iloc[-1]
+
+            # 计算动量指标
+            df["momentum"] = df["tvl"].diff(periods=7)
+            df["rate_of_change"] = df["tvl"].pct_change(periods=7) * 100
+
+            # 趋势确认
+            trend_signals = []
+            if df["ma7"].iloc[-1] > df["ma30"].iloc[-1]:
+                trend_signals.append("ma7_above_ma30")
+            if df["momentum"].iloc[-1] > 0:
+                trend_signals.append("positive_momentum")
+            if rsi.iloc[-1] > 50:
+                trend_signals.append("rsi_bullish")
+            if macd.iloc[-1] > signal.iloc[-1]:
+                trend_signals.append("macd_bullish")
+
+            # 超买超卖信号
+            overbought_oversold = (
+                "overbought"
+                if rsi.iloc[-1] > 70
+                else "oversold" if rsi.iloc[-1] < 30 else "neutral"
+            )
+
+            return {
+                "trend": current_trend,
+                "strength": (
+                    "strong"
+                    if trend_strength > 0.05
+                    else "moderate" if trend_strength > 0.02 else "weak"
+                ),
+                "rsi": rsi.iloc[-1],
+                "indicators": {
+                    "macd": {
+                        "value": macd.iloc[-1],
+                        "signal": signal.iloc[-1],
+                        "histogram": histogram.iloc[-1],
+                    },
+                    "moving_averages": {
+                        "ma7": df["ma7"].iloc[-1],
+                        "ma30": df["ma30"].iloc[-1],
+                        "ma90": df["ma90"].iloc[-1],
+                    },
+                    "bollinger_bands": {
+                        "upper": df["bb_upper"].iloc[-1],
+                        "middle": df["bb_middle"].iloc[-1],
+                        "lower": df["bb_lower"].iloc[-1],
+                    },
+                    "momentum": {
+                        "value": df["momentum"].iloc[-1],
+                        "roc": df["rate_of_change"].iloc[-1],
+                    },
+                },
+                "signals": {
+                    "trend_signals": trend_signals,
+                    "overbought_oversold": overbought_oversold,
+                    "price_position": (
+                        "above_bb"
+                        if df["tvl"].iloc[-1] > df["bb_upper"].iloc[-1]
+                        else (
+                            "below_bb"
+                            if df["tvl"].iloc[-1] < df["bb_lower"].iloc[-1]
+                            else "within_bb"
+                        )
+                    ),
+                },
+            }
+        except Exception as e:
+            logger.error(f"分析趋势时出错: {e}")
+            return {}
 
     def _calculate_ema(self, prices: np.ndarray, period: int) -> np.ndarray:
         """计算指数移动平均线"""
@@ -986,3 +1244,80 @@ class AiPredictor:
         # 返回最接近当前价格的两个阻力位
         resistance_levels.sort()
         return resistance_levels[:2]
+
+    def _get_basic_protocol_risk_analysis(self, protocol_name: str) -> Dict:
+        """生成基本的协议风险分析结果"""
+        return {
+            "protocol_name": protocol_name,
+            "risk_score": 50,
+            "risk_level": "MEDIUM",
+            "security_score": 75,
+            "liquidity_score": 70,
+            "centralization_risk": "MEDIUM",
+            "audit_status": {
+                "score": 80,
+                "last_audit_date": "2023-12-01",
+                "audit_firms": ["Basic Security Audit"],
+            },
+            "audit_details": {
+                "last_audit_date": "2023-12-01",
+                "audit_firms": ["Basic Security Audit"],
+                "vulnerabilities": [],
+            },
+            "risk_factors": ["缺乏实时风险数据", "使用基础风险评估模型"],
+            "recommendations": [
+                "建议进行更深入的风险评估",
+                "关注协议的最新更新和审计报告",
+                "分散投资以降低风险",
+            ],
+            "timestamp": datetime.now().isoformat(),
+            "data_source": "Default",
+        }
+
+    def _calculate_risk_score(self, metrics: Dict) -> float:
+        """计算综合风险评分"""
+        try:
+            # 权重设置
+            weights = {
+                "tvl": 0.3,
+                "volatility": 0.2,
+                "concentration": 0.2,
+                "trend": 0.15,
+                "audit": 0.15,
+            }
+
+            # TVL得分 (0-100)
+            tvl_score = min(
+                100, metrics["tvl_metrics"]["current_tvl"] / 1000000
+            )  # 每100万TVL一分，最高100分
+
+            # 波动性得分 (100为最稳定)
+            volatility_score = max(
+                0, 100 - metrics["tvl_metrics"]["tvl_volatility"] * 100
+            )
+
+            # 集中度得分 (100为最分散)
+            concentration_score = max(
+                0, 100 - metrics["chain_metrics"]["max_chain_concentration"]
+            )
+
+            # 趋势得分
+            trend_score = 70 if metrics["tvl_metrics"]["trend"] == "up" else 30
+
+            # 审计得分
+            audit_count = metrics.get("audit_info", {}).get("count", 0)
+            audit_score = min(100, audit_count * 25)  # 每次审计25分，最高100分
+
+            # 计算加权总分
+            total_score = (
+                weights["tvl"] * tvl_score
+                + weights["volatility"] * volatility_score
+                + weights["concentration"] * concentration_score
+                + weights["trend"] * trend_score
+                + weights["audit"] * audit_score
+            )
+
+            return round(total_score, 2)
+        except Exception as e:
+            logger.error(f"计算风险评分时出错: {e}")
+            return 50.0

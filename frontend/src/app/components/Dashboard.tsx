@@ -7,7 +7,7 @@ import PortfolioOverview from "./PortfolioOverview";
 import AlertsList from "./AlertsList";
 import MarketAnalysis from "./MarketAnalysis";
 import { apiService } from "../services/api";
-import { Portfolio, MarketPrediction } from "../services/api";
+import type { Portfolio, MarketPrediction } from "../services/api";
 import { Loader2, RefreshCw, AlertTriangle, Fuel } from "lucide-react";
 
 export const Dashboard: React.FC = () => {
@@ -223,13 +223,11 @@ export const Dashboard: React.FC = () => {
               <PortfolioOverview portfolio={portfolio} />
             </div>
             <div className="bg-card rounded-xl border border-border p-6 shadow-sm hover:shadow-md transition-all">
-              <RiskMonitor portfolio={portfolio} />
+              <RiskMonitor portfolio={portfolio} marketPredictions={marketPredictions} />
             </div>
           </div>
           <div className="bg-card rounded-xl border border-border p-6 shadow-sm hover:shadow-md transition-all">
-            <AlertsList
-              walletAddress={address || ""}
-            />
+            <AlertsList walletAddress={address || ""} />
           </div>
         </div>
       ) : (
@@ -251,7 +249,7 @@ export const Dashboard: React.FC = () => {
               </select>
             </div>
             {marketPredictions[selectedAsset] ? (
-              <MarketAnalysis asset={selectedAsset} prediction={marketPredictions[selectedAsset]} marketAnalysis={portfolio.market_analysis[selectedAsset]} aiPrediction={portfolio.ai_predictions[selectedAsset]} />
+              <MarketAnalysis asset={selectedAsset} prediction={marketPredictions[selectedAsset]} marketAnalysis={portfolio.market_analysis[selectedAsset]} />
             ) : (
               <div className="text-center py-8">
                 <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />

@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Portfolio } from "../services/api";
+import { Portfolio, MarketPrediction } from "../services/api";
 import { AlertTriangle, Shield, TrendingDown, Zap, BarChart3, DollarSign, Percent, ChartBar, Target, Wallet } from "lucide-react";
 
 interface Position {
@@ -14,9 +14,10 @@ interface Position {
 
 interface RiskMonitorProps {
   portfolio: Portfolio | null;
+  marketPredictions?: { [key: string]: MarketPrediction };
 }
 
-const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
+const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, marketPredictions }) => {
   if (!portfolio) {
     return (
       <div>
@@ -85,7 +86,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
     .map((position) => {
       const asset = position.asset.split("/")[0];
       const marketData = portfolio.market_analysis[asset];
-      const aiPrediction = portfolio.ai_predictions[asset];
+      const prediction = marketPredictions?.[asset];
 
       // 基于市场数据和AI预测计算风险分数
       let riskScore = 0.5; // 默认中等风险
@@ -104,11 +105,11 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
         }
       }
 
-      if (aiPrediction) {
+      if (prediction) {
         // AI预测风险
-        if (aiPrediction.risk_level.toUpperCase() === "HIGH") {
+        if (prediction.risk_level.toUpperCase() === "HIGH") {
           riskScore += 0.2;
-        } else if (aiPrediction.risk_level.toUpperCase() === "LOW") {
+        } else if (prediction.risk_level.toUpperCase() === "LOW") {
           riskScore -= 0.1;
         }
       }
@@ -258,9 +259,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {portfolio.recommendations.map((rec, index) => (
                 <div key={index} className="p-3 rounded-lg bg-background/50 hover:bg-background transition-colors flex items-start gap-2">
-                  <div className={`mt-0.5 w-5 h-5 rounded-full ${bg} ${color} flex items-center justify-center flex-shrink-0 text-xs`}>
-                    {index + 1}
-                  </div>
+                  <div className={`mt-0.5 w-5 h-5 rounded-full ${bg} ${color} flex items-center justify-center flex-shrink-0 text-xs`}>{index + 1}</div>
                   <p className="text-sm">{rec}</p>
                 </div>
               ))}
@@ -275,9 +274,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
               <BarChart3 className="h-4 w-4 text-primary" />
               头寸风险分析
             </h3>
-            <span className="text-xs px-2 py-1 rounded-md bg-background text-muted">
-              {portfolio.positions.length} 个头寸
-            </span>
+            <span className="text-xs px-2 py-1 rounded-md bg-background text-muted">{portfolio.positions.length} 个头寸</span>
           </div>
 
           <div className="space-y-3">
@@ -291,9 +288,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
                 <div key={index} className={`p-4 rounded-xl border ${riskLevel.border} ${riskLevel.bg} hover:shadow-md transition-all group`}>
                   <div className="flex justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <div className={`w-8 h-8 rounded-full ${riskLevel.bg} ${riskLevel.color} flex items-center justify-center text-xs font-medium transition-all group-hover:scale-110`}>
-                        {position.asset.substring(0, 2)}
-                      </div>
+                      <div className={`w-8 h-8 rounded-full ${riskLevel.bg} ${riskLevel.color} flex items-center justify-center text-xs font-medium transition-all group-hover:scale-110`}>{position.asset.substring(0, 2)}</div>
                       <div>
                         <span className="font-medium group-hover:text-primary transition-colors">{position.protocol}</span>
                         <p className="text-xs text-muted">{position.asset}</p>

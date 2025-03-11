@@ -163,7 +163,7 @@ const AlertsList: React.FC<AlertsListProps> = ({ walletAddress }) => {
       const apiAlerts = await apiService.getAlerts(walletAddress);
 
       // 转换警报格式
-      const formattedAlerts: Alert[] = apiAlerts.map(apiAlert => ({
+      const formattedAlerts: Alert[] = apiAlerts.map((apiAlert) => ({
         id: `${apiAlert.type}-${apiAlert.asset}-${apiAlert.timestamp}_${apiAlert.protocol}`,
         type: mapAlertType(apiAlert.type),
         severity: mapSeverity(apiAlert.severity),
@@ -173,12 +173,8 @@ const AlertsList: React.FC<AlertsListProps> = ({ walletAddress }) => {
         asset: apiAlert.asset,
         details: {
           recommendation: apiAlert.details?.recommendation,
-          value: apiAlert.details?.value ||
-                 apiAlert.details?.volatility ||
-                 apiAlert.details?.leverage ||
-                 apiAlert.details?.price_change_24h,
-          threshold: apiAlert.details?.threshold ||
-                    apiAlert.details?.safe_leverage,
+          value: apiAlert.details?.value || apiAlert.details?.volatility || apiAlert.details?.leverage || apiAlert.details?.price_change_24h,
+          threshold: apiAlert.details?.threshold || apiAlert.details?.safe_leverage,
           ...apiAlert.details,
         },
       }));
@@ -190,6 +186,16 @@ const AlertsList: React.FC<AlertsListProps> = ({ walletAddress }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // 使用useEffect确保日期格式化只在客户端进行
+  const formatDate = (timestamp: string) => {
+    // 在服务端返回一个固定格式，避免服务端和客户端差异
+    if (typeof window === "undefined") {
+      return new Date(timestamp).toISOString();
+    }
+    // 客户端使用本地化格式
+    return new Date(timestamp).toLocaleString();
   };
 
   // 过滤和排序警报
@@ -211,15 +217,10 @@ const AlertsList: React.FC<AlertsListProps> = ({ walletAddress }) => {
   // 获取警报统计信息
   const alertStats: AlertStats = {
     total: alerts.length,
-    high: alerts.filter(a => a.severity === "high").length,
-    medium: alerts.filter(a => a.severity === "medium").length,
-    low: alerts.filter(a => a.severity === "low").length,
-    byType: Object.fromEntries(
-      Object.keys(alertTypeConfig).map(type => [
-        type,
-        alerts.filter(a => a.type === type).length
-      ])
-    ),
+    high: alerts.filter((a) => a.severity === "high").length,
+    medium: alerts.filter((a) => a.severity === "medium").length,
+    low: alerts.filter((a) => a.severity === "low").length,
+    byType: Object.fromEntries(Object.keys(alertTypeConfig).map((type) => [type, alerts.filter((a) => a.type === type).length])),
   };
 
   if (loading) {
@@ -241,10 +242,7 @@ const AlertsList: React.FC<AlertsListProps> = ({ walletAddress }) => {
         </div>
         <h3 className="text-lg font-medium mb-2">获取警报失败</h3>
         <p className="text-muted mb-4">{error}</p>
-        <button
-          onClick={fetchAlerts}
-          className="px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-        >
+        <button onClick={fetchAlerts} className="px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors">
           重试
         </button>
       </div>
@@ -257,16 +255,10 @@ const AlertsList: React.FC<AlertsListProps> = ({ walletAddress }) => {
         <h2 className="text-xl font-semibold flex items-center gap-2">
           <Bell className="h-5 w-5 text-primary" />
           风险警报
-          <span className="ml-2 text-sm px-2 py-0.5 rounded-full bg-muted">
-            {alertStats.total.toString()} 个警报
-          </span>
+          <span className="ml-2 text-sm px-2 py-0.5 rounded-full bg-muted">{alertStats.total.toString()} 个警报</span>
         </h2>
         <div className="flex gap-2">
-          <select
-            value={severityFilter}
-            onChange={(e) => setSeverityFilter(e.target.value as Alert["severity"] | "all")}
-            className="px-3 py-1 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-          >
+          <select value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value as Alert["severity"] | "all")} className="px-3 py-1 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50">
             <option value="all">全部严重度</option>
             {Object.entries(severityConfigMap).map(([value, config]) => (
               <option key={value} value={value}>
@@ -274,11 +266,7 @@ const AlertsList: React.FC<AlertsListProps> = ({ walletAddress }) => {
               </option>
             ))}
           </select>
-          <select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value as Alert["type"] | "all")}
-            className="px-3 py-1 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-          >
+          <select value={filter} onChange={(e) => setFilter(e.target.value as Alert["type"] | "all")} className="px-3 py-1 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50">
             <option value="all">全部类型</option>
             {Object.entries(alertTypeConfig).map(([value, config]) => (
               <option key={value} value={value}>
@@ -338,23 +326,13 @@ const AlertsList: React.FC<AlertsListProps> = ({ walletAddress }) => {
             const isExpanded = expanded[alert.id];
 
             return (
-              <div
-                key={alert.id}
-                className={`p-4 rounded-lg border transition-all ${severityConfig.bg} ${severityConfig.color} hover:shadow-md`}
-                onClick={() => setExpanded({ ...expanded, [alert.id]: !isExpanded })}
-              >
+              <div key={alert.id} className={`p-4 rounded-lg border transition-all ${severityConfig.bg} ${severityConfig.color} hover:shadow-md`} onClick={() => setExpanded({ ...expanded, [alert.id]: !isExpanded })}>
                 <div className="flex items-start gap-3">
-                  <div className={`mt-1 ${typeConfig.color}`}>
-                    {typeConfig.icon}
-                  </div>
+                  <div className={`mt-1 ${typeConfig.color}`}>{typeConfig.icon}</div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${severityConfig.bg} ${severityConfig.color}`}>
-                        {severityConfig.label}级
-                      </span>
-                      <span className="text-xs text-muted">
-                        {new Date(alert.timestamp).toLocaleString()}
-                      </span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${severityConfig.bg} ${severityConfig.color}`}>{severityConfig.label}级</span>
+                      <span className="text-xs text-muted">{formatDate(alert.timestamp)}</span>
                     </div>
                     <p className="font-medium">{alert.message}</p>
                     <div className="flex items-center gap-2 mt-1 text-sm">
@@ -380,9 +358,7 @@ const AlertsList: React.FC<AlertsListProps> = ({ walletAddress }) => {
                         {alert.details.leverage !== undefined && (
                           <div className="flex justify-between items-center">
                             <span className="text-muted">杠杆率</span>
-                            <span className={alert.details.leverage > 1.5 ? "text-destructive" : "text-success"}>
-                              {alert.details.leverage.toFixed(2)}x
-                            </span>
+                            <span className={alert.details.leverage > 1.5 ? "text-destructive" : "text-success"}>{alert.details.leverage.toFixed(2)}x</span>
                           </div>
                         )}
                         {alert.details.current_apy !== undefined && (
@@ -401,23 +377,23 @@ const AlertsList: React.FC<AlertsListProps> = ({ walletAddress }) => {
                           <div className="flex justify-between items-center">
                             <span className="text-muted">APY变化</span>
                             <span className={alert.details.apy_change > 0 ? "text-success" : "text-destructive"}>
-                              {alert.details.apy_change > 0 ? "+" : ""}{(alert.details.apy_change * 100).toFixed(2)}%
+                              {alert.details.apy_change > 0 ? "+" : ""}
+                              {(alert.details.apy_change * 100).toFixed(2)}%
                             </span>
                           </div>
                         )}
                         {alert.details.volatility !== undefined && (
                           <div className="flex justify-between items-center">
                             <span className="text-muted">波动率</span>
-                            <span className={alert.details.volatility > 20 ? "text-destructive" : "text-amber-500"}>
-                              {alert.details.volatility.toFixed(2)}%
-                            </span>
+                            <span className={alert.details.volatility > 20 ? "text-destructive" : "text-amber-500"}>{alert.details.volatility.toFixed(2)}%</span>
                           </div>
                         )}
                         {alert.details.price_change_24h !== undefined && (
                           <div className="flex justify-between items-center">
                             <span className="text-muted">24h价格变化</span>
                             <span className={alert.details.price_change_24h > 0 ? "text-success" : "text-destructive"}>
-                              {alert.details.price_change_24h > 0 ? "+" : ""}{alert.details.price_change_24h.toFixed(2)}%
+                              {alert.details.price_change_24h > 0 ? "+" : ""}
+                              {alert.details.price_change_24h.toFixed(2)}%
                             </span>
                           </div>
                         )}
