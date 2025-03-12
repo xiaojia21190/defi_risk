@@ -124,7 +124,7 @@ DEMO_PROTOCOLS = {
     },
     "Compound V3": {"risk": 0.20, "apy_range": (0.03, 0.06)},
     "Curve Finance": {"risk": 0.30, "apy_range": (0.04, 0.10)},
-    "Uniswap V2": {"risk": 0.35, "apy_range": (0.05, 0.15)},
+    "Maker": {"risk": 0.15, "apy_range": (0.01, 0.03)},
     "Balancer": {"risk": 0.30, "apy_range": (0.04, 0.12)},
 }
 
@@ -201,12 +201,12 @@ class BlockchainService:
             except Exception as e:
                 logger.error(f"获取Curve Finance头寸时出错: {e}")
 
-            # 4. 获取Uniswap V3头寸
+            # 4. 获取Maker头寸
             try:
-                uniswap_positions = await self._get_uniswap_v3_positions(address)
-                positions.extend(uniswap_positions)
+                maker_positions = await self._get_maker_positions(address)
+                positions.extend(maker_positions)
             except Exception as e:
-                logger.error(f"获取Uniswap V3头寸时出错: {e}")
+                logger.error(f"获取Maker头寸时出错: {e}")
 
             # 过滤掉金额为0的头寸
             positions = [pos for pos in positions if pos.amount > 0]
@@ -781,7 +781,7 @@ class BlockchainService:
                 "USDT": await self.get_asset_price("USDT"),
                 "BTC": await self.get_asset_price("BTC"),  # 假设当前BTC价格
                 "LINK": await self.get_asset_price("LINK"),
-                "UNI": await self.get_asset_price("UNI"),
+                "DAI": 1.0,  # DAI的价格应该接近1美元
             }
 
             # 更真实的APY范围（基于当前市场情况）
@@ -802,11 +802,12 @@ class BlockchainService:
                     "USDT": (0.04, 0.06),
                     "USDC": (0.04, 0.06),
                 },
-                "Uniswap-V3": {
-                    "ETH": (0.05, 0.12),
-                    "BTC": (0.04, 0.1),
-                    "LINK": (0.06, 0.15),
-                    "UNI": (0.07, 0.18),
+                "Maker": {
+                    "ETH-A": (0.01, 0.02),
+                    "ETH-B": (0.015, 0.025),
+                    "ETH-C": (0.02, 0.03),
+                    "WBTC-A": (0.01, 0.02),
+                    "USDC-A": (0.005, 0.01),
                 },
             }
 
@@ -814,6 +815,13 @@ class BlockchainService:
             max_leverage = {
                 "Aave-V3": {"ETH": 2.5, "USDC": 1.1, "USDT": 1.1, "BTC": 2.0},
                 "Compound-V3": {"ETH": 2.0, "USDC": 1.0, "USDT": 1.0, "BTC": 1.8},
+                "Maker": {
+                    "ETH-A": 2.0,
+                    "ETH-B": 2.5,
+                    "ETH-C": 3.0,
+                    "WBTC-A": 2.0,
+                    "USDC-A": 1.1,
+                },
             }
 
             # 设置总投资组合价值（美元）
@@ -837,7 +845,7 @@ class BlockchainService:
 
             # ETH在Aave
             eth_aave_amount = (
-                total_portfolio_value * asset_allocation["ETH"] * 0.6
+                total_portfolio_value * asset_allocation["ETH"] * 0.4
             ) / current_prices["ETH"]
             positions.append(
                 ProtocolPosition(
@@ -849,16 +857,18 @@ class BlockchainService:
                 )
             )
 
-            # ETH在Uniswap
-            eth_uni_amount = (
-                total_portfolio_value * asset_allocation["ETH"] * 0.4
+            # ETH在Maker
+            eth_maker_amount = (
+                total_portfolio_value * asset_allocation["ETH"] * 0.6
             ) / current_prices["ETH"]
+            maker_eth_ilk = random.choice(["ETH-A", "ETH-B", "ETH-C"])
             positions.append(
                 ProtocolPosition(
-                    protocol="Uniswap-V3",
-                    asset="ETH/USDC",  # LP代币
-                    amount=round(eth_uni_amount, 4),
-                    apy=random.uniform(*apy_ranges["Uniswap-V3"]["ETH"]),
+                    protocol="Maker",
+                    asset=maker_eth_ilk,
+                    amount=round(eth_maker_amount, 4),
+                    leverage=random.uniform(1.0, max_leverage["Maker"][maker_eth_ilk]),
+                    apy=random.uniform(*apy_ranges["Maker"][maker_eth_ilk]),
                 )
             )
 
@@ -889,17 +899,17 @@ class BlockchainService:
                 )
             )
 
-            # BTC在Aave
+            # BTC在Maker
             wbtc_amount = (
                 total_portfolio_value * asset_allocation["BTC"]
             ) / current_prices["BTC"]
             positions.append(
                 ProtocolPosition(
-                    protocol="Aave-V3",
-                    asset="BTC",
+                    protocol="Maker",
+                    asset="WBTC-A",
                     amount=round(wbtc_amount, 6),
-                    leverage=random.uniform(1.0, max_leverage["Aave-V3"]["BTC"]),
-                    apy=random.uniform(*apy_ranges["Aave-V3"]["BTC"]),
+                    leverage=random.uniform(1.0, max_leverage["Maker"]["WBTC-A"]),
+                    apy=random.uniform(*apy_ranges["Maker"]["WBTC-A"]),
                 )
             )
 
@@ -928,14 +938,18 @@ class BlockchainService:
                     protocol="Curve Finance", asset="USDT/USDC", amount=8000, apy=0.05
                 ),
                 ProtocolPosition(
-                    protocol="Aave V3",
-                    asset="BTC",
-                    amount=0.15,
-                    leverage=1.2,
+                    protocol="Maker",
+                    asset="ETH-A",
+                    amount=0.8,
+                    leverage=1.8,
                     apy=0.015,
                 ),
                 ProtocolPosition(
-                    protocol="Uniswap-V2", asset="ETH/USDC", amount=0.8, apy=0.08
+                    protocol="Maker",
+                    asset="WBTC-A",
+                    amount=0.15,
+                    leverage=1.2,
+                    apy=0.01,
                 ),
             ]
 
@@ -1296,83 +1310,346 @@ class BlockchainService:
             },
         ]
 
+        # Maker Protocol ABI
+        self.maker_cdp_manager_abi = [
+            {
+                "constant": True,
+                "inputs": [{"name": "cdp", "type": "uint256"}],
+                "name": "ilks",
+                "outputs": [{"name": "", "type": "bytes32"}],
+                "payable": False,
+                "stateMutability": "view",
+                "type": "function",
+            },
+            {
+                "constant": True,
+                "inputs": [{"name": "cdp", "type": "uint256"}],
+                "name": "urns",
+                "outputs": [{"name": "", "type": "address"}],
+                "payable": False,
+                "stateMutability": "view",
+                "type": "function",
+            },
+            {
+                "constant": True,
+                "inputs": [{"name": "usr", "type": "address"}],
+                "name": "first",
+                "outputs": [{"name": "", "type": "uint256"}],
+                "payable": False,
+                "stateMutability": "view",
+                "type": "function",
+            },
+            {
+                "constant": True,
+                "inputs": [{"name": "usr", "type": "address"}],
+                "name": "last",
+                "outputs": [{"name": "", "type": "uint256"}],
+                "payable": False,
+                "stateMutability": "view",
+                "type": "function",
+            },
+        ]
+
+        self.maker_vat_abi = [
+            {
+                "constant": True,
+                "inputs": [
+                    {"name": "", "type": "bytes32"},
+                    {"name": "", "type": "address"},
+                ],
+                "name": "urns",
+                "outputs": [
+                    {"name": "ink", "type": "uint256"},
+                    {"name": "art", "type": "uint256"},
+                ],
+                "payable": False,
+                "stateMutability": "view",
+                "type": "function",
+            },
+            {
+                "constant": True,
+                "inputs": [{"name": "", "type": "bytes32"}],
+                "name": "ilks",
+                "outputs": [
+                    {"name": "Art", "type": "uint256"},
+                    {"name": "rate", "type": "uint256"},
+                    {"name": "spot", "type": "uint256"},
+                    {"name": "line", "type": "uint256"},
+                    {"name": "dust", "type": "uint256"},
+                ],
+                "payable": False,
+                "stateMutability": "view",
+                "type": "function",
+            },
+        ]
+
+        self.maker_jug_abi = [
+            {
+                "constant": True,
+                "inputs": [{"name": "", "type": "bytes32"}],
+                "name": "ilks",
+                "outputs": [
+                    {"name": "duty", "type": "uint256"},
+                    {"name": "rho", "type": "uint256"},
+                ],
+                "payable": False,
+                "stateMutability": "view",
+                "type": "function",
+            }
+        ]
+
     async def _get_aave_v3_positions(self, address: str) -> List[ProtocolPosition]:
         """获取用户在Aave V3的存款头寸"""
         positions = []
 
         try:
-            # 获取Aave V3合约
-            pool_address = "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"
-            data_provider_address = "0x7B4EB56E7CD4b454BA8ff71E4518426369a138a3"
+            # 如果是演示模式，返回演示数据
+            if address.lower() == DEMO_ADDRESS.lower() or self.demo_mode:
+                logger.info(f"为演示地址返回预设Aave V3头寸数据")
+                # 返回一些演示的Aave V3头寸
+                return [
+                    ProtocolPosition(
+                        protocol="Aave-V3",
+                        asset="ETH",
+                        amount=1.2,
+                        leverage=1.5,
+                        apy=0.02,
+                    ),
+                    ProtocolPosition(
+                        protocol="Aave-V3",
+                        asset="USDC",
+                        amount=5000,
+                        leverage=1.0,
+                        apy=0.04,
+                    ),
+                    ProtocolPosition(
+                        protocol="Aave-V3",
+                        asset="BTC",
+                        amount=0.15,
+                        leverage=1.2,
+                        apy=0.015,
+                    ),
+                ]
 
-            pool_contract = self.w3.eth.contract(
-                address=pool_address, abi=self.aave_pool_abi
+            # 使用Aave V3 Subgraph获取用户的头寸信息
+            # 根据网络选择合适的subgraph端点
+            # 使用Messari的Aave V3 subgraph端点
+            subgraph_url = (
+                "https://api.thegraph.com/subgraphs/name/messari/aave-v3-ethereum"
             )
 
-            data_provider_contract = self.w3.eth.contract(
-                address=data_provider_address, abi=self.aave_data_provider_abi
+            # 构建GraphQL查询，获取用户的存款和借款头寸
+            # 根据Messari的Subgraph Schema构建查询
+            query = """
+            query GetUserPositions($userAddress: String!) {
+              account(id: $userAddress) {
+                id
+                positions(where: {side: LENDER}) {
+                  id
+                  side
+                  balance
+                  isCollateral
+                  isIsolated
+                  market {
+                    id
+                    name
+                    inputToken {
+                      id
+                      name
+                      symbol
+                      decimals
+                    }
+                    outputToken {
+                      id
+                      name
+                      symbol
+                      decimals
+                    }
+                    rates(where: {side: LENDER}) {
+                      rate
+                      side
+                      type
+                    }
+                    maximumLTV
+                    liquidationThreshold
+                    liquidationPenalty
+                    totalValueLockedUSD
+                    totalBorrowBalanceUSD
+                    inputTokenPriceUSD
+                    canUseAsCollateral
+                  }
+                }
+                # 获取借款头寸
+                borrowingPositions: positions(where: {side: BORROWER}) {
+                  id
+                  balance
+                  side
+                  type
+                  market {
+                    id
+                    inputToken {
+                      id
+                      symbol
+                      decimals
+                    }
+                    inputTokenPriceUSD
+                    rates(where: {side: BORROWER}) {
+                      rate
+                      side
+                      type
+                    }
+                  }
+                }
+                _enabledCollaterals {
+                  id
+                }
+                _eMode
+              }
+            }
+            """
+
+            # 设置查询变量
+            variables = {"userAddress": address.lower()}
+
+            # 发送GraphQL请求
+            logger.info(f"向Aave V3 Subgraph发送查询，获取地址{address}的头寸")
+            response = requests.post(
+                subgraph_url,
+                json={"query": query, "variables": variables},
+                proxies=proxies,
             )
 
-            # 获取所有支持的代币
-            all_reserves = (
-                data_provider_contract.functions.getAllReservesTokens().call()
+            if response.status_code != 200:
+                logger.error(
+                    f"Subgraph请求失败: {response.status_code}, {response.text}"
+                )
+                return []
+
+            data = response.json()
+
+            if "errors" in data:
+                logger.error(f"Subgraph查询错误: {data['errors']}")
+                return []
+
+            if (
+                "data" not in data
+                or "account" not in data["data"]
+                or not data["data"]["account"]
+            ):
+                logger.warning(f"Subgraph返回的数据格式不正确或用户不存在: {data}")
+                return []
+
+            # 处理存款头寸
+            account_data = data["data"]["account"]
+            lender_positions = account_data.get("positions", [])
+
+            # 处理借款头寸以计算杠杆率
+            borrower_positions = account_data.get("borrowingPositions", [])
+
+            # 获取用户的eMode状态
+            emode_enabled = account_data.get("_eMode", False)
+
+            # 获取用户启用的抵押品市场
+            enabled_collaterals = account_data.get("_enabledCollaterals", [])
+            enabled_collateral_ids = (
+                [collateral["id"] for collateral in enabled_collaterals]
+                if enabled_collaterals
+                else []
             )
 
-            # 获取用户账户数据（总抵押品、总债务等）
-            account_data = pool_contract.functions.getUserAccountData(address).call()
-            total_collateral_eth = account_data[0]
-            total_debt_eth = account_data[1]
-            health_factor = account_data[5]
+            # 如果没有找到任何头寸，返回空列表
+            if not lender_positions and not borrower_positions:
+                logger.info(f"地址 {address} 在Aave V3上没有找到任何头寸")
+                return []
 
-            # 计算杠杆率
-            leverage = 1.0
-            if total_collateral_eth > 0:
-                leverage = (
-                    total_collateral_eth + total_debt_eth
-                ) / total_collateral_eth
+            # 计算总存款价值和总借款价值（用于计算杠杆率）
+            total_deposit_value_usd = 0
+            total_borrow_value_usd = 0
 
-            # 遍历所有资产，检查用户的存款
-            for reserve in all_reserves:
-                token_symbol = reserve[0]
-                token_address = reserve[1]
+            # 计算借款价值
+            for borrow_pos in borrower_positions:
+                token_decimals = int(borrow_pos["market"]["inputToken"]["decimals"])
+                token_price_usd = float(borrow_pos["market"]["inputTokenPriceUSD"])
+                borrow_balance = int(borrow_pos["balance"]) / (10**token_decimals)
+                borrow_value_usd = borrow_balance * token_price_usd
+                total_borrow_value_usd += borrow_value_usd
 
-                # 获取用户在该资产上的数据
-                user_reserve_data = data_provider_contract.functions.getUserReserveData(
-                    token_address, address
-                ).call()
+                # 获取借款利率
+                borrow_apy = 0.0
+                borrow_type = borrow_pos.get("type", "VARIABLE")
+                for rate in borrow_pos["market"]["rates"]:
+                    if rate["side"] == "BORROWER" and rate["type"] == borrow_type:
+                        borrow_apy = float(rate["rate"])
+                        break
 
-                current_atoken_balance = user_reserve_data[0]
+                logger.info(
+                    f"发现Aave V3 {borrow_pos['market']['inputToken']['symbol']}借款: {borrow_balance:.6f} "
+                    f"(APY: {borrow_apy*100:.2f}%, 价值: ${borrow_value_usd:.2f}, "
+                    f"类型: {borrow_type})"
+                )
 
-                # 如果用户有存款
-                if current_atoken_balance > 0:
-                    # 获取代币信息
-                    token_contract = self.w3.eth.contract(
-                        address=token_address, abi=self.erc20_abi
-                    )
+            # 处理每个存款头寸
+            for pos in lender_positions:
+                try:
+                    market = pos["market"]
+                    token = market["inputToken"]
+                    token_symbol = token["symbol"]
+                    token_decimals = int(token["decimals"])
 
-                    # 获取代币精度
-                    try:
-                        decimals = token_contract.functions.decimals().call()
-                    except Exception:
-                        decimals = 18  # 默认精度
+                    # 获取存款余额
+                    balance = int(pos["balance"])
+                    amount = balance / (10**token_decimals)
 
-                    # 计算实际金额
-                    amount = current_atoken_balance / (10**decimals)
+                    # 获取代币价格
+                    token_price_usd = float(market["inputTokenPriceUSD"])
+                    deposit_value_usd = amount * token_price_usd
+                    total_deposit_value_usd += deposit_value_usd
 
                     # 获取存款APY
-                    liquidity_rate = user_reserve_data[6]
-                    apy = liquidity_rate / (10**27)  # Aave使用ray单位(10^27)
+                    apy = 0.0
+                    for rate in market["rates"]:
+                        if rate["side"] == "LENDER" and rate["type"] == "VARIABLE":
+                            apy = float(rate["rate"])
+                            break
+
+                    # 是否用作抵押品
+                    is_collateral = pos["isCollateral"]
+
+                    # 是否为隔离资产
+                    is_isolated = pos.get("isIsolated", False)
 
                     # 创建头寸对象
                     position = ProtocolPosition(
-                        protocol="Aave V3",
+                        protocol="Aave-V3",
                         asset=token_symbol,
                         amount=amount,
-                        leverage=leverage,
+                        leverage=None,  # 稍后计算整体杠杆率
                         apy=apy,
                     )
 
                     positions.append(position)
+                    logger.info(
+                        f"发现Aave V3 {token_symbol}存款: {amount:.6f} "
+                        f"(APY: {apy*100:.2f}%, 价值: ${deposit_value_usd:.2f}, "
+                        f"用作抵押品: {is_collateral}, 隔离资产: {is_isolated})"
+                    )
+                except Exception as e:
+                    logger.error(f"处理Aave V3存款头寸时出错: {e}")
+
+            # 计算整体杠杆率
+            leverage = 1.0
+            if total_deposit_value_usd > 0:
+                leverage = (
+                    total_deposit_value_usd + total_borrow_value_usd
+                ) / total_deposit_value_usd
+
+            # 更新所有头寸的杠杆率
+            for position in positions:
+                position.leverage = leverage
+
+            # 记录eMode状态
+            if emode_enabled:
+                logger.info(f"用户已启用eMode (高效模式)")
 
             return positions
 
@@ -1755,221 +2032,99 @@ class BlockchainService:
             logger.error(f"获取Curve Finance头寸时出错: {e}")
             return []
 
-    async def _get_uniswap_v3_positions(self, address: str) -> List[ProtocolPosition]:
-        """获取用户在Uniswap V3的LP头寸"""
+    async def _get_maker_positions(self, address: str) -> List[ProtocolPosition]:
+        """获取用户在Maker协议中的CDP头寸"""
         positions = []
 
         try:
-            # 使用TheGraph查询Uniswap V3头寸数据
-            uniswap_v3_graph_url = "https://gateway.thegraph.com/api/95d759c3b12e4dd174e4f7e2adfa4882/subgraphs/id/5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV"
+            # Maker合约地址
+            cdp_manager_address = "0x5ef30b9986345249bc32d8928B7ee64DE9435E39"
+            vat_address = "0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B"
+            jug_address = "0x19c0976f590D67707E62397C87829d896Dc0f1F1"
 
-            # 使用用户提供的GraphQL查询结构
-            query = (
-                """
-            {
-              positions(
-                where: { owner: "%s" }
-                orderBy: liquidity
-                orderDirection: desc
-                first: 100
-              ) {
-                id
-                liquidity
-                tickLower { tickIdx }
-                tickUpper { tickIdx }
-                pool {
-                  id
-                  token0 {
-                    symbol
-                    id
-                    decimals
-                  }
-                  token1 {
-                    symbol
-                    id
-                    decimals
-                  }
-                  feeTier
-                  liquidity
-                  sqrtPrice
-                  tick
-                  createdAtTimestamp
-                }
-                depositedToken0
-                depositedToken1
-                withdrawnToken0
-                withdrawnToken1
-                collectedFeesToken0
-                collectedFeesToken1
-              }
-            }
-            """
-                % address.lower()
+            # 创建合约实例
+            cdp_manager = self.w3.eth.contract(
+                address=cdp_manager_address, abi=self.maker_cdp_manager_abi
             )
+            vat = self.w3.eth.contract(address=vat_address, abi=self.maker_vat_abi)
+            jug = self.w3.eth.contract(address=jug_address, abi=self.maker_jug_abi)
 
-            try:
-                response = requests.post(
-                    uniswap_v3_graph_url, json={"query": query}, proxies=self.proxies
-                )
+            # 获取用户的第一个和最后一个CDP
+            first_cdp = cdp_manager.functions.first(address).call()
+            last_cdp = cdp_manager.functions.last(address).call()
 
-                if response.status_code == 200:
-                    data = response.json()
+            # 如果用户没有CDP，返回空列表
+            if first_cdp == 0:
+                logger.info(f"用户 {address} 在Maker中没有CDP")
+                return positions
 
-                    if "data" in data and "positions" in data["data"]:
-                        v3_positions = data["data"]["positions"]
-                        logger.info(
-                            f"从TheGraph获取到 {len(v3_positions)} 个Uniswap V3头寸"
-                        )
+            # 遍历用户的所有CDP
+            current_cdp = first_cdp
+            while current_cdp <= last_cdp:
+                try:
+                    # 获取CDP的ilk（抵押品类型）
+                    ilk = cdp_manager.functions.ilks(current_cdp).call()
 
-                        for position_data in v3_positions:
-                            try:
-                                # 跳过流动性为0的头寸
-                                if int(position_data["liquidity"]) == 0:
-                                    continue
+                    # 获取CDP的urn（金库）地址
+                    urn = cdp_manager.functions.urns(current_cdp).call()
 
-                                pool = position_data["pool"]
-                                token0 = pool["token0"]
-                                token1 = pool["token1"]
+                    # 获取金库信息
+                    urn_data = vat.functions.urns(ilk, urn).call()
+                    ink = urn_data[0]  # 抵押品数量
+                    art = urn_data[1]  # 借出的DAI数量
 
-                                token0_symbol = token0["symbol"]
-                                token1_symbol = token1["symbol"]
-                                token0_decimals = int(token0["decimals"])
-                                token1_decimals = int(token1["decimals"])
+                    # 获取ilk信息
+                    ilk_data = vat.functions.ilks(ilk).call()
+                    rate = ilk_data[1]  # 累积利率
+                    spot = ilk_data[2]  # 清算价格
 
-                                # 计算当前头寸中的代币数量
-                                # 存入的代币
-                                deposited_token0 = float(
-                                    position_data["depositedToken0"]
-                                ) / (10**token0_decimals)
-                                deposited_token1 = float(
-                                    position_data["depositedToken1"]
-                                ) / (10**token1_decimals)
+                    # 获取稳定费率
+                    jug_data = jug.functions.ilks(ilk).call()
+                    duty = jug_data[0]  # 年化稳定费率
 
-                                # 提取的代币
-                                withdrawn_token0 = float(
-                                    position_data["withdrawnToken0"]
-                                ) / (10**token0_decimals)
-                                withdrawn_token1 = float(
-                                    position_data["withdrawnToken1"]
-                                ) / (10**token1_decimals)
+                    # 将ilk从bytes32转换为字符串
+                    ilk_str = self.w3.to_text(ilk).strip("\x00")
 
-                                # 收集的手续费
-                                fees_token0 = float(
-                                    position_data["collectedFeesToken0"]
-                                ) / (10**token0_decimals)
-                                fees_token1 = float(
-                                    position_data["collectedFeesToken1"]
-                                ) / (10**token1_decimals)
+                    # 计算实际数值
+                    collateral_amount = ink / (10**18)  # 假设18位小数
+                    debt_amount = (art * rate) / (10**45)  # rate使用27位小数
 
-                                # 计算净头寸
-                                net_token0 = (
-                                    deposited_token0 - withdrawn_token0 + fees_token0
-                                )
-                                net_token1 = (
-                                    deposited_token1 - withdrawn_token1 + fees_token1
-                                )
+                    # 计算年化利率
+                    apy = (duty / (10**27)) - 1
 
-                                # 获取当前价格
-                                current_tick = int(pool["tick"])
-                                tick_lower = int(position_data["tickLower"]["tickIdx"])
-                                tick_upper = int(position_data["tickUpper"]["tickIdx"])
+                    # 计算杠杆率
+                    leverage = None
+                    if collateral_amount > 0:
+                        leverage = debt_amount / collateral_amount
 
-                                # 计算价格范围
-                                lower_price = 1.0001**tick_lower
-                                upper_price = 1.0001**tick_upper
-                                current_price = 1.0001**current_tick
-
-                                # 计算费率
-                                fee_tier = (
-                                    int(pool["feeTier"]) / 1000000
-                                )  # 转换为百分比
-
-                                # 尝试估算APY
-                                apy = None
-                                try:
-                                    # 获取池创建时间
-                                    created_timestamp = int(pool["createdAtTimestamp"])
-                                    current_timestamp = int(time.time())
-                                    pool_age_days = (
-                                        current_timestamp - created_timestamp
-                                    ) / 86400
-
-                                    if pool_age_days > 0:
-                                        # 估算每日费用收入
-                                        daily_fees_token0 = fees_token0 / pool_age_days
-                                        daily_fees_token1 = fees_token1 / pool_age_days
-
-                                        # 获取代币价格
-                                        token0_price = await self.get_asset_price(
-                                            token0_symbol
-                                        )
-                                        token1_price = await self.get_asset_price(
-                                            token1_symbol
-                                        )
-
-                                        # 计算每日费用的USD价值
-                                        daily_fees_usd = (
-                                            daily_fees_token0 * token0_price
-                                        ) + (daily_fees_token1 * token1_price)
-
-                                        # 计算头寸的USD价值
-                                        position_value_usd = (
-                                            net_token0 * token0_price
-                                        ) + (net_token1 * token1_price)
-
-                                        if position_value_usd > 0:
-                                            # 年化收益率
-                                            apy = (
-                                                daily_fees_usd * 365
-                                            ) / position_value_usd
-                                except Exception as e:
-                                    logger.error(f"计算Uniswap V3头寸APY时出错: {e}")
-
-                                # 创建头寸对象
-                                position = ProtocolPosition(
-                                    protocol="Uniswap V3",
-                                    asset=f"{token0_symbol}/{token1_symbol} ({fee_tier*100}%)",
-                                    amount=1.0,  # V3头寸是NFT，数量始终为1
-                                    leverage=None,  # Uniswap没有杠杆
-                                    apy=apy,
-                                )
-
-                                position = ProtocolPosition(
-                                    protocol="Uniswap V3",
-                                    asset=f"{token0_symbol}/{token1_symbol} ({fee_tier*100}%)",
-                                    amount=1.0,  # V3头寸是NFT，数量始终为1
-                                    leverage=None,  # Uniswap没有杠杆
-                                    apy=apy,
-                                )
-
-                                positions.append(position)
-
-                                # 记录详细信息
-                                logger.info(
-                                    f"发现Uniswap V3 {token0_symbol}/{token1_symbol} 头寸: "
-                                    f"ID {position_data['id']} "
-                                    f"价格范围: {lower_price:.6f} - {upper_price:.6f} "
-                                    f"({net_token0:.6f} {token0_symbol}, {net_token1:.6f} {token1_symbol})"
-                                )
-                                if apy:
-                                    logger.info(f"  估计APY: {apy*100:.2f}%")
-
-                            except Exception as e:
-                                logger.error(
-                                    f"处理Uniswap V3头寸 {position_data.get('id', 'Unknown')} 时出错: {e}"
-                                )
-                else:
-                    logger.error(
-                        f"从TheGraph获取Uniswap V3数据失败: {response.status_code} {response.text}"
+                    # 创建头寸对象
+                    position = ProtocolPosition(
+                        protocol="Maker",
+                        asset=f"{ilk_str}",
+                        amount=collateral_amount,
+                        leverage=leverage,
+                        apy=apy,
                     )
 
-            except Exception as e:
-                logger.error(f"从TheGraph获取Uniswap V3头寸数据时出错: {e}")
+                    positions.append(position)
+
+                    logger.info(
+                        f"发现Maker CDP #{current_cdp}: "
+                        f"{collateral_amount:.6f} {ilk_str} "
+                        f"(借出: {debt_amount:.2f} DAI, "
+                        f"杠杆率: {leverage:.2f}x, "
+                        f"APY: {apy*100:.2f}%)"
+                    )
+
+                except Exception as e:
+                    logger.error(f"处理CDP #{current_cdp}时出错: {e}")
+
+                current_cdp += 1
 
             return positions
 
         except Exception as e:
-            logger.error(f"获取Uniswap V3头寸时出错: {e}")
+            logger.error(f"获取Maker头寸时出错: {e}")
             return []
 
     async def get_gas_price(self) -> float:
