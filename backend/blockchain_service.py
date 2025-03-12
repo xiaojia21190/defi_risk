@@ -1424,24 +1424,25 @@ class BlockchainService:
                     ),
                     ProtocolPosition(
                         protocol="Aave-V3",
-                        asset="BTC",
+                        asset="USDT",
                         amount=0.15,
+                        leverage=1.2,
+                        apy=0.015,
+                    ),
+                    ProtocolPosition(
+                        protocol="Aave-V3",
+                        asset="WBTC",
+                        amount=0.001,
                         leverage=1.2,
                         apy=0.015,
                     ),
                 ]
 
-            # 使用Aave V3 Subgraph获取用户的头寸信息
-            # 根据网络选择合适的subgraph端点
-            # 使用Messari的Aave V3 subgraph端点
-            subgraph_url = (
-                "https://api.thegraph.com/subgraphs/name/messari/aave-v3-ethereum"
-            )
+            subgraph_url = "https://gateway.thegraph.com/api/95d759c3b12e4dd174e4f7e2adfa4882/subgraphs/id/JCNWRypm7FYwV8fx5HhzZPSFaMxgkPuw4TnR3Gpi81zk"
 
             # 构建GraphQL查询，获取用户的存款和借款头寸
             # 根据Messari的Subgraph Schema构建查询
             query = """
-            query GetUserPositions($userAddress: String!) {
               account(id: $userAddress) {
                 id
                 positions(where: {side: LENDER}) {
@@ -1500,12 +1501,7 @@ class BlockchainService:
                     }
                   }
                 }
-                _enabledCollaterals {
-                  id
-                }
-                _eMode
               }
-            }
             """
 
             # 设置查询变量
@@ -1545,17 +1541,6 @@ class BlockchainService:
 
             # 处理借款头寸以计算杠杆率
             borrower_positions = account_data.get("borrowingPositions", [])
-
-            # 获取用户的eMode状态
-            emode_enabled = account_data.get("_eMode", False)
-
-            # 获取用户启用的抵押品市场
-            enabled_collaterals = account_data.get("_enabledCollaterals", [])
-            enabled_collateral_ids = (
-                [collateral["id"] for collateral in enabled_collaterals]
-                if enabled_collaterals
-                else []
-            )
 
             # 如果没有找到任何头寸，返回空列表
             if not lender_positions and not borrower_positions:
@@ -1647,10 +1632,6 @@ class BlockchainService:
             for position in positions:
                 position.leverage = leverage
 
-            # 记录eMode状态
-            if emode_enabled:
-                logger.info(f"用户已启用eMode (高效模式)")
-
             return positions
 
         except Exception as e:
@@ -1661,11 +1642,37 @@ class BlockchainService:
         """获取用户在Compound V3的存款和借款头寸"""
         positions = []
 
+        # 如果是演示模式，返回演示数据
+        if address.lower() == DEMO_ADDRESS.lower() or self.demo_mode:
+            logger.info(f"为演示地址返回预设Compound V3头寸数据")
+            # 返回一些演示的Compound V3头寸
+            return [
+                ProtocolPosition(
+                    protocol="Compound V3",
+                    asset="ETH",
+                    amount=1.2,
+                    leverage=1.5,
+                    apy=0.02,
+                ),
+                ProtocolPosition(
+                    protocol="Compound V3",
+                    asset="USDC",
+                    amount=12000,
+                    leverage=1.0,
+                    apy=0.04,
+                ),
+                ProtocolPosition(
+                    protocol="Compound V3",
+                    asset="USDT",
+                    amount=8000,
+                    leverage=1.0,
+                    apy=0.05,
+                ),
+            ]
+
         try:
             # Compound V3 subgraph API地址
-            compound_v3_subgraph_url = (
-                "https://api.thegraph.com/subgraphs/name/messari/compound-v3-ethereum"
-            )
+            compound_v3_subgraph_url = "https://gateway.thegraph.com/api/95d759c3b12e4dd174e4f7e2adfa4882/subgraphs/id/AwoxEZbiWLvv6e3QdvdMZw4WDURdGbvPfHmZRc8Dpfz9"
 
             # 构建GraphQL查询，获取用户的所有头寸
             query = """
@@ -1846,7 +1853,7 @@ class BlockchainService:
 
                                 position = ProtocolPosition(
                                     protocol="Compound V3",
-                                    asset=f"{asset['symbol']}{position_type}",
+                                    asset=f"{asset['symbol']}",
                                     amount=balance,
                                     leverage=leverage,
                                     apy=apy,
@@ -1884,6 +1891,34 @@ class BlockchainService:
     async def _get_curve_positions(self, address: str) -> List[ProtocolPosition]:
         """获取用户在Curve的存款头寸"""
         positions = []
+
+        # 如果是演示模式，返回演示数据
+        if address.lower() == DEMO_ADDRESS.lower() or self.demo_mode:
+            logger.info(f"为演示地址返回预设Curve头寸数据")
+            # 返回一些演示的Curve头寸
+            return [
+                ProtocolPosition(
+                    protocol="Curve Finance",
+                    asset="ETH",
+                    amount=1.2,
+                    leverage=1.5,
+                    apy=0.02,
+                ),
+                ProtocolPosition(
+                    protocol="Curve Finance",
+                    asset="USDC",
+                    amount=12000,
+                    leverage=1.0,
+                    apy=0.04,
+                ),
+                ProtocolPosition(
+                    protocol="Curve Finance",
+                    asset="USDT",
+                    amount=8000,
+                    leverage=1.0,
+                    apy=0.05,
+                ),
+            ]
 
         try:
             # 从Curve API获取所有池子信息
@@ -2035,6 +2070,22 @@ class BlockchainService:
     async def _get_maker_positions(self, address: str) -> List[ProtocolPosition]:
         """获取用户在Maker协议中的CDP头寸"""
         positions = []
+
+        # 如果是演示模式，返回演示数据
+        if address.lower() == DEMO_ADDRESS.lower() or self.demo_mode:
+            logger.info(f"为演示地址返回预设Maker头寸数据")
+            # 返回一些演示的Maker头寸
+            return [
+                ProtocolPosition(
+                    protocol="Maker", asset="ETH", amount=1.2, leverage=1.5, apy=0.02
+                ),
+                ProtocolPosition(
+                    protocol="Maker", asset="USDC", amount=12000, leverage=1.0, apy=0.04
+                ),
+                ProtocolPosition(
+                    protocol="Maker", asset="USDT", amount=8000, leverage=1.0, apy=0.05
+                ),
+            ]
 
         try:
             # Maker合约地址
