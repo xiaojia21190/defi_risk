@@ -934,7 +934,7 @@ class RiskCalculator:
                 "Aave": 0.9,  # 较为成熟的借贷协议
                 "Compound": 0.9,  # 较为成熟的借贷协议
                 "Uniswap": 1.0,  # DEX
-                "Curve": 1.0,  # DEX
+                "Curve Finance": 1.0,  # DEX
             }
 
             # 获取协议风险乘数，默认为1.1

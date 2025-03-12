@@ -117,9 +117,12 @@ DEMO_ASSETS = {
 }
 
 DEMO_PROTOCOLS = {
-    "Aave V3": {"risk": 0.25, "apy_range": (0.02, 0.05)},
+    "Aave V3": {
+        "risk": 0.25,
+        "apy_range": (0.02, 0.05),
+    },
     "Compound V3": {"risk": 0.20, "apy_range": (0.03, 0.06)},
-    "Curve": {"risk": 0.30, "apy_range": (0.04, 0.10)},
+    "Curve Finance": {"risk": 0.30, "apy_range": (0.04, 0.10)},
     "Uniswap V2": {"risk": 0.35, "apy_range": (0.05, 0.15)},
     "Balancer": {"risk": 0.30, "apy_range": (0.04, 0.12)},
 }
@@ -142,6 +145,9 @@ class BlockchainService:
         self.historical_data_cache = HistoricalDataCache()
         self.data_fetch_locks = {}  # 用于防止并发获取相同数据
         self.pending_requests = {}  # 用于合并请求
+        self._load_contract_abis()
+
+        DEMO_PROTOCOLS.get("Aave V3")
 
         # 配置日志
         self.logger = logging.getLogger("blockchain_service")
@@ -187,12 +193,12 @@ class BlockchainService:
             except Exception as e:
                 logger.error(f"获取Compound V3头寸时出错: {e}")
 
-            # 3. 获取Curve头寸
+            # 3. 获取Curve Finance头寸
             try:
                 curve_positions = await self._get_curve_positions(address)
                 positions.extend(curve_positions)
             except Exception as e:
-                logger.error(f"获取Curve头寸时出错: {e}")
+                logger.error(f"获取Curve Finance头寸时出错: {e}")
 
             # 4. 获取Uniswap V2头寸
             try:
@@ -945,7 +951,7 @@ class BlockchainService:
                     "USDT": (0.03, 0.045),
                     "BTC": (0.012, 0.022),
                 },
-                "Curve": {
+                "Curve Finance": {
                     "USDT": (0.04, 0.06),
                     "USDC": (0.04, 0.06),
                 },
@@ -1023,16 +1029,16 @@ class BlockchainService:
                 )
             )
 
-            # USDT在Curve
+            # USDT在Curve Finance
             usdt_amount = (
                 total_portfolio_value * asset_allocation["USDT"]
             ) / current_prices["USDT"]
             positions.append(
                 ProtocolPosition(
-                    protocol="Curve",
+                    protocol="Curve Finance",
                     asset="USDT/USDC",  # 稳定币池
                     amount=round(usdt_amount, 2),
-                    apy=random.uniform(*apy_ranges["Curve"]["USDT"]),
+                    apy=random.uniform(*apy_ranges["Curve Finance"]["USDT"]),
                 )
             )
 
@@ -1072,7 +1078,7 @@ class BlockchainService:
                     apy=0.04,
                 ),
                 ProtocolPosition(
-                    protocol="Curve", asset="USDT/USDC", amount=8000, apy=0.05
+                    protocol="Curve Finance", asset="USDT/USDC", amount=8000, apy=0.05
                 ),
                 ProtocolPosition(
                     protocol="Aave V3",
@@ -1290,9 +1296,25 @@ class BlockchainService:
                 "stateMutability": "view",
                 "type": "function",
             },
+            {
+                "inputs": [],
+                "name": "baseTokenPriceFeed",
+                "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+                "stateMutability": "view",
+                "type": "function",
+            },
+            {
+                "inputs": [
+                    {"internalType": "address", "name": "priceFeed", "type": "address"}
+                ],
+                "name": "getPrice",
+                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function",
+            },
         ]
 
-        # Curve ABI
+        # Curve Finance ABI
         self.curve_registry_abi = [
             {
                 "name": "get_pool_from_lp_token",
@@ -1387,7 +1409,6 @@ class BlockchainService:
                 "type": "function",
             },
         ]
-
         # ERC20 ABI (用于获取代币信息和余额)
         self.erc20_abi = [
             {
@@ -1428,40 +1449,14 @@ class BlockchainService:
             },
         ]
 
-    def _init_token_addresses(self):
-        """初始化常用代币地址映射"""
-        self.token_addresses = {
-            "ETH": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",  # 以太坊原生代币特殊地址
-            "WETH": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-            "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-            "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-            "BTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
-            "AAVE": "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9",
-            "COMP": "0xc00e94Cb662C3520282E6f5717214004A7f26888",
-            "UNI": "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
-            "LINK": "0x514910771AF9Ca656af840dff83E8264EcF986CA",
-        }
-
-        # Aave V3代币地址映射
-        self.aave_v3_atokens = {}  # 将在运行时从数据提供者获取
-
-        # Compound V3抵押品地址
-        self.compound_v3_collaterals = {
-            "WETH": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-            "BTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
-            "COMP": "0xc00e94Cb662C3520282E6f5717214004A7f26888",
-            "UNI": "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
-            "LINK": "0x514910771AF9Ca656af840dff83E8264EcF986CA",
-        }
-
     async def _get_aave_v3_positions(self, address: str) -> List[ProtocolPosition]:
         """获取用户在Aave V3的存款头寸"""
         positions = []
 
         try:
             # 获取Aave V3合约
-            pool_address = self.protocol_contracts["Aave V3"]["pool"]
-            data_provider_address = self.protocol_contracts["Aave V3"]["data_provider"]
+            pool_address = "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"
+            data_provider_address = "0x7B4EB56E7CD4b454BA8ff71E4518426369a138a3"
 
             pool_contract = self.w3.eth.contract(
                 address=pool_address, abi=self.aave_pool_abi
@@ -1543,72 +1538,146 @@ class BlockchainService:
         positions = []
 
         try:
-            # 获取Compound V3 Comet合约（USDC市场）
-            comet_address = self.protocol_contracts["Compound V3"]["comet"]
-            comet_contract = self.w3.eth.contract(
-                address=comet_address, abi=self.compound_comet_abi
-            )
+            # Compound V3市场配置
+            markets = [
+                {
+                    "name": "USDC市场",
+                    "address": "0xc3d688B66703497DAA19211EEdff47f25384cdc3",
+                    "base_token": "USDC",
+                    "base_decimals": 6,
+                    "collaterals": [
+                        {
+                            "symbol": "WETH",
+                            "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+                            "decimals": 18,
+                        },
+                        {
+                            "symbol": "WBTC",
+                            "address": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+                            "decimals": 8,
+                        },
+                        {
+                            "symbol": "COMP",
+                            "address": "0xc00e94Cb662C3520282E6f5717214004A7f26888",
+                            "decimals": 18,
+                        },
+                        {
+                            "symbol": "UNI",
+                            "address": "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
+                            "decimals": 18,
+                        },
+                        {
+                            "symbol": "LINK",
+                            "address": "0x514910771AF9Ca656af840dff83E8264EcF986CA",
+                            "decimals": 18,
+                        },
+                    ],
+                },
+                {
+                    "name": "WETH市场",
+                    "address": "0xA17581A9E3356d9A858b789D68B4d866e593aE94",
+                    "base_token": "WETH",
+                    "base_decimals": 18,
+                    "collaterals": [
+                        {
+                            "symbol": "WBTC",
+                            "address": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+                            "decimals": 8,
+                        },
+                        {
+                            "symbol": "COMP",
+                            "address": "0xc00e94Cb662C3520282E6f5717214004A7f26888",
+                            "decimals": 18,
+                        },
+                        {
+                            "symbol": "UNI",
+                            "address": "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
+                            "decimals": 18,
+                        },
+                        {
+                            "symbol": "LINK",
+                            "address": "0x514910771AF9Ca656af840dff83E8264EcF986CA",
+                            "decimals": 18,
+                        },
+                    ],
+                },
+            ]
 
-            # 获取用户基本数据
-            user_basic = comet_contract.functions.userBasic(address).call()
-            principal = user_basic[0]
-
-            # 获取供应利率
-            supply_rate = comet_contract.functions.getSupplyRate().call()
-            apy = supply_rate / (10**18) * 365 * 24 * 60 * 60  # 转换为年化利率
-
-            # 如果用户有USDC存款（principal < 0表示存款）
-            if principal < 0:
-                # 转换为正数并调整精度
-                usdc_amount = abs(principal) / (10**6)  # USDC有6位小数
-
-                # 创建USDC头寸
-                usdc_position = ProtocolPosition(
-                    protocol="Compound V3",
-                    asset="USDC",
-                    amount=usdc_amount,
-                    leverage=1.0,  # Compound V3 USDC市场不支持杠杆
-                    apy=apy,
-                )
-
-                positions.append(usdc_position)
-
-            # 检查用户的抵押品
-            for symbol, collateral_address in self.compound_v3_collaterals.items():
+            # 遍历所有市场
+            for market in markets:
                 try:
-                    # 获取用户抵押品数据
-                    collateral_data = comet_contract.functions.userCollateral(
-                        address, collateral_address
+                    # 创建合约实例
+                    comet_contract = self.w3.eth.contract(
+                        address=market["address"], abi=self.compound_comet_abi
+                    )
+
+                    # 1. 检查基础资产存款/借款
+                    user_basic = comet_contract.functions.userBasic(address).call()
+                    principal = user_basic[0]
+
+                    # 获取当前利用率和供应利率
+                    utilization = comet_contract.functions.getUtilization().call()
+                    supply_rate = comet_contract.functions.getSupplyRate(
+                        utilization
                     ).call()
+                    annual_supply_rate = supply_rate / 1e18 * 365 * 24 * 60 * 60
 
-                    collateral_balance = collateral_data[0]
-
-                    if collateral_balance > 0:
-                        # 获取代币精度
-                        token_contract = self.w3.eth.contract(
-                            address=collateral_address, abi=self.erc20_abi
+                    if principal < 0:
+                        # 负值表示用户有存款
+                        deposit_amount = abs(principal) / (
+                            10 ** market["base_decimals"]
                         )
 
-                        try:
-                            decimals = token_contract.functions.decimals().call()
-                        except Exception:
-                            decimals = 18  # 默认精度
-
-                        # 计算实际金额
-                        amount = collateral_balance / (10**decimals)
-
-                        # 创建抵押品头寸
+                        # 创建存款头寸
                         position = ProtocolPosition(
                             protocol="Compound V3",
-                            asset=symbol,
-                            amount=amount,
-                            leverage=None,  # 抵押品没有杠杆
-                            apy=0.0,  # 抵押品没有APY
+                            asset=market["base_token"],
+                            amount=deposit_amount,
+                            leverage=1.0,  # 基础资产存款没有杠杆
+                            apy=annual_supply_rate,
                         )
 
                         positions.append(position)
+                        logger.info(
+                            f"发现Compound V3 {market['base_token']}存款: {deposit_amount:.6f} (APY: {annual_supply_rate*100:.2f}%)"
+                        )
+
+                    # 2. 检查所有抵押品资产
+                    for collateral in market["collaterals"]:
+                        try:
+                            collateral_address = collateral["address"]
+                            user_collateral = comet_contract.functions.userCollateral(
+                                address, collateral_address
+                            ).call()
+
+                            collateral_balance = user_collateral[0]
+
+                            if collateral_balance > 0:
+                                # 计算实际金额
+                                collateral_amount = collateral_balance / (
+                                    10 ** collateral["decimals"]
+                                )
+
+                                # 创建抵押品头寸
+                                collateral_position = ProtocolPosition(
+                                    protocol="Compound V3",
+                                    asset=collateral["symbol"],
+                                    amount=collateral_amount,
+                                    leverage=None,  # 抵押品没有杠杆
+                                    apy=0.0,  # 抵押品没有APY
+                                )
+
+                                positions.append(collateral_position)
+                                logger.info(
+                                    f"发现Compound V3 {collateral['symbol']}抵押品: {collateral_amount:.6f}"
+                                )
+                        except Exception as e:
+                            logger.error(
+                                f"获取Compound V3 {collateral['symbol']}抵押品时出错: {e}"
+                            )
+
                 except Exception as e:
-                    logger.error(f"获取Compound V3 {symbol}抵押品时出错: {e}")
+                    logger.error(f"获取Compound V3 {market['name']}数据时出错: {e}")
 
             return positions
 
@@ -1621,75 +1690,150 @@ class BlockchainService:
         positions = []
 
         try:
-            # 获取Curve注册表合约
-            registry_address = self.protocol_contracts["Curve"]["registry"]
-            registry_contract = self.w3.eth.contract(
-                address=registry_address, abi=self.curve_registry_abi
-            )
+            # 从Curve API获取所有池子信息
+            try:
+                # 获取所有池子信息
+                pools_response = requests.get(
+                    "https://api.curve.fi/api/getPools/ethereum", proxies=self.proxies
+                )
 
-            # 常见的Curve池
-            common_curve_pools = [
-                # USDT/USDC池
-                "0xbEbc44782C7dB0a1A60Cb6fe97d0b483032FF1C7",
-                # stETH/ETH
-                "0xDC24316b9AE028F1497c275EB9192a3Ea0f67022",
-                # ETH/BTC
-                "0xBb2b8038a1640196FbE3e38816F3e67Cba72D940",
-                # ETH/USDT
-                "0x0d4a11d5EEaaC28EC3F61d100daF4d40471f1852",
-                # USDC/USDT
-                "0x3041CbD36888bECc7bbCBc0045E3B1f144466f5f",
-            ]
+                curve_pools = []
 
-            for pool_address in common_curve_pools:
-                try:
-                    # 获取LP代币地址
-                    lp_token_address = registry_contract.functions.get_lp_token(
-                        pool_address
-                    ).call()
+                if pools_response.status_code == 200:
+                    pools_data = pools_response.json()
+                    if "data" in pools_data and "poolData" in pools_data["data"]:
+                        curve_pools = pools_data["data"]["poolData"]
+                        logger.info(f"从Curve API获取到 {len(curve_pools)} 个池子信息")
+                    else:
+                        logger.error("Curve API返回数据格式不正确")
+                else:
+                    logger.error(f"获取Curve池失败: {pools_response.status_code}")
+                    curve_pools = []
 
-                    # 创建LP代币合约
-                    lp_token_contract = self.w3.eth.contract(
-                        address=lp_token_address, abi=self.erc20_abi
-                    )
+                # 获取所有池子交易量和APY信息
+                volumes_response = requests.get(
+                    "https://api.curve.fi/api/getVolumes/ethereum", proxies=self.proxies
+                )
 
-                    # 获取用户LP代币余额
-                    balance = lp_token_contract.functions.balanceOf(address).call()
+                pools_apy_data = {}
 
-                    if balance > 0:
-                        # 获取代币精度
-                        try:
-                            decimals = lp_token_contract.functions.decimals().call()
-                        except Exception:
-                            decimals = 18  # 默认精度
+                if volumes_response.status_code == 200:
+                    volumes_data = volumes_response.json()
+                    if "data" in volumes_data and "pools" in volumes_data["data"]:
+                        for pool_apy in volumes_data["data"]["pools"]:
+                            if "address" in pool_apy:
+                                pools_apy_data[pool_apy["address"].lower()] = pool_apy
+                        logger.info(
+                            f"从Curve API获取到 {len(pools_apy_data)} 个池子APY信息"
+                        )
+                    else:
+                        logger.error("Curve API返回APY数据格式不正确")
+                else:
+                    logger.error(f"获取Curve交易量失败: {volumes_response.status_code}")
 
-                        # 计算实际金额
-                        amount = balance / (10**decimals)
+                # 遍历所有Curve池
+                for pool_info in curve_pools:
+                    try:
+                        pool_address = pool_info["address"]
 
-                        # 获取代币符号
-                        try:
-                            symbol = lp_token_contract.functions.symbol().call()
-                        except Exception:
-                            # 如果无法获取符号，使用池地址的简短形式
-                            symbol = f"Curve-{pool_address[:6]}...{pool_address[-4:]}"
+                        # 获取LP代币地址
+                        lp_token_address = pool_info.get("lpTokenAddress")
 
-                        # 创建头寸对象
-                        position = ProtocolPosition(
-                            protocol="Curve",
-                            asset=symbol,
-                            amount=amount,
-                            leverage=None,  # Curve LP没有杠杆
-                            apy=None,  # 需要从外部API获取APY
+                        # 创建LP代币合约
+                        lp_token_contract = self.w3.eth.contract(
+                            address=lp_token_address, abi=self.erc20_abi
                         )
 
-                        positions.append(position)
-                except Exception as e:
-                    logger.error(f"获取Curve池 {pool_address} 数据时出错: {e}")
+                        # 获取用户LP代币余额
+                        balance = lp_token_contract.functions.balanceOf(address).call()
 
-            return positions
+                        if balance > 0:
+                            # 获取代币精度
+                            try:
+                                decimals = lp_token_contract.functions.decimals().call()
+                            except Exception:
+                                decimals = 18  # 默认精度
+
+                            # 计算实际金额
+                            amount = balance / (10**decimals)
+
+                            # 获取代币符号
+                            symbol = pool_info.get("symbol", "")
+                            if not symbol:
+                                try:
+                                    symbol = lp_token_contract.functions.symbol().call()
+                                except Exception:
+                                    # 如果无法获取符号，使用池名称
+                                    symbol = f"Curve-{pool_info.get('name', 'Unknown')}"
+
+                            # 获取池子USD总价值
+                            usd_total = pool_info.get("usdTotal", 0)
+
+                            # 获取池子总供应量
+                            total_supply_str = pool_info.get("totalSupply", "0")
+                            try:
+                                total_supply = int(total_supply_str) / (10**decimals)
+                            except (ValueError, TypeError):
+                                total_supply = 0
+
+                            # 计算用户份额价值（USD）
+                            user_value_usd = 0
+                            if total_supply > 0:
+                                user_share = amount / total_supply
+                                user_value_usd = user_share * usd_total
+
+                            # 获取APY信息
+                            apy = 0.0
+                            pool_apy_info = pools_apy_data.get(pool_address.lower())
+
+                            if pool_apy_info:
+                                # 交易费APY
+                                trading_apy = (
+                                    pool_apy_info.get("latestDailyApyPcent", 0) / 100
+                                )
+
+                                # CRV奖励APY
+                                crv_apy = 0.0
+                                if (
+                                    "gaugeCrvApy" in pool_info
+                                    and pool_info["gaugeCrvApy"]
+                                ):
+                                    if (
+                                        isinstance(pool_info["gaugeCrvApy"], list)
+                                        and len(pool_info["gaugeCrvApy"]) > 0
+                                    ):
+                                        crv_apy = pool_info["gaugeCrvApy"][0]
+
+                                # 总APY
+                                apy = trading_apy + crv_apy
+
+                            # 创建头寸对象
+                            position = ProtocolPosition(
+                                protocol="Curve Finance",
+                                asset=symbol,
+                                amount=amount,
+                                leverage=None,  # Curve Finance LP没有杠杆
+                                apy=apy,
+                            )
+
+                            positions.append(position)
+                            logger.info(
+                                f"发现Curve {pool_info.get('name', 'Unknown')} 存款: "
+                                f"{amount:.6f} {symbol} (APY: {apy*100:.2f}%, "
+                                f"价值: ${user_value_usd:.2f})"
+                            )
+                    except Exception as e:
+                        pool_name = pool_info.get("name", "Unknown")
+                        logger.error(f"获取Curve池 {pool_name} 数据时出错: {e}")
+
+                return positions
+
+            except Exception as e:
+                logger.error(f"从Curve API获取数据时出错: {e}")
+                return []
 
         except Exception as e:
-            logger.error(f"获取Curve头寸时出错: {e}")
+            logger.error(f"获取Curve Finance头寸时出错: {e}")
             return []
 
     async def _get_uniswap_v2_positions(self, address: str) -> List[ProtocolPosition]:
@@ -1703,18 +1847,97 @@ class BlockchainService:
                 address=factory_address, abi=self.uniswap_factory_abi
             )
 
+            # 获取Uniswap V2路由合约
+            router_address = self.protocol_contracts["Uniswap V2"]["router"]
+            router_contract = self.w3.eth.contract(
+                address=router_address, abi=self.uniswap_router_abi
+            )
+
             # 常见的Uniswap V2对
             common_pairs = [
                 # ETH/USDC
                 "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc",
-                # ETH/BTC
+                # ETH/WBTC
                 "0xBb2b8038a1640196FbE3e38816F3e67Cba72D940",
                 # ETH/USDT
                 "0x0d4a11d5EEaaC28EC3F61d100daF4d40471f1852",
                 # USDC/USDT
                 "0x3041CbD36888bECc7bbCBc0045E3B1f144466f5f",
+                # ETH/DAI
+                "0xA478c2975Ab1Ea89e8196811F51A7B7Ade33eB11",
+                # WBTC/USDC
+                "0x004375Dff511095CC5A197A54140a24eFEF3A416",
+                # ETH/UNI
+                "0xd3d2E2692501A5c9Ca623199D38826e513033a17",
+                # ETH/LINK
+                "0xa2107FA5B38d9bbd2C461D6EDf11B11A50F6b974",
+                # ETH/AAVE
+                "0xDFC14d2Af169B0D36C4EFF567Ada9b2E0CAE044f",
+                # ETH/COMP
+                "0xCFfDdeD873554F362Ac02f8Fb1f02E5ada10516f",
+                # ETH/SNX
+                "0x43AE24960e5534731Fc831386c07755A2dc33D47",
+                # ETH/SUSHI
+                "0xCE84867c3c02B05dc570d0135103d3fB9CC19433",
+                # ETH/YFI
+                "0x2fDbAdf3C4D5A8666Bc06645B8358ab803996E28",
+                # ETH/MKR
+                "0xC2aDdA861F89bBB333c90c492cB837741916A225",
+                # ETH/1INCH
+                "0x26aAd2da94C59524ac0D93F6D6Cbf9071d7086f2",
             ]
 
+            # 尝试从Uniswap API获取交易对信息
+            try:
+                # 使用TheGraph查询Uniswap V2交易对数据
+                uniswap_graph_url = (
+                    "https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v2"
+                )
+                query = """
+                {
+                  pairs(first: 100, orderBy: reserveUSD, orderDirection: desc) {
+                    id
+                    token0 {
+                      id
+                      symbol
+                      name
+                      decimals
+                    }
+                    token1 {
+                      id
+                      symbol
+                      name
+                      decimals
+                    }
+                    reserve0
+                    reserve1
+                    reserveUSD
+                    volumeUSD
+                    txCount
+                    token0Price
+                    token1Price
+                  }
+                }
+                """
+
+                response = requests.post(
+                    uniswap_graph_url, json={"query": query}, proxies=self.proxies
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    if "data" in data and "pairs" in data["data"]:
+                        # 添加从TheGraph获取的热门交易对
+                        for pair in data["data"]["pairs"]:
+                            if pair["id"] not in common_pairs:
+                                common_pairs.append(pair["id"])
+                        logger.info(
+                            f"从TheGraph获取到 {len(data['data']['pairs'])} 个Uniswap V2交易对"
+                        )
+            except Exception as e:
+                logger.error(f"从TheGraph获取Uniswap V2交易对数据时出错: {e}")
+
+            # 处理所有交易对
             for pair_address in common_pairs:
                 try:
                     # 创建对合约
@@ -1782,16 +2005,58 @@ class BlockchainService:
                         token0_amount = token0_amount / (10**token0_decimals)
                         token1_amount = token1_amount / (10**token1_decimals)
 
+                        # 尝试获取USD价值
+                        usd_value = None
+                        try:
+                            # 尝试从TheGraph获取交易对USD价值
+                            for pair in data.get("data", {}).get("pairs", []):
+                                if pair["id"].lower() == pair_address.lower():
+                                    reserve_usd = float(pair["reserveUSD"])
+                                    usd_value = reserve_usd * share
+                                    break
+                        except Exception:
+                            pass
+
+                        # 尝试估算APY
+                        apy = None
+                        try:
+                            # 尝试从TheGraph获取交易对交易量，估算APY
+                            for pair in data.get("data", {}).get("pairs", []):
+                                if pair["id"].lower() == pair_address.lower():
+                                    # 假设每日交易量是过去24小时的交易量
+                                    daily_volume = float(pair["volumeUSD"])
+                                    reserve_usd = float(pair["reserveUSD"])
+
+                                    if reserve_usd > 0:
+                                        # Uniswap V2收取0.3%的交易费
+                                        daily_fee = daily_volume * 0.003
+                                        # 年化收益率 = 日费用 * 365 / 储备
+                                        apy = (daily_fee * 365) / reserve_usd
+                                        break
+                        except Exception:
+                            pass
+
                         # 创建头寸对象
                         position = ProtocolPosition(
                             protocol="Uniswap V2",
                             asset=f"{token0_symbol}/{token1_symbol}",
                             amount=balance / (10**18),  # LP代币通常是18位小数
                             leverage=None,  # Uniswap LP没有杠杆
-                            apy=None,  # 需要从外部API获取APY
+                            apy=apy,
                         )
 
                         positions.append(position)
+
+                        # 记录详细信息
+                        logger.info(
+                            f"发现Uniswap V2 {token0_symbol}/{token1_symbol} LP: "
+                            f"{balance / (10**18):.6f} LP代币 "
+                            f"({token0_amount:.6f} {token0_symbol}, {token1_amount:.6f} {token1_symbol})"
+                        )
+                        if usd_value:
+                            logger.info(f"  估计价值: ${usd_value:.2f} USD")
+                        if apy:
+                            logger.info(f"  估计APY: {apy*100:.2f}%")
                 except Exception as e:
                     logger.error(f"获取Uniswap V2对 {pair_address} 数据时出错: {e}")
 
@@ -1808,44 +2073,41 @@ class BlockchainService:
             float: 当前gas价格，单位为Gwei
         """
         try:
-            # 首先尝试从以太坊节点获取
-            if self.w3.is_connected():
-                try:
-                    # 获取当前gas价格（单位：Wei）
-                    gas_price_wei = self.w3.eth.gas_price
-                    # max_priority_fee
-                    max_priority_fee = self.w3.eth.max_priority_fee
-                    # 转换为Gwei (1 Gwei = 10^9 Wei)
-                    gas_price_gwei = gas_price_wei / 10**9
-                    logger.info(f"从以太坊节点获取gas价格: {gas_price_gwei:.2f} Gwei")
-                    return gas_price_gwei
-                except Exception as e:
-                    logger.warning(f"从以太坊节点获取gas价格失败: {e}")
-
-            # 尝试从Binance API获取ETH gas价格
+            gas_price = self.historical_data_cache.get("gas_price", "1m")
+            if gas_price is not None:
+                return gas_price
             try:
-                url = "https://api.binance.com/api/v3/ticker/price"
-                params = {"symbol": "ETHUSDT"}  # 使用ETH价格作为参考
+                # 尝试从ETH API获取ETH gas价格
+                url = "https://api.etherscan.io/v2/api?chainid=1&module=gastracker&action=gasoracle"
+                """
+                {
+                    "status": "1",
+                    "message": "OK-Missing/Invalid API Key, rate limit of 1/5sec applied",
+                    "result": {
+                        "LastBlock": "22027483",
+                        "SafeGasPrice": "0.638579654",
+                        "ProposeGasPrice": "0.639519654",
+                        "FastGasPrice": "0.703471619",
+                        "suggestBaseFee": "0.638579654",
+                        "gasUsedRatio": "0.798531,0.483220166666667,0.492903416666667,0.982302996161946,0.451882105996492"
+                    }
+                }
+                """
 
-                response = requests.get(url, params=params, proxies=proxies)
+                response = requests.get(url, proxies=proxies)
                 if response.status_code == 200:
                     data = response.json()
-                    eth_price = float(data["price"])
-
-                    # 使用一个基准gas价格（例如30 Gwei）并根据ETH价格调整
-                    base_gas_price = 30  # 基准gas价格（Gwei）
-                    eth_price_factor = 2000 / eth_price  # 2000美元作为基准ETH价格
-                    adjusted_gas_price = base_gas_price * eth_price_factor
-
-                    logger.info(f"从Binance估算gas价格: {adjusted_gas_price:.2f} Gwei")
-                    return adjusted_gas_price
+                    gas_price = float(data["result"]["suggestBaseFee"])
+                    self.historical_data_cache.set("gas_price", gas_price, "1m")
+                    logger.info(f"从ETH API估算gas价格: {gas_price:.2f} Gwei")
+                    return gas_price
                 else:
-                    logger.error(f"Binance API返回错误: {response.status_code}")
+                    logger.error(f"ETH API返回错误: {response.status_code}")
             except Exception as e:
-                logger.error(f"从Binance获取gas价格失败: {e}")
+                logger.error(f"从ETH API获取gas价格失败: {e}")
 
             # 如果都失败了，返回一个合理的默认值
-            default_gas_price = 30.0  # 30 Gwei
+            default_gas_price = 0.5  # 0.5 Gwei
             logger.warning(f"无法获取实时gas价格，使用默认值: {default_gas_price} Gwei")
             return default_gas_price
 

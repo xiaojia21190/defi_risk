@@ -225,7 +225,7 @@ async def get_supported_protocols():
                 "features": ["存款", "借贷"],
             },
             {
-                "name": "Curve",
+                "name": "Curve Finance",
                 "description": "稳定币交易协议",
                 "supported_assets": ["USDC", "DAI", "USDT"],
                 "features": ["流动性挖矿", "稳定币交换"],
@@ -352,7 +352,7 @@ if __name__ == "__main__":
     # 测试数据
     DEMO_ADDRESS = "0xAbCdEf123456789AbCdEf123456789AbCdEf1234"
     TEST_ASSETS = ["ETH", "USDC", "USDT", "BTC"]
-    TEST_PROTOCOLS = ["Aave-V3", "Compound-V3", "Curve", "Uniswap-V2"]
+    TEST_PROTOCOLS = ["Aave-V3", "Compound-V3", "Curve Finance", "Uniswap-V2"]
 
     async def test_api_endpoints():
         """测试主要API端点"""

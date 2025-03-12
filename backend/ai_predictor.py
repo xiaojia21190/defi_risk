@@ -966,8 +966,6 @@ TVL分析：
         """处理协议数据并进行分析"""
         try:
             # 如果输入是字符串（协议名称），先获取协议数据
-            if protocol_name == "Curve":
-                protocol_name = "CRV"
             protocol_data = self.get_protocol_data(protocol_name)
 
             if not protocol_data:
