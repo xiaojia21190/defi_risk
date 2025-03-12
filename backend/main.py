@@ -352,7 +352,7 @@ if __name__ == "__main__":
     # 测试数据
     DEMO_ADDRESS = "0xAbCdEf123456789AbCdEf123456789AbCdEf1234"
     TEST_ASSETS = ["ETH", "USDC", "USDT", "BTC"]
-    TEST_PROTOCOLS = ["Aave-V3", "Compound-V3", "Curve Finance", "Uniswap-V2"]
+    TEST_PROTOCOLS = ["Aave-V3", "Compound-V3", "Curve Finance", "Uniswap-V3"]
 
     async def test_api_endpoints():
         """测试主要API端点"""

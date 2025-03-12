@@ -123,7 +123,7 @@ DEMO_PROTOCOLS = {
     },
     "Compound V3": {"risk": 0.20, "apy_range": (0.03, 0.06)},
     "Curve Finance": {"risk": 0.30, "apy_range": (0.04, 0.10)},
-    "Uniswap V2": {"risk": 0.35, "apy_range": (0.05, 0.15)},
+    "Uniswap V3": {"risk": 0.35, "apy_range": (0.05, 0.15)},
     "Balancer": {"risk": 0.30, "apy_range": (0.04, 0.12)},
 }
 
@@ -200,12 +200,12 @@ class BlockchainService:
             except Exception as e:
                 logger.error(f"获取Curve Finance头寸时出错: {e}")
 
-            # 4. 获取Uniswap V2头寸
+            # 4. 获取Uniswap V3头寸
             try:
-                uniswap_positions = await self._get_uniswap_v2_positions(address)
+                uniswap_positions = await self._get_uniswap_v3_positions(address)
                 positions.extend(uniswap_positions)
             except Exception as e:
-                logger.error(f"获取Uniswap V2头寸时出错: {e}")
+                logger.error(f"获取Uniswap V3头寸时出错: {e}")
 
             # 过滤掉金额为0的头寸
             positions = [pos for pos in positions if pos.amount > 0]
@@ -495,962 +495,279 @@ class BlockchainService:
             except Exception as e:
                 logger.error(f"处理资产相关性警报时出错: {e}")
 
-            # 按严重程度和时间戳排序
-            severity_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
-            alerts.sort(key=lambda x: (severity_order[x["severity"]], -x["timestamp"]))
-
             return alerts
 
         except Exception as e:
-            logger.error(f"生成市场警报时出错: {e}")
-            # 出错时返回演示警报
-            return self._get_demo_market_alerts()
-
-    async def get_asset_historical_data(self, asset: str) -> pd.DataFrame:
-        """获取资产的历史价格数据，实现请求合并"""
-        # 创建锁，如果不存在
-        if asset not in self.data_fetch_locks:
-            self.data_fetch_locks[asset] = asyncio.Lock()
-
-        # 使用锁防止并发获取相同数据
-        async with self.data_fetch_locks[asset]:
-            # 检查是否有正在处理的请求
-            if asset in self.pending_requests:
-                # 等待现有请求完成并返回结果
-                logger.info(f"合并 {asset} 的历史数据请求")
-                return await self.pending_requests[asset]
-
-            # 创建新的请求任务
-            request_task = asyncio.create_task(self._fetch_historical_data(asset))
-            self.pending_requests[asset] = request_task
-
-            try:
-                # 执行请求
-                result = await request_task
-                return result
-            finally:
-                # 清理
-                del self.pending_requests[asset]
-
-    async def _fetch_historical_data(self, asset: str) -> pd.DataFrame:
-        """实际获取历史数据的方法"""
-        try:
-            # 检查缓存
-            cached_data = self.historical_data_cache.get(asset, "1d")
-            if cached_data is not None:
-                logger.info(f"从缓存获取 {asset} 的历史数据")
-                return cached_data
-            else:
-                logger.info(f"缓存中未找到 {asset} 的历史数据")
-
-            # 资产ID映射（不同API可能使用不同的ID）
-            asset_ids = {
-                # Binance交易对
-                "binance": {
-                    "ETH": "ETHUSDT",
-                    "BTC": "BTCUSDT",  # 使用BTC作为BTC的代理
-                    "USDC": "USDCUSDT",
-                    "USDT": "BUSDUSDT",  # USDT/USDC交易对
-                    "AAVE": "AAVEUSDT",
-                    "COMP": "COMPUSDT",
-                    "UNI": "UNIUSDT",
-                    "LINK": "LINKUSDT",
-                    "SNX": "SNXUSDT",
-                    "MKR": "MKRUSDT",
-                    "YFI": "YFIUSDT",
-                    "SUSHI": "SUSHIUSDT",
-                },
-            }
-
-            if asset not in asset_ids["binance"]:
-                logger.warning(f"不支持的资产 {asset}，使用演示数据")
-                demo_data = self._get_demo_historical_data(asset)
-                logger.info(f"设置 {asset} 的演示数据到缓存")
-                self.historical_data_cache.set(asset, demo_data, "1d")
-                return demo_data
-
-            # 尝试从不同的数据源获取数据
-            df = None
-            error_messages = []
-
-            # 1. 尝试Binance API
-            if asset in asset_ids["binance"]:
-                try:
-                    logger.info(f"尝试从Binance获取{asset}数据")
-                    df = await self._get_binance_data(
-                        asset, asset_ids["binance"][asset]
-                    )
-                    if df is not None and not df.empty:
-                        logger.info(f"成功从Binance获取{asset}数据，设置到缓存")
-                        self.historical_data_cache.set(asset, df, "1d")
-                        return df
-                    else:
-                        logger.warning(f"从Binance获取的{asset}数据为空")
-                except Exception as e:
-                    error_msg = f"从Binance获取{asset}数据失败: {e}"
-                    logger.warning(error_msg)
-                    error_messages.append(error_msg)
-
-            # 5. 所有数据源都失败，使用演示数据
-            logger.error(
-                f"所有数据源获取{asset}数据失败，使用演示数据。错误: {error_messages}"
-            )
-            demo_data = self._get_demo_historical_data(asset)
-            logger.info(f"设置 {asset} 的演示数据到缓存")
-            self.historical_data_cache.set(asset, demo_data, "1d")
-            return demo_data
-
-        except Exception as e:
-            logger.error(f"获取{asset}历史数据时出错: {e}")
-            demo_data = self._get_demo_historical_data(asset)
-            logger.info(f"设置 {asset} 的演示数据到缓存（异常处理）")
-            self.historical_data_cache.set(asset, demo_data, "1d")
-            return demo_data
-
-    # 获取24小时数据
-    async def _get_24h_data(
-        self,
-        asset: str,
-    ) -> Optional[Dict]:
-        """从Binance API获取24小时行情数据"""
-        # 手动实现缓存逻辑
-        cache_key = f"24h_data_{asset}"
-        if cache_key in cache:
-            return cache[cache_key]
-
-        url = "https://api.binance.com/api/v3/ticker/24hr"
-
-        asset_ids = {
-            # Binance交易对
-            "binance": {
-                "ETH": "ETHUSDT",
-                "BTC": "BTCUSDT",  # 使用BTC作为BTC的代理
-                "USDC": "USDCUSDT",
-                "USDT": "BUSDUSDT",  # USDT/USDC交易对
-                "AAVE": "AAVEUSDT",
-                "COMP": "COMPUSDT",
-                "UNI": "UNIUSDT",
-                "LINK": "LINKUSDT",
-                "SNX": "SNXUSDT",
-                "MKR": "MKRUSDT",
-                "YFI": "YFIUSDT",
-                "SUSHI": "SUSHIUSDT",
-            },
-        }
-
-        # 设置请求参数
-        params = {
-            "symbol": asset_ids["binance"].get(asset, f"{asset}USDT"),
-        }
-
-        try:
-            response = requests.get(url, params=params, proxies=proxies)
-            if response.status_code == 200:
-                data = response.json()
-
-                if not data:
-                    logger.warning(f"Binance返回的{asset}数据为空")
-                    return None
-
-                # 将结果存入缓存
-                cache[cache_key] = data
-
-                # 返回数据
-                return data
-            else:
-                logger.error(f"Binance API返回错误: {response.status_code}")
-                return None
-        except Exception as e:
-            logger.error(f"从Binance获取{asset}数据失败: {e}")
-            return None
-
-    async def _get_binance_data(
-        self, asset: str, symbol: str
-    ) -> Optional[pd.DataFrame]:
-        """从Binance API获取历史数据"""
-        url = "https://api.binance.com/api/v3/klines"
-        # 计算时间范围（过去30天）
-        end_time = int(datetime.now().timestamp() * 1000)
-        start_time = end_time - (30 * 24 * 60 * 60 * 1000)  # 30天的毫秒数
-
-        # 设置请求参数
-        params = {
-            "symbol": symbol,
-            "interval": "1d",  # 1天的K线
-            "startTime": start_time,
-            "endTime": end_time,
-            "limit": 30,  # 最多30个数据点
-        }
-
-        try:
-            response = requests.get(url, params=params, proxies=proxies)
-            if response.status_code == 200:
-                data = response.json()
-
-                if not data:
-                    logger.warning(f"Binance返回的{asset}数据为空")
-                    return None
-
-                # 创建DataFrame
-                # Binance K线数据格式:
-                # [
-                #   [
-                #     开盘时间,
-                #     开盘价,
-                #     最高价,
-                #     最低价,
-                #     收盘价,
-                #     成交量,
-                #     收盘时间,
-                #     成交额,
-                #     成交笔数,
-                #     主动买入成交量,
-                #     主动买入成交额,
-                #     忽略
-                #   ]
-                # ]
-                df = pd.DataFrame(
-                    {
-                        "timestamp": [
-                            datetime.fromtimestamp(k[0] / 1000) for k in data
-                        ],
-                        "price": [float(k[4]) for k in data],  # 使用收盘价
-                        "volume": [float(k[5]) for k in data],
-                        "market_cap": [None] * len(data),  # Binance不提供市值数据
-                    }
-                )
-                df["source"] = "binance"
-                return df
-            else:
-                logger.error(f"Binance API返回错误: {response.status}")
-                return None
-        except Exception as e:
-            logger.error(f"从Binance获取{asset}数据失败: {e}")
-            return None
-
-    async def _get_onchain_data(self, asset: str) -> Optional[pd.DataFrame]:
-        """从链上获取历史数据（通过Chainlink价格预言机）"""
-        try:
-            # 检查是否支持该资产的链上数据
-            chainlink_feeds = {
-                "ETH": "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",  # ETH/USD
-                "BTC": "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c",  # BTC/USD
-                "LINK": "0x2c1d072e956AFFC0D435Cb7AC38EF18d24d9127c",  # LINK/USD
-                "AAVE": "0x547a514d5e3769680Ce22B2361c10Ea13619e8a9",  # AAVE/USD
-                "UNI": "0x553303d460EE0afB37EdFf9bE42922D8FF63220e",  # UNI/USD
-                "SNX": "0xDC3EA94CD0AC27d9A86C180091e7f78C683d3699",  # SNX/USD
-                "COMP": "0xdbd020CAeF83eFd542f4De03e3cF0C28A4428bd5",  # COMP/USD
-                "YFI": "0xA027702dbb89fbd58938e4324ac03B58d812b0E1",  # YFI/USD
-                "SUSHI": "0xCc70F09A6CC17553b2E31954cD36E4A2d89501f7",  # SUSHI/USD
-                "MKR": "0xec1D1B3b0443256cc3860e24a46F108e699484Aa",  # MKR/USD
-                "USDT": "0x3E7d1eAB13ad0104d2750B8863b489D65364e32D",  # USDT/USD
-                "USDC": "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6",  # USDC/USD
-            }
-
-            if asset not in chainlink_feeds:
-                logger.warning(f"不支持{asset}的链上数据")
-                return None
-
-            # 获取Chainlink价格预言机合约地址
-            feed_address = chainlink_feeds[asset]
-
-            # 创建合约实例
-            abi = [
-                {
-                    "inputs": [],
-                    "name": "latestRoundData",
-                    "outputs": [
-                        {"name": "roundId", "type": "uint80"},
-                        {"name": "answer", "type": "int256"},
-                        {"name": "startedAt", "type": "uint256"},
-                        {"name": "updatedAt", "type": "uint256"},
-                        {"name": "answeredInRound", "type": "uint80"},
-                    ],
-                    "stateMutability": "view",
-                    "type": "function",
-                },
-                {
-                    "inputs": [{"name": "roundId", "type": "uint80"}],
-                    "name": "getRoundData",
-                    "outputs": [
-                        {"name": "roundId", "type": "uint80"},
-                        {"name": "answer", "type": "int256"},
-                        {"name": "startedAt", "type": "uint256"},
-                        {"name": "updatedAt", "type": "uint256"},
-                        {"name": "answeredInRound", "type": "uint80"},
-                    ],
-                    "stateMutability": "view",
-                    "type": "function",
-                },
-            ]
-
-            contract = self.w3.eth.contract(address=feed_address, abi=abi)
-
-            # 获取最新轮次数据
-            latest_data = await self.w3.eth.call_async(
-                contract.functions.latestRoundData().build_transaction(
-                    {
-                        "from": self.w3.eth.default_account
-                        or "0x0000000000000000000000000000000000000000"
-                    }
-                )
-            )
-            latest_round_id = latest_data[0]
-
-            # 收集历史数据（尝试获取30天的数据点）
-            timestamps = []
-            prices = []
-
-            # 从最新轮次向前查询30个数据点
-            for i in range(30):
-                try:
-                    round_id = max(1, latest_round_id - i)
-                    round_data = await self.w3.eth.call_async(
-                        contract.functions.getRoundData(round_id).build_transaction(
-                            {
-                                "from": self.w3.eth.default_account
-                                or "0x0000000000000000000000000000000000000000"
-                            }
-                        )
-                    )
-
-                    # 解析数据
-                    # Chainlink价格通常有8位小数
-                    price = round_data[1] / 10**8
-                    timestamp = datetime.fromtimestamp(round_data[3])
-
-                    timestamps.append(timestamp)
-                    prices.append(price)
-                except Exception as e:
-                    logger.warning(f"获取{asset}轮次{round_id}数据失败: {e}")
-                    continue
-
-            if not timestamps:
-                logger.warning(f"未能获取{asset}的链上历史数据")
-                return None
-
-            # 创建DataFrame
-            df = pd.DataFrame(
-                {
-                    "timestamp": timestamps,
-                    "price": prices,
-                    "volume": [None] * len(timestamps),  # 链上数据没有交易量
-                    "market_cap": [None] * len(timestamps),  # 链上数据没有市值
-                }
-            )
-            df["source"] = "chainlink"
-
-            # 按时间排序
-            df = df.sort_values("timestamp")
-
-            return df
-        except Exception as e:
-            logger.error(f"从链上获取{asset}数据失败: {e}")
-            return None
-
-    def _get_demo_historical_data(self, asset: str) -> pd.DataFrame:
-        """生成usd价格历史数据"""
-
-        # dates = pd.date_range(end=datetime.now(), periods=30, freq="D")
-        # base_price = DEMO_ASSETS.get(asset, {"price": 100.0})["price"]
-        # volatility = DEMO_ASSETS.get(asset, {"volatility": 0.01})["volatility"]
-
-        # np.random.seed(42 + hash(asset) % 100)
-        # price_changes = np.random.normal(0, volatility / 2, size=30)
-        # prices = base_price * (1 + np.cumsum(price_changes))
-        # volumes = np.random.uniform(10000, 100000, size=30)
-
-        # df = pd.DataFrame(
-        #     {
-        #         "timestamp": dates,
-        #         "price": prices,
-        #         "volume": volumes,
-        #         "market_cap": np.random.uniform(
-        #             base_price * 1000000, base_price * 10000000, size=30
-        #         ),
-        #     }
-        # )
-        # df["source"] = "demo"
-        # return df
-
-    def _get_demo_market_alerts(self) -> List[Dict]:
-        """返回演示警报数据"""
-        now = int(datetime.now().timestamp())
-        hour = 3600
-
-        return [
-            {
-                "type": "PRICE_VOLATILITY",
-                "severity": "HIGH",
-                "asset": "ETH",
-                "protocol": "Aave V3",
-                "message": "ETH价格在24小时内下跌7.5%",
-                "timestamp": now - 1 * hour,
-                "details": {
-                    "price_change": -0.075,
-                    "current_price": 1850.0,
-                    "previous_price": 2000.0,
-                },
-            },
-            {
-                "type": "LIQUIDATION_RISK",
-                "severity": "HIGH",
-                "asset": "ETH",
-                "protocol": "Aave V3",
-                "message": "Aave V3上的ETH头寸接近清算阈值，当前杠杆率1.85",
-                "timestamp": now - 2 * hour,
-                "details": {
-                    "leverage": 1.85,
-                    "safe_leverage": 1.5,
-                    "position_size": 2.5,
-                },
-            },
-            {
-                "type": "APY_CHANGE",
-                "severity": "MEDIUM",
-                "asset": "USDC",
-                "protocol": "Compound V3",
-                "message": "Compound V3的USDC APY增加25%",
-                "timestamp": now - 3 * hour,
-                "details": {
-                    "current_apy": 0.05,
-                    "previous_apy": 0.04,
-                    "apy_change": 0.25,
-                },
-            },
-        ]
-
-    async def get_demo_positions(self) -> List[ProtocolPosition]:
-        """为演示提供更真实的用户头寸数据"""
-        try:
-            today = datetime.now().date()
-            seed = int(f"{today.year}{today.month:02d}{today.day:02d}")
-            random.seed(seed)
-
-            # 获取当前市场价格（模拟）
-            current_prices = {
-                "ETH": await self.get_asset_price("ETH"),  # 假设当前ETH价格
-                "USDC": await self.get_asset_price("USDC"),
-                "USDT": await self.get_asset_price("USDT"),
-                "BTC": await self.get_asset_price("BTC"),  # 假设当前BTC价格
-                "LINK": await self.get_asset_price("LINK"),
-                "UNI": await self.get_asset_price("UNI"),
-            }
-
-            # 更真实的APY范围（基于当前市场情况）
-            apy_ranges = {
-                "Aave-V3": {
-                    "ETH": (0.01, 0.025),
-                    "USDC": (0.03, 0.045),
-                    "USDT": (0.025, 0.04),
-                    "BTC": (0.01, 0.02),
-                },
-                "Compound-V3": {
-                    "ETH": (0.015, 0.03),
-                    "USDC": (0.035, 0.05),
-                    "USDT": (0.03, 0.045),
-                    "BTC": (0.012, 0.022),
-                },
-                "Curve Finance": {
-                    "USDT": (0.04, 0.06),
-                    "USDC": (0.04, 0.06),
-                },
-                "Uniswap-V2": {
-                    "ETH": (0.05, 0.12),
-                    "BTC": (0.04, 0.1),
-                    "LINK": (0.06, 0.15),
-                    "UNI": (0.07, 0.18),
-                },
-            }
-
-            # 更真实的杠杆率限制
-            max_leverage = {
-                "Aave-V3": {"ETH": 2.5, "USDC": 1.1, "USDT": 1.1, "BTC": 2.0},
-                "Compound-V3": {"ETH": 2.0, "USDC": 1.0, "USDT": 1.0, "BTC": 1.8},
-            }
-
-            # 设置总投资组合价值（美元）
-            total_portfolio_value = random.uniform(30000, 50000)
-
-            # 分配资产比例
-            asset_allocation = {
-                "ETH": random.uniform(0.3, 0.5),  # 30-50% ETH
-                "USDC": random.uniform(0.2, 0.3),  # 20-30% USDC
-                "USDT": random.uniform(0.1, 0.2),  # 10-20% USDT
-                "BTC": random.uniform(0.1, 0.25),  # 10-25% BTC
-            }
-
-            # 归一化资产分配比例
-            total_allocation = sum(asset_allocation.values())
-            for asset in asset_allocation:
-                asset_allocation[asset] /= total_allocation
-
-            # 生成更真实的头寸
-            positions = []
-
-            # ETH在Aave
-            eth_aave_amount = (
-                total_portfolio_value * asset_allocation["ETH"] * 0.6
-            ) / current_prices["ETH"]
-            positions.append(
-                ProtocolPosition(
-                    protocol="Aave-V3",
-                    asset="ETH",
-                    amount=round(eth_aave_amount, 4),
-                    leverage=random.uniform(1.0, max_leverage["Aave-V3"]["ETH"]),
-                    apy=random.uniform(*apy_ranges["Aave-V3"]["ETH"]),
-                )
-            )
-
-            # ETH在Uniswap
-            eth_uni_amount = (
-                total_portfolio_value * asset_allocation["ETH"] * 0.4
-            ) / current_prices["ETH"]
-            positions.append(
-                ProtocolPosition(
-                    protocol="Uniswap-V2",
-                    asset="ETH/USDC",  # LP代币
-                    amount=round(eth_uni_amount, 4),
-                    apy=random.uniform(*apy_ranges["Uniswap-V2"]["ETH"]),
-                )
-            )
-
-            # USDC在Compound
-            usdc_amount = (
-                total_portfolio_value * asset_allocation["USDC"]
-            ) / current_prices["USDC"]
-            positions.append(
-                ProtocolPosition(
-                    protocol="Compound-V3",
-                    asset="USDC",
-                    amount=round(usdc_amount, 2),
-                    leverage=1.0,
-                    apy=random.uniform(*apy_ranges["Compound-V3"]["USDC"]),
-                )
-            )
-
-            # USDT在Curve Finance
-            usdt_amount = (
-                total_portfolio_value * asset_allocation["USDT"]
-            ) / current_prices["USDT"]
-            positions.append(
-                ProtocolPosition(
-                    protocol="Curve Finance",
-                    asset="USDT/USDC",  # 稳定币池
-                    amount=round(usdt_amount, 2),
-                    apy=random.uniform(*apy_ranges["Curve Finance"]["USDT"]),
-                )
-            )
-
-            # BTC在Aave
-            wbtc_amount = (
-                total_portfolio_value * asset_allocation["BTC"]
-            ) / current_prices["BTC"]
-            positions.append(
-                ProtocolPosition(
-                    protocol="Aave-V3",
-                    asset="BTC",
-                    amount=round(wbtc_amount, 6),
-                    leverage=random.uniform(1.0, max_leverage["Aave-V3"]["BTC"]),
-                    apy=random.uniform(*apy_ranges["Aave-V3"]["BTC"]),
-                )
-            )
-
-            random.seed()  # 重置随机种子
-            return positions
-
-        except Exception as e:
-            logger.error(f"生成演示头寸时出错: {e}")
-            # 提供一个备用的固定数据集
-            return [
-                ProtocolPosition(
-                    protocol="Aave-V3",
-                    asset="ETH",
-                    amount=1.2,
-                    leverage=1.5,
-                    apy=0.02,
-                ),
-                ProtocolPosition(
-                    protocol="Compound-V3",
-                    asset="USDC",
-                    amount=12000,
-                    leverage=1.0,
-                    apy=0.04,
-                ),
-                ProtocolPosition(
-                    protocol="Curve Finance", asset="USDT/USDC", amount=8000, apy=0.05
-                ),
-                ProtocolPosition(
-                    protocol="Aave V3",
-                    asset="BTC",
-                    amount=0.15,
-                    leverage=1.2,
-                    apy=0.015,
-                ),
-                ProtocolPosition(
-                    protocol="Uniswap-V2", asset="ETH/USDC", amount=0.8, apy=0.08
-                ),
-            ]
-
-    async def get_asset_price(self, asset: str) -> float:
-        """获取资产的当前价格
-
-        Args:
-            asset: 资产符号（例如：'ETH', 'USDC', 'BTC'等）
-
-        Returns:
-            float: 资产的当前美元价格
-        """
-        try:
-            # 如果缓存中没有，获取最新的历史数据
-            url = "https://api.binance.com/api/v3/ticker/price"
-            if asset == "USDT":
-                params = {"symbol": "BUSDUSDT"}
-            else:
-                params = {"symbol": f"{asset}USDT"}
-
-            response = requests.get(url, params=params, proxies=proxies)
-            if response.status_code == 200:
-                data = response.json()
-
-                if not data:
-                    logger.warning(f"Binance返回的{asset}数据为空")
-                    return None
-
-                return float(data["price"])
-            else:
-                logger.error(f"Binance API返回错误: {response.status_code}")
-                return None
-
-        except Exception as e:
-            logger.error(f"获取{asset}价格时出错: {e}")
-            return 1.0  # 发生错误时返回默认价格
-
-    def _load_contract_abis(self):
-        """加载各协议合约的ABI"""
-        # Aave V3 ABI
-        self.aave_pool_abi = [
-            {
-                "inputs": [
-                    {"internalType": "address", "name": "user", "type": "address"}
-                ],
-                "name": "getUserAccountData",
-                "outputs": [
-                    {
-                        "internalType": "uint256",
-                        "name": "totalCollateralBase",
-                        "type": "uint256",
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "totalDebtBase",
-                        "type": "uint256",
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "availableBorrowsBase",
-                        "type": "uint256",
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "currentLiquidationThreshold",
-                        "type": "uint256",
-                    },
-                    {"internalType": "uint256", "name": "ltv", "type": "uint256"},
-                    {
-                        "internalType": "uint256",
-                        "name": "healthFactor",
-                        "type": "uint256",
-                    },
-                ],
-                "stateMutability": "view",
-                "type": "function",
-            }
-        ]
-
-        self.aave_data_provider_abi = [
-            {
-                "inputs": [
-                    {"internalType": "address", "name": "asset", "type": "address"},
-                    {"internalType": "address", "name": "user", "type": "address"},
-                ],
-                "name": "getUserReserveData",
-                "outputs": [
-                    {
-                        "internalType": "uint256",
-                        "name": "currentATokenBalance",
-                        "type": "uint256",
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "currentStableDebt",
-                        "type": "uint256",
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "currentVariableDebt",
-                        "type": "uint256",
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "principalStableDebt",
-                        "type": "uint256",
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "scaledVariableDebt",
-                        "type": "uint256",
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "stableBorrowRate",
-                        "type": "uint256",
-                    },
-                    {
-                        "internalType": "uint256",
-                        "name": "liquidityRate",
-                        "type": "uint256",
-                    },
-                    {
-                        "internalType": "uint40",
-                        "name": "stableRateLastUpdated",
-                        "type": "uint40",
-                    },
-                    {
-                        "internalType": "bool",
-                        "name": "usageAsCollateralEnabled",
-                        "type": "bool",
-                    },
-                ],
-                "stateMutability": "view",
-                "type": "function",
-            },
-            {
-                "inputs": [],
-                "name": "getAllReservesTokens",
-                "outputs": [
-                    {
-                        "components": [
-                            {
-                                "internalType": "string",
-                                "name": "symbol",
-                                "type": "string",
-                            },
-                            {
-                                "internalType": "address",
-                                "name": "tokenAddress",
-                                "type": "address",
-                            },
-                        ],
-                        "internalType": "struct AaveProtocolDataProvider.TokenData[]",
-                        "name": "",
-                        "type": "tuple[]",
-                    }
-                ],
-                "stateMutability": "view",
-                "type": "function",
-            },
-        ]
-
-        # Compound V3 ABI
-        self.compound_comet_abi = [
-            {
-                "inputs": [
-                    {"internalType": "address", "name": "account", "type": "address"}
-                ],
-                "name": "userCollateral",
-                "outputs": [
-                    {"internalType": "uint256", "name": "balance", "type": "uint256"},
-                    {"internalType": "uint256", "name": "principal", "type": "uint256"},
-                ],
-                "stateMutability": "view",
-                "type": "function",
-            },
-            {
-                "inputs": [
-                    {"internalType": "address", "name": "account", "type": "address"}
-                ],
-                "name": "userBasic",
-                "outputs": [
-                    {"internalType": "int104", "name": "principal", "type": "int104"},
-                    {
-                        "internalType": "uint64",
-                        "name": "baseTrackingIndex",
-                        "type": "uint64",
-                    },
-                    {
-                        "internalType": "uint64",
-                        "name": "baseTrackingAccrued",
-                        "type": "uint64",
-                    },
-                    {"internalType": "uint16", "name": "assetsIn", "type": "uint16"},
-                    {"internalType": "uint8", "name": "reserved", "type": "uint8"},
-                ],
-                "stateMutability": "view",
-                "type": "function",
-            },
-            {
-                "inputs": [],
-                "name": "getSupplyRate",
-                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-                "stateMutability": "view",
-                "type": "function",
-            },
-            {
-                "inputs": [],
-                "name": "baseTokenPriceFeed",
-                "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-                "stateMutability": "view",
-                "type": "function",
-            },
-            {
-                "inputs": [
-                    {"internalType": "address", "name": "priceFeed", "type": "address"}
-                ],
-                "name": "getPrice",
-                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-                "stateMutability": "view",
-                "type": "function",
-            },
-        ]
-
-        # Curve Finance ABI
-        self.curve_registry_abi = [
-            {
-                "name": "get_pool_from_lp_token",
-                "outputs": [{"type": "address", "name": ""}],
-                "inputs": [{"type": "address", "name": "arg0"}],
-                "stateMutability": "view",
-                "type": "function",
-            },
-            {
-                "name": "get_lp_token",
-                "outputs": [{"type": "address", "name": ""}],
-                "inputs": [{"type": "address", "name": "arg0"}],
-                "stateMutability": "view",
-                "type": "function",
-            },
-            {
-                "name": "get_n_coins",
-                "outputs": [{"type": "uint256[2]", "name": ""}],
-                "inputs": [{"type": "address", "name": "_pool"}],
-                "stateMutability": "view",
-                "type": "function",
-            },
-        ]
-
-        # Uniswap V2 ABI
-        self.uniswap_factory_abi = [
-            {
-                "constant": True,
-                "inputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-                "name": "allPairs",
-                "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-                "payable": False,
-                "stateMutability": "view",
-                "type": "function",
-            },
-            {
-                "constant": True,
-                "inputs": [],
-                "name": "allPairsLength",
-                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-                "payable": False,
-                "stateMutability": "view",
-                "type": "function",
-            },
-        ]
-
-        self.uniswap_pair_abi = [
-            {
-                "constant": True,
-                "inputs": [
-                    {"internalType": "address", "name": "owner", "type": "address"}
-                ],
-                "name": "balanceOf",
-                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-                "payable": False,
-                "stateMutability": "view",
-                "type": "function",
-            },
-            {
-                "constant": True,
-                "inputs": [],
-                "name": "token0",
-                "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-                "payable": False,
-                "stateMutability": "view",
-                "type": "function",
-            },
-            {
-                "constant": True,
-                "inputs": [],
-                "name": "token1",
-                "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-                "payable": False,
-                "stateMutability": "view",
-                "type": "function",
-            },
-            {
-                "constant": True,
-                "inputs": [],
-                "name": "getReserves",
-                "outputs": [
-                    {"internalType": "uint112", "name": "_reserve0", "type": "uint112"},
-                    {"internalType": "uint112", "name": "_reserve1", "type": "uint112"},
-                    {
-                        "internalType": "uint32",
-                        "name": "_blockTimestampLast",
-                        "type": "uint32",
-                    },
-                ],
-                "payable": False,
-                "stateMutability": "view",
-                "type": "function",
-            },
-        ]
-        # ERC20 ABI (用于获取代币信息和余额)
-        self.erc20_abi = [
-            {
-                "constant": True,
-                "inputs": [],
-                "name": "name",
-                "outputs": [{"name": "", "type": "string"}],
-                "payable": False,
-                "stateMutability": "view",
-                "type": "function",
-            },
-            {
-                "constant": True,
-                "inputs": [],
-                "name": "symbol",
-                "outputs": [{"name": "", "type": "string"}],
-                "payable": False,
-                "stateMutability": "view",
-                "type": "function",
-            },
-            {
-                "constant": True,
-                "inputs": [],
-                "name": "decimals",
-                "outputs": [{"name": "", "type": "uint8"}],
-                "payable": False,
-                "stateMutability": "view",
-                "type": "function",
-            },
-            {
-                "constant": True,
-                "inputs": [{"name": "_owner", "type": "address"}],
-                "name": "balanceOf",
-                "outputs": [{"name": "balance", "type": "uint256"}],
-                "payable": False,
-                "stateMutability": "view",
-                "type": "function",
-            },
-        ]
+            logger.error(f"获取市场警报时出错: {e}")
+            return []
 
     async def _get_aave_v3_positions(self, address: str) -> List[ProtocolPosition]:
         """获取用户在Aave V3的存款头寸"""
+        positions = []
+
+        try:
+            # 如果是演示模式，返回演示数据
+            if address.lower() == DEMO_ADDRESS.lower() or self.demo_mode:
+                logger.info(f"为演示地址返回预设Aave V3头寸数据")
+                # 返回一些演示的Aave V3头寸
+                return [
+                    ProtocolPosition(
+                        protocol="Aave-V3",
+                        asset="ETH",
+                        amount=1.2,
+                        leverage=1.5,
+                        apy=0.02,
+                    ),
+                    ProtocolPosition(
+                        protocol="Aave-V3",
+                        asset="USDC",
+                        amount=5000,
+                        leverage=1.0,
+                        apy=0.04,
+                    ),
+                    ProtocolPosition(
+                        protocol="Aave-V3",
+                        asset="BTC",
+                        amount=0.15,
+                        leverage=1.2,
+                        apy=0.015,
+                    ),
+                ]
+
+            # 使用Aave V3 Subgraph获取用户的头寸信息
+            # 根据网络选择合适的subgraph端点
+            # 以太坊主网的Aave V3 subgraph端点
+            subgraph_url = "https://gateway.thegraph.com/api/95d759c3b12e4dd174e4f7e2adfa4882/subgraphs/id/JCNWRypm7FYwV8fx5HhzZPSFaMxgkPuw4TnR3Gpi81zk"
+
+            # 构建GraphQL查询，获取用户的存款和借款头寸
+            # 根据最新的Messari Subgraph Schema进行查询
+            query = """
+            query GetUserPositions($userAddress: String!) {
+              account(id: $userAddress) {
+                id
+                positions(where: {side: LENDER}) {
+                  id
+                  side
+                  balance
+                  isCollateral
+                  isIsolated
+                  market {
+                    id
+                    name
+                    inputToken {
+                      id
+                      name
+                      symbol
+                      decimals
+                    }
+                    outputToken {
+                      id
+                      name
+                      symbol
+                      decimals
+                    }
+                    rates(where: {side: LENDER}) {
+                      rate
+                      side
+                      type
+                    }
+                    maximumLTV
+                    liquidationThreshold
+                    liquidationPenalty
+                    totalValueLockedUSD
+                    totalBorrowBalanceUSD
+                    inputTokenPriceUSD
+                    canUseAsCollateral
+                  }
+                }
+                # 获取借款头寸
+                borrowingPositions: positions(where: {side: BORROWER}) {
+                  id
+                  balance
+                  side
+                  type
+                  market {
+                    id
+                    inputToken {
+                      id
+                      symbol
+                      decimals
+                    }
+                    inputTokenPriceUSD
+                    rates(where: {side: BORROWER}) {
+                      rate
+                      side
+                      type
+                    }
+                  }
+                }
+                _enabledCollaterals {
+                  id
+                }
+                _eMode
+              }
+            }
+            """
+
+            # 设置查询变量
+            variables = {"userAddress": address.lower()}
+
+            # 发送GraphQL请求
+            logger.info(f"向Aave V3 Subgraph发送查询，获取地址{address}的头寸")
+            response = requests.post(
+                subgraph_url,
+                json={"query": query, "variables": variables},
+                proxies=proxies,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Subgraph请求失败: {response.status_code}, {response.text}"
+                )
+                # 如果subgraph请求失败，回退到合约调用方法
+                return await self._get_aave_v3_positions_fallback(address)
+
+            data = response.json()
+
+            if "errors" in data:
+                logger.error(f"Subgraph查询错误: {data['errors']}")
+                return await self._get_aave_v3_positions_fallback(address)
+
+            if (
+                "data" not in data
+                or "account" not in data["data"]
+                or not data["data"]["account"]
+            ):
+                logger.warning(f"Subgraph返回的数据格式不正确或用户不存在: {data}")
+                return []
+
+            # 处理存款头寸
+            account_data = data["data"]["account"]
+            lender_positions = account_data.get("positions", [])
+
+            # 处理借款头寸以计算杠杆率
+            borrower_positions = account_data.get("borrowingPositions", [])
+
+            # 获取用户的eMode状态
+            emode_enabled = account_data.get("_eMode", False)
+
+            # 获取用户启用的抵押品市场
+            enabled_collaterals = account_data.get("_enabledCollaterals", [])
+            enabled_collateral_ids = (
+                [collateral["id"] for collateral in enabled_collaterals]
+                if enabled_collaterals
+                else []
+            )
+
+            # 如果没有找到任何头寸，返回空列表
+            if not lender_positions and not borrower_positions:
+                logger.info(f"地址 {address} 在Aave V3上没有找到任何头寸")
+                return []
+
+            # 计算总存款价值和总借款价值（用于计算杠杆率）
+            total_deposit_value_usd = 0
+            total_borrow_value_usd = 0
+
+            # 计算借款价值
+            for borrow_pos in borrower_positions:
+                token_decimals = int(borrow_pos["market"]["inputToken"]["decimals"])
+                token_price_usd = float(borrow_pos["market"]["inputTokenPriceUSD"])
+                borrow_balance = int(borrow_pos["balance"]) / (10**token_decimals)
+                borrow_value_usd = borrow_balance * token_price_usd
+                total_borrow_value_usd += borrow_value_usd
+
+                # 获取借款利率
+                borrow_apy = 0.0
+                borrow_type = borrow_pos.get("type", "VARIABLE")
+                for rate in borrow_pos["market"]["rates"]:
+                    if rate["side"] == "BORROWER" and rate["type"] == borrow_type:
+                        borrow_apy = float(rate["rate"])
+                        break
+
+                logger.info(
+                    f"发现Aave V3 {borrow_pos['market']['inputToken']['symbol']}借款: {borrow_balance:.6f} "
+                    f"(APY: {borrow_apy*100:.2f}%, 价值: ${borrow_value_usd:.2f}, "
+                    f"类型: {borrow_type})"
+                )
+
+            # 处理每个存款头寸
+            for pos in lender_positions:
+                try:
+                    market = pos["market"]
+                    token = market["inputToken"]
+                    token_symbol = token["symbol"]
+                    token_decimals = int(token["decimals"])
+
+                    # 获取存款余额
+                    balance = int(pos["balance"])
+                    amount = balance / (10**token_decimals)
+
+                    # 获取代币价格
+                    token_price_usd = float(market["inputTokenPriceUSD"])
+                    deposit_value_usd = amount * token_price_usd
+                    total_deposit_value_usd += deposit_value_usd
+
+                    # 获取存款APY
+                    apy = 0.0
+                    for rate in market["rates"]:
+                        if rate["side"] == "LENDER" and rate["type"] == "VARIABLE":
+                            apy = float(rate["rate"])
+                            break
+
+                    # 是否用作抵押品
+                    is_collateral = pos["isCollateral"]
+
+                    # 是否为隔离资产
+                    is_isolated = pos.get("isIsolated", False)
+
+                    # 创建头寸对象
+                    position = ProtocolPosition(
+                        protocol="Aave-V3",
+                        asset=token_symbol,
+                        amount=amount,
+                        leverage=None,  # 稍后计算整体杠杆率
+                        apy=apy,
+                    )
+
+                    positions.append(position)
+                    logger.info(
+                        f"发现Aave V3 {token_symbol}存款: {amount:.6f} "
+                        f"(APY: {apy*100:.2f}%, 价值: ${deposit_value_usd:.2f}, "
+                        f"用作抵押品: {is_collateral}, 隔离资产: {is_isolated})"
+                    )
+                except Exception as e:
+                    logger.error(f"处理Aave V3存款头寸时出错: {e}")
+
+            # 计算整体杠杆率
+            leverage = 1.0
+            if total_deposit_value_usd > 0:
+                leverage = (
+                    total_deposit_value_usd + total_borrow_value_usd
+                ) / total_deposit_value_usd
+
+            # 更新所有头寸的杠杆率
+            for position in positions:
+                position.leverage = leverage
+
+            # 记录eMode状态
+            if emode_enabled:
+                logger.info(f"用户已启用eMode (高效模式)")
+
+            return positions
+
+        except Exception as e:
+            logger.error(f"获取Aave V3头寸时出错: {e}")
+            # 如果出现任何错误，尝试回退到合约调用方法
+            try:
+                return await self._get_aave_v3_positions_fallback(address)
+            except Exception as fallback_error:
+                logger.error(f"回退方法也失败: {fallback_error}")
+                return []
+
+    async def _get_aave_v3_positions_fallback(
+        self, address: str
+    ) -> List[ProtocolPosition]:
+        """获取用户在Aave V3的存款头寸（回退方法，使用合约调用）"""
         positions = []
 
         try:
@@ -1518,7 +835,7 @@ class BlockchainService:
 
                     # 创建头寸对象
                     position = ProtocolPosition(
-                        protocol="Aave V3",
+                        protocol="Aave-V3",
                         asset=token_symbol,
                         amount=amount,
                         leverage=leverage,
@@ -1530,587 +847,5 @@ class BlockchainService:
             return positions
 
         except Exception as e:
-            logger.error(f"获取Aave V3头寸时出错: {e}")
+            logger.error(f"获取Aave V3头寸时出错（回退方法）: {e}")
             return []
-
-    async def _get_compound_v3_positions(self, address: str) -> List[ProtocolPosition]:
-        """获取用户在Compound V3的存款头寸"""
-        positions = []
-
-        try:
-            # Compound V3市场配置
-            markets = [
-                {
-                    "name": "USDC市场",
-                    "address": "0xc3d688B66703497DAA19211EEdff47f25384cdc3",
-                    "base_token": "USDC",
-                    "base_decimals": 6,
-                    "collaterals": [
-                        {
-                            "symbol": "WETH",
-                            "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-                            "decimals": 18,
-                        },
-                        {
-                            "symbol": "WBTC",
-                            "address": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
-                            "decimals": 8,
-                        },
-                        {
-                            "symbol": "COMP",
-                            "address": "0xc00e94Cb662C3520282E6f5717214004A7f26888",
-                            "decimals": 18,
-                        },
-                        {
-                            "symbol": "UNI",
-                            "address": "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
-                            "decimals": 18,
-                        },
-                        {
-                            "symbol": "LINK",
-                            "address": "0x514910771AF9Ca656af840dff83E8264EcF986CA",
-                            "decimals": 18,
-                        },
-                    ],
-                },
-                {
-                    "name": "WETH市场",
-                    "address": "0xA17581A9E3356d9A858b789D68B4d866e593aE94",
-                    "base_token": "WETH",
-                    "base_decimals": 18,
-                    "collaterals": [
-                        {
-                            "symbol": "WBTC",
-                            "address": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
-                            "decimals": 8,
-                        },
-                        {
-                            "symbol": "COMP",
-                            "address": "0xc00e94Cb662C3520282E6f5717214004A7f26888",
-                            "decimals": 18,
-                        },
-                        {
-                            "symbol": "UNI",
-                            "address": "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
-                            "decimals": 18,
-                        },
-                        {
-                            "symbol": "LINK",
-                            "address": "0x514910771AF9Ca656af840dff83E8264EcF986CA",
-                            "decimals": 18,
-                        },
-                    ],
-                },
-            ]
-
-            # 遍历所有市场
-            for market in markets:
-                try:
-                    # 创建合约实例
-                    comet_contract = self.w3.eth.contract(
-                        address=market["address"], abi=self.compound_comet_abi
-                    )
-
-                    # 1. 检查基础资产存款/借款
-                    user_basic = comet_contract.functions.userBasic(address).call()
-                    principal = user_basic[0]
-
-                    # 获取当前利用率和供应利率
-                    utilization = comet_contract.functions.getUtilization().call()
-                    supply_rate = comet_contract.functions.getSupplyRate(
-                        utilization
-                    ).call()
-                    annual_supply_rate = supply_rate / 1e18 * 365 * 24 * 60 * 60
-
-                    if principal < 0:
-                        # 负值表示用户有存款
-                        deposit_amount = abs(principal) / (
-                            10 ** market["base_decimals"]
-                        )
-
-                        # 创建存款头寸
-                        position = ProtocolPosition(
-                            protocol="Compound V3",
-                            asset=market["base_token"],
-                            amount=deposit_amount,
-                            leverage=1.0,  # 基础资产存款没有杠杆
-                            apy=annual_supply_rate,
-                        )
-
-                        positions.append(position)
-                        logger.info(
-                            f"发现Compound V3 {market['base_token']}存款: {deposit_amount:.6f} (APY: {annual_supply_rate*100:.2f}%)"
-                        )
-
-                    # 2. 检查所有抵押品资产
-                    for collateral in market["collaterals"]:
-                        try:
-                            collateral_address = collateral["address"]
-                            user_collateral = comet_contract.functions.userCollateral(
-                                address, collateral_address
-                            ).call()
-
-                            collateral_balance = user_collateral[0]
-
-                            if collateral_balance > 0:
-                                # 计算实际金额
-                                collateral_amount = collateral_balance / (
-                                    10 ** collateral["decimals"]
-                                )
-
-                                # 创建抵押品头寸
-                                collateral_position = ProtocolPosition(
-                                    protocol="Compound V3",
-                                    asset=collateral["symbol"],
-                                    amount=collateral_amount,
-                                    leverage=None,  # 抵押品没有杠杆
-                                    apy=0.0,  # 抵押品没有APY
-                                )
-
-                                positions.append(collateral_position)
-                                logger.info(
-                                    f"发现Compound V3 {collateral['symbol']}抵押品: {collateral_amount:.6f}"
-                                )
-                        except Exception as e:
-                            logger.error(
-                                f"获取Compound V3 {collateral['symbol']}抵押品时出错: {e}"
-                            )
-
-                except Exception as e:
-                    logger.error(f"获取Compound V3 {market['name']}数据时出错: {e}")
-
-            return positions
-
-        except Exception as e:
-            logger.error(f"获取Compound V3头寸时出错: {e}")
-            return []
-
-    async def _get_curve_positions(self, address: str) -> List[ProtocolPosition]:
-        """获取用户在Curve的存款头寸"""
-        positions = []
-
-        try:
-            # 从Curve API获取所有池子信息
-            try:
-                # 获取所有池子信息
-                pools_response = requests.get(
-                    "https://api.curve.fi/api/getPools/ethereum", proxies=self.proxies
-                )
-
-                curve_pools = []
-
-                if pools_response.status_code == 200:
-                    pools_data = pools_response.json()
-                    if "data" in pools_data and "poolData" in pools_data["data"]:
-                        curve_pools = pools_data["data"]["poolData"]
-                        logger.info(f"从Curve API获取到 {len(curve_pools)} 个池子信息")
-                    else:
-                        logger.error("Curve API返回数据格式不正确")
-                else:
-                    logger.error(f"获取Curve池失败: {pools_response.status_code}")
-                    curve_pools = []
-
-                # 获取所有池子交易量和APY信息
-                volumes_response = requests.get(
-                    "https://api.curve.fi/api/getVolumes/ethereum", proxies=self.proxies
-                )
-
-                pools_apy_data = {}
-
-                if volumes_response.status_code == 200:
-                    volumes_data = volumes_response.json()
-                    if "data" in volumes_data and "pools" in volumes_data["data"]:
-                        for pool_apy in volumes_data["data"]["pools"]:
-                            if "address" in pool_apy:
-                                pools_apy_data[pool_apy["address"].lower()] = pool_apy
-                        logger.info(
-                            f"从Curve API获取到 {len(pools_apy_data)} 个池子APY信息"
-                        )
-                    else:
-                        logger.error("Curve API返回APY数据格式不正确")
-                else:
-                    logger.error(f"获取Curve交易量失败: {volumes_response.status_code}")
-
-                # 遍历所有Curve池
-                for pool_info in curve_pools:
-                    try:
-                        pool_address = pool_info["address"]
-
-                        # 获取LP代币地址
-                        lp_token_address = pool_info.get("lpTokenAddress")
-
-                        # 创建LP代币合约
-                        lp_token_contract = self.w3.eth.contract(
-                            address=lp_token_address, abi=self.erc20_abi
-                        )
-
-                        # 获取用户LP代币余额
-                        balance = lp_token_contract.functions.balanceOf(address).call()
-
-                        if balance > 0:
-                            # 获取代币精度
-                            try:
-                                decimals = lp_token_contract.functions.decimals().call()
-                            except Exception:
-                                decimals = 18  # 默认精度
-
-                            # 计算实际金额
-                            amount = balance / (10**decimals)
-
-                            # 获取代币符号
-                            symbol = pool_info.get("symbol", "")
-                            if not symbol:
-                                try:
-                                    symbol = lp_token_contract.functions.symbol().call()
-                                except Exception:
-                                    # 如果无法获取符号，使用池名称
-                                    symbol = f"Curve-{pool_info.get('name', 'Unknown')}"
-
-                            # 获取池子USD总价值
-                            usd_total = pool_info.get("usdTotal", 0)
-
-                            # 获取池子总供应量
-                            total_supply_str = pool_info.get("totalSupply", "0")
-                            try:
-                                total_supply = int(total_supply_str) / (10**decimals)
-                            except (ValueError, TypeError):
-                                total_supply = 0
-
-                            # 计算用户份额价值（USD）
-                            user_value_usd = 0
-                            if total_supply > 0:
-                                user_share = amount / total_supply
-                                user_value_usd = user_share * usd_total
-
-                            # 获取APY信息
-                            apy = 0.0
-                            pool_apy_info = pools_apy_data.get(pool_address.lower())
-
-                            if pool_apy_info:
-                                # 交易费APY
-                                trading_apy = (
-                                    pool_apy_info.get("latestDailyApyPcent", 0) / 100
-                                )
-
-                                # CRV奖励APY
-                                crv_apy = 0.0
-                                if (
-                                    "gaugeCrvApy" in pool_info
-                                    and pool_info["gaugeCrvApy"]
-                                ):
-                                    if (
-                                        isinstance(pool_info["gaugeCrvApy"], list)
-                                        and len(pool_info["gaugeCrvApy"]) > 0
-                                    ):
-                                        crv_apy = pool_info["gaugeCrvApy"][0]
-
-                                # 总APY
-                                apy = trading_apy + crv_apy
-
-                            # 创建头寸对象
-                            position = ProtocolPosition(
-                                protocol="Curve Finance",
-                                asset=symbol,
-                                amount=amount,
-                                leverage=None,  # Curve Finance LP没有杠杆
-                                apy=apy,
-                            )
-
-                            positions.append(position)
-                            logger.info(
-                                f"发现Curve {pool_info.get('name', 'Unknown')} 存款: "
-                                f"{amount:.6f} {symbol} (APY: {apy*100:.2f}%, "
-                                f"价值: ${user_value_usd:.2f})"
-                            )
-                    except Exception as e:
-                        pool_name = pool_info.get("name", "Unknown")
-                        logger.error(f"获取Curve池 {pool_name} 数据时出错: {e}")
-
-                return positions
-
-            except Exception as e:
-                logger.error(f"从Curve API获取数据时出错: {e}")
-                return []
-
-        except Exception as e:
-            logger.error(f"获取Curve Finance头寸时出错: {e}")
-            return []
-
-    async def _get_uniswap_v2_positions(self, address: str) -> List[ProtocolPosition]:
-        """获取用户在Uniswap V2的LP头寸"""
-        positions = []
-
-        try:
-            # 获取Uniswap V2工厂合约
-            factory_address = self.protocol_contracts["Uniswap V2"]["factory"]
-            factory_contract = self.w3.eth.contract(
-                address=factory_address, abi=self.uniswap_factory_abi
-            )
-
-            # 获取Uniswap V2路由合约
-            router_address = self.protocol_contracts["Uniswap V2"]["router"]
-            router_contract = self.w3.eth.contract(
-                address=router_address, abi=self.uniswap_router_abi
-            )
-
-            # 常见的Uniswap V2对
-            common_pairs = [
-                # ETH/USDC
-                "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc",
-                # ETH/WBTC
-                "0xBb2b8038a1640196FbE3e38816F3e67Cba72D940",
-                # ETH/USDT
-                "0x0d4a11d5EEaaC28EC3F61d100daF4d40471f1852",
-                # USDC/USDT
-                "0x3041CbD36888bECc7bbCBc0045E3B1f144466f5f",
-                # ETH/DAI
-                "0xA478c2975Ab1Ea89e8196811F51A7B7Ade33eB11",
-                # WBTC/USDC
-                "0x004375Dff511095CC5A197A54140a24eFEF3A416",
-                # ETH/UNI
-                "0xd3d2E2692501A5c9Ca623199D38826e513033a17",
-                # ETH/LINK
-                "0xa2107FA5B38d9bbd2C461D6EDf11B11A50F6b974",
-                # ETH/AAVE
-                "0xDFC14d2Af169B0D36C4EFF567Ada9b2E0CAE044f",
-                # ETH/COMP
-                "0xCFfDdeD873554F362Ac02f8Fb1f02E5ada10516f",
-                # ETH/SNX
-                "0x43AE24960e5534731Fc831386c07755A2dc33D47",
-                # ETH/SUSHI
-                "0xCE84867c3c02B05dc570d0135103d3fB9CC19433",
-                # ETH/YFI
-                "0x2fDbAdf3C4D5A8666Bc06645B8358ab803996E28",
-                # ETH/MKR
-                "0xC2aDdA861F89bBB333c90c492cB837741916A225",
-                # ETH/1INCH
-                "0x26aAd2da94C59524ac0D93F6D6Cbf9071d7086f2",
-            ]
-
-            # 尝试从Uniswap API获取交易对信息
-            try:
-                # 使用TheGraph查询Uniswap V2交易对数据
-                uniswap_graph_url = (
-                    "https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v2"
-                )
-                query = """
-                {
-                  pairs(first: 100, orderBy: reserveUSD, orderDirection: desc) {
-                    id
-                    token0 {
-                      id
-                      symbol
-                      name
-                      decimals
-                    }
-                    token1 {
-                      id
-                      symbol
-                      name
-                      decimals
-                    }
-                    reserve0
-                    reserve1
-                    reserveUSD
-                    volumeUSD
-                    txCount
-                    token0Price
-                    token1Price
-                  }
-                }
-                """
-
-                response = requests.post(
-                    uniswap_graph_url, json={"query": query}, proxies=self.proxies
-                )
-
-                if response.status_code == 200:
-                    data = response.json()
-                    if "data" in data and "pairs" in data["data"]:
-                        # 添加从TheGraph获取的热门交易对
-                        for pair in data["data"]["pairs"]:
-                            if pair["id"] not in common_pairs:
-                                common_pairs.append(pair["id"])
-                        logger.info(
-                            f"从TheGraph获取到 {len(data['data']['pairs'])} 个Uniswap V2交易对"
-                        )
-            except Exception as e:
-                logger.error(f"从TheGraph获取Uniswap V2交易对数据时出错: {e}")
-
-            # 处理所有交易对
-            for pair_address in common_pairs:
-                try:
-                    # 创建对合约
-                    pair_contract = self.w3.eth.contract(
-                        address=pair_address, abi=self.uniswap_pair_abi
-                    )
-
-                    # 获取用户LP代币余额
-                    balance = pair_contract.functions.balanceOf(address).call()
-
-                    if balance > 0:
-                        # 获取代币0和代币1
-                        token0_address = pair_contract.functions.token0().call()
-                        token1_address = pair_contract.functions.token1().call()
-
-                        # 创建代币合约
-                        token0_contract = self.w3.eth.contract(
-                            address=token0_address, abi=self.erc20_abi
-                        )
-                        token1_contract = self.w3.eth.contract(
-                            address=token1_address, abi=self.erc20_abi
-                        )
-
-                        # 获取代币符号
-                        try:
-                            token0_symbol = token0_contract.functions.symbol().call()
-                            token1_symbol = token1_contract.functions.symbol().call()
-                        except Exception:
-                            # 如果无法获取符号，使用地址的简短形式
-                            token0_symbol = (
-                                f"{token0_address[:6]}...{token0_address[-4:]}"
-                            )
-                            token1_symbol = (
-                                f"{token1_address[:6]}...{token1_address[-4:]}"
-                            )
-
-                        # 获取池中的储备量
-                        reserves = pair_contract.functions.getReserves().call()
-                        reserve0 = reserves[0]
-                        reserve1 = reserves[1]
-
-                        # 获取总供应量
-                        total_supply = pair_contract.functions.totalSupply().call()
-
-                        # 计算用户在池中的份额
-                        share = balance / total_supply if total_supply > 0 else 0
-
-                        # 计算用户的代币数量
-                        token0_amount = share * reserve0
-                        token1_amount = share * reserve1
-
-                        # 获取代币精度
-                        try:
-                            token0_decimals = (
-                                token0_contract.functions.decimals().call()
-                            )
-                            token1_decimals = (
-                                token1_contract.functions.decimals().call()
-                            )
-                        except Exception:
-                            token0_decimals = 18  # 默认精度
-                            token1_decimals = 18  # 默认精度
-
-                        # 调整精度
-                        token0_amount = token0_amount / (10**token0_decimals)
-                        token1_amount = token1_amount / (10**token1_decimals)
-
-                        # 尝试获取USD价值
-                        usd_value = None
-                        try:
-                            # 尝试从TheGraph获取交易对USD价值
-                            for pair in data.get("data", {}).get("pairs", []):
-                                if pair["id"].lower() == pair_address.lower():
-                                    reserve_usd = float(pair["reserveUSD"])
-                                    usd_value = reserve_usd * share
-                                    break
-                        except Exception:
-                            pass
-
-                        # 尝试估算APY
-                        apy = None
-                        try:
-                            # 尝试从TheGraph获取交易对交易量，估算APY
-                            for pair in data.get("data", {}).get("pairs", []):
-                                if pair["id"].lower() == pair_address.lower():
-                                    # 假设每日交易量是过去24小时的交易量
-                                    daily_volume = float(pair["volumeUSD"])
-                                    reserve_usd = float(pair["reserveUSD"])
-
-                                    if reserve_usd > 0:
-                                        # Uniswap V2收取0.3%的交易费
-                                        daily_fee = daily_volume * 0.003
-                                        # 年化收益率 = 日费用 * 365 / 储备
-                                        apy = (daily_fee * 365) / reserve_usd
-                                        break
-                        except Exception:
-                            pass
-
-                        # 创建头寸对象
-                        position = ProtocolPosition(
-                            protocol="Uniswap V2",
-                            asset=f"{token0_symbol}/{token1_symbol}",
-                            amount=balance / (10**18),  # LP代币通常是18位小数
-                            leverage=None,  # Uniswap LP没有杠杆
-                            apy=apy,
-                        )
-
-                        positions.append(position)
-
-                        # 记录详细信息
-                        logger.info(
-                            f"发现Uniswap V2 {token0_symbol}/{token1_symbol} LP: "
-                            f"{balance / (10**18):.6f} LP代币 "
-                            f"({token0_amount:.6f} {token0_symbol}, {token1_amount:.6f} {token1_symbol})"
-                        )
-                        if usd_value:
-                            logger.info(f"  估计价值: ${usd_value:.2f} USD")
-                        if apy:
-                            logger.info(f"  估计APY: {apy*100:.2f}%")
-                except Exception as e:
-                    logger.error(f"获取Uniswap V2对 {pair_address} 数据时出错: {e}")
-
-            return positions
-
-        except Exception as e:
-            logger.error(f"获取Uniswap V2头寸时出错: {e}")
-            return []
-
-    async def get_gas_price(self) -> float:
-        """获取当前gas价格（单位：Gwei）
-
-        Returns:
-            float: 当前gas价格，单位为Gwei
-        """
-        try:
-            gas_price = self.historical_data_cache.get("gas_price", "1m")
-            if gas_price is not None:
-                return gas_price
-            try:
-                # 尝试从ETH API获取ETH gas价格
-                url = "https://api.etherscan.io/v2/api?chainid=1&module=gastracker&action=gasoracle"
-                """
-                {
-                    "status": "1",
-                    "message": "OK-Missing/Invalid API Key, rate limit of 1/5sec applied",
-                    "result": {
-                        "LastBlock": "22027483",
-                        "SafeGasPrice": "0.638579654",
-                        "ProposeGasPrice": "0.639519654",
-                        "FastGasPrice": "0.703471619",
-                        "suggestBaseFee": "0.638579654",
-                        "gasUsedRatio": "0.798531,0.483220166666667,0.492903416666667,0.982302996161946,0.451882105996492"
-                    }
-                }
-                """
-
-                response = requests.get(url, proxies=proxies)
-                if response.status_code == 200:
-                    data = response.json()
-                    gas_price = float(data["result"]["suggestBaseFee"])
-                    self.historical_data_cache.set("gas_price", gas_price, "1m")
-                    logger.info(f"从ETH API估算gas价格: {gas_price:.2f} Gwei")
-                    return gas_price
-                else:
-                    logger.error(f"ETH API返回错误: {response.status_code}")
-            except Exception as e:
-                logger.error(f"从ETH API获取gas价格失败: {e}")
-
-            # 如果都失败了，返回一个合理的默认值
-            default_gas_price = 0.5  # 0.5 Gwei
-            logger.warning(f"无法获取实时gas价格，使用默认值: {default_gas_price} Gwei")
-            return default_gas_price
-
-        except Exception as e:
-            logger.error(f"获取gas价格时出错: {e}")
-            return 30.0  # 返回默认值
