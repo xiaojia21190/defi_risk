@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from web3 import Web3
 import os
 import pandas as pd
@@ -13,6 +13,12 @@ import asyncio
 import aiohttp
 from cachetools import TTLCache, cached
 import time
+import json
+import hmac
+import hashlib
+import base64
+import urllib.parse
+from dfllama import DefiLlamaClient, Coin
 
 # 设置日志记录器
 logger = logging.getLogger("defi_risk.blockchain")
@@ -134,7 +140,6 @@ class ProtocolPosition:
     protocol: str
     asset: str
     amount: float
-    leverage: Optional[float] = None
     apy: Optional[float] = None
 
 
@@ -147,12 +152,27 @@ class BlockchainService:
         self.data_fetch_locks = {}  # 用于防止并发获取相同数据
         self.pending_requests = {}  # 用于合并请求
         self._load_contract_abis()
+        self.proxies = {
+            "http": "http://127.0.0.1:7890",
+            "https": "http://127.0.0.1:7890",
+        }
+
+        # OKX API 配置
+        self.okx_api_config = {
+            "api_key": "",
+            "secret_key": "",
+            "passphrase": "",
+            "project": "",  # 此处仅适用于 WaaS APIs
+        }
+
+        # OKX API 基础 URL
+        self.okx_api_base_url = "https://www.okx.com"
+        self.okx_api_defi_path = "/api/v5/defi"
 
         DEMO_PROTOCOLS.get("Aave V3")
 
         # 配置日志
         self.logger = logging.getLogger("blockchain_service")
-        # 只在开发环境设置为DEBUG，生产环境设置为INFO或WARNING
         if os.environ.get("ENVIRONMENT") == "development":
             self.logger.setLevel(logging.DEBUG)
         else:
@@ -201,12 +221,12 @@ class BlockchainService:
             except Exception as e:
                 logger.error(f"获取Curve Finance头寸时出错: {e}")
 
-            # 4. 获取Maker头寸
+            # 4. 获取Uniswap V3头寸
             try:
-                maker_positions = await self._get_maker_positions(address)
-                positions.extend(maker_positions)
+                uniswap_positions = await self._get_uniswap_v3_positions(address)
+                positions.extend(uniswap_positions)
             except Exception as e:
-                logger.error(f"获取Maker头寸时出错: {e}")
+                logger.error(f"获取Uniswap V3头寸时出错: {e}")
 
             # 过滤掉金额为0的头寸
             positions = [pos for pos in positions if pos.amount > 0]
@@ -219,6 +239,335 @@ class BlockchainService:
             return positions
         except Exception as e:
             logger.error(f"获取所有存款头寸时出错: {e}")
+            return []
+
+    def _generate_okx_signature(
+        self, method: str, request_path: str, params: Optional[Dict] = None
+    ) -> Dict[str, str]:
+        """生成OKX API请求所需的签名和时间戳
+
+        Args:
+            method: HTTP方法 ('GET' 或 'POST')
+            request_path: 请求路径
+            params: 请求参数
+
+        Returns:
+            包含签名和时间戳的字典
+        """
+        # 获取ISO 8601格式时间戳
+        timestamp = datetime.now(datetime.UTC).isoformat()[:-3] + "Z"
+
+        # 生成预签名字符串
+        query_string = ""
+        if method == "GET" and params:
+            query_string = "?" + urllib.parse.urlencode(params)
+        elif method == "POST" and params:
+            query_string = json.dumps(params)
+
+        pre_hash = timestamp + method + request_path + query_string
+
+        # 使用HMAC-SHA256生成签名
+        secret_key = self.okx_api_config["secret_key"].encode("utf-8")
+        signature = base64.b64encode(
+            hmac.new(secret_key, pre_hash.encode("utf-8"), hashlib.sha256).digest()
+        ).decode("utf-8")
+
+        return {
+            "OK-ACCESS-KEY": self.okx_api_config["api_key"],
+            "OK-ACCESS-SIGN": signature,
+            "OK-ACCESS-TIMESTAMP": timestamp,
+            "OK-ACCESS-PASSPHRASE": self.okx_api_config["passphrase"],
+            "OK-ACCESS-PROJECT": self.okx_api_config["project"],
+        }
+
+    async def _okx_request(
+        self, method: str, path: str, params: Optional[Dict] = None
+    ) -> Dict:
+        """发送带有认证的OKX API请求
+
+        Args:
+            method: HTTP方法 ('GET' 或 'POST')
+            path: API路径
+            params: 请求参数
+
+        Returns:
+            API响应数据
+        """
+        # 间隔1-2秒
+        time.sleep(random.randint(1, 2))
+        full_path = self.okx_api_defi_path + path
+        headers = self._generate_okx_signature(method, full_path, params)
+
+        if method == "POST":
+            headers["Content-Type"] = "application/json"
+            url = self.okx_api_base_url + full_path
+            response = requests.post(
+                url, json=params, headers=headers, proxies=self.proxies
+            )
+        else:  # GET
+            url = self.okx_api_base_url + full_path
+            if params:
+                url += "?" + urllib.parse.urlencode(params)
+            response = requests.get(url, headers=headers, proxies=self.proxies)
+
+        if response.status_code != 200:
+            logger.error(f"OKX API请求失败: {response.status_code}, {response.text}")
+            raise Exception(f"OKX API请求失败: {response.status_code}")
+
+        data = response.json()
+        if data.get("code") != 0:
+            logger.error(f"OKX API返回错误: {data}")
+            raise Exception(f"OKX API返回错误: {data.get('msg', 'Unknown error')}")
+
+        return data
+
+    async def get_okx_positions(self, address: str) -> List[ProtocolPosition]:
+        """使用OKX API获取用户在各DeFi协议中的存款头寸
+
+        Args:
+            address: 用户的钱包地址
+
+        Returns:
+            List[ProtocolPosition]: 用户的DeFi头寸列表
+        """
+        try:
+            logger.info(f"使用OKX API获取地址 {address} 的DeFi头寸")
+            positions = []
+
+            # 投资品类型映射
+            invest_type_map = {
+                1: "存币",
+                2: "流动性池",
+                3: "挖矿",
+                4: "机枪池",
+                5: "质押",
+                6: "借贷",
+            }
+
+            # 投资名称映射
+            invest_name_map = {
+                "Save": "存款",
+                "Stake": "质押",
+                "Farm": "挖矿",
+                "Vaults": "机枪池",
+                "Borrow": "借款",
+                "Lend": "借出",
+            }
+
+            # 1. 获取用户资产列表
+            payload = {
+                "walletAddressList": [
+                    {"walletAddress": address, "chainId": 1}  # 默认使用以太坊主网
+                ]
+            }
+
+            try:
+                data = await self._okx_request(
+                    "POST", "/user/asset/platform/list", payload
+                )
+            except Exception as e:
+                logger.error(f"获取用户资产列表失败: {e}")
+                return []
+
+            wallet_platform_list = data["data"].get("walletIdPlatformList", [])
+            if not wallet_platform_list:
+                logger.info(f"地址 {address} 在OKX API中没有找到任何DeFi头寸")
+                return []
+
+            # 2. 处理每个平台的资产
+            for wallet_platform in wallet_platform_list:
+                platform_list = wallet_platform.get("platformList", [])
+
+                # 按平台分组的资产数据结构
+                platform_assets = {}  # 按平台分组的资产
+
+                for platform in platform_list:
+                    platform_name = platform.get("platformName")
+                    analysis_platform_id = platform.get("analysisPlatformId")
+
+                    # 初始化平台资产数据
+                    if platform_name not in platform_assets:
+                        platform_assets[platform_name] = {
+                            "total_assets": 0.0,  # 总资产价值
+                            "total_debts": 0.0,  # 总负债价值
+                            "leverage": 0.0,  # 杠杆率
+                            "positions": [],  # 该平台的所有头寸
+                        }
+
+                    # 获取平台详细信息
+                    try:
+                        platform_detail_payload = {
+                            "analysisPlatformId": analysis_platform_id,
+                            "accountIdInfoList": [
+                                {
+                                    "walletAddressList": [
+                                        {
+                                            "chainId": 1,
+                                            "walletAddress": address,
+                                        }
+                                    ]
+                                }
+                            ],
+                        }
+
+                        platform_detail_data = await self._okx_request(
+                            "POST",
+                            "/user/asset/platform/detail",
+                            platform_detail_payload,
+                        )
+
+                        if "data" in platform_detail_data:
+                            wallet_details = platform_detail_data["data"].get(
+                                "walletIdPlatformDetailList", []
+                            )
+
+                            for wallet_detail in wallet_details:
+                                network_holds = wallet_detail.get(
+                                    "networkHoldVoList", []
+                                )
+
+                                for network_hold in network_holds:
+                                    network = network_hold.get("network")
+                                    chain_id = network_hold.get("chainId")
+                                    # 总资产
+                                    total_assets = network_hold.get("totalAssert", 0)
+                                    # 总负债
+                                    total_debts = 0
+                                    # 投资品
+                                    invest_tokens = network_hold.get(
+                                        "investTokenBalanceVoList", []
+                                    )
+
+                                    for invest_token in invest_tokens:
+                                        invest_type = invest_token.get("investType", 1)
+                                        investment_name = invest_token.get(
+                                            "investmentName", ""
+                                        )
+                                        total_value = float(
+                                            invest_token.get("totalValue", "0")
+                                        )
+
+                                        # 创建头寸对象
+                                        position = ProtocolPosition(
+                                            protocol=platform_name,
+                                            asset=investment_name,
+                                            amount=total_value,
+                                            apy=None,
+                                        )
+
+                                        # 更新平台资产统计
+                                        if invest_type == 6:  # 借贷
+                                            platform_assets[platform_name][
+                                                "total_debts"
+                                            ] += total_value
+                                        else:  # 其他类型都计入总资产
+                                            platform_assets[platform_name][
+                                                "total_assets"
+                                            ] += total_value
+
+                                        # 添加到平台头寸列表
+                                        platform_assets[platform_name][
+                                            "positions"
+                                        ].append(position)
+                                        positions.append(position)
+
+                    except Exception as e:
+                        logger.error(f"获取平台 {platform_name} 详情时出错: {e}")
+
+                    # 如果没有获取到详细资产，则添加一个总体头寸
+                    if (
+                        platform_name not in platform_assets
+                        or not platform_assets[platform_name]["positions"]
+                    ):
+                        position = ProtocolPosition(
+                            protocol=platform_name,
+                            asset="USD",  # 使用USD作为默认资产
+                            amount=0.0,
+                            leverage=None,
+                            apy=None,
+                        )
+                        positions.append(position)
+
+                # 计算每个平台的杠杆率
+                for platform_name, platform_data in platform_assets.items():
+                    total_assets = platform_data["total_assets"]
+                    total_debts = platform_data["total_debts"]
+
+                    # 计算杠杆率
+                    if total_assets > 0:
+                        leverage = (
+                            total_assets / (total_assets - total_debts)
+                            if total_debts < total_assets
+                            else 0
+                        )
+                        logger.info(
+                            f"平台 {platform_name} - 总资产: {total_assets:.4f}, 总负债: {total_debts:.4f}, 杠杆率: {leverage:.4f}x"
+                        )
+                        # 更新该平台所有头寸的杠杆率
+                        platform_data["leverage"] = leverage
+
+            # 尝试从DefiLlama获取额外信息并更新头寸
+            try:
+
+                # 更新OKX头寸的APY和其他信息
+                for position in positions:
+                    defi_llama_pools = await self.get_defi_llama_pools(position.asset)
+                    if defi_llama_pools:
+                        position.apy = defi_llama_pools
+
+                logger.info(f"已使用DefiLlama数据更新OKX头寸信息")
+            except Exception as e:
+                logger.error(f"使用DefiLlama数据更新OKX头寸时出错: {e}")
+
+            return positions
+        except Exception as e:
+            logger.error(f"获取OKX头寸时出错: {e}")
+            return []
+
+    async def get_defi_llama_pools(self, symbol: str) -> str:
+        """使用DefiLlama API获取DeFi协议池的最新数据
+
+        Returns:
+            float: DeFi池的APY
+        """
+        try:
+            logger.info("使用DefiLlama API获取DeFi池数据")
+            positions = []
+
+            # 使用缓存获取数据，避免频繁请求API
+            cache_key = "defi_llama_pools"
+            cache_interval = "1h"  # 使用1小时缓存
+
+            # 检查缓存中是否有数据
+            cached_pools = self.historical_data_cache.get(cache_key, cache_interval)
+
+            if cached_pools is not None:
+                logger.info("从缓存获取DefiLlama池数据")
+                pools = cached_pools
+            else:
+                logger.info("从DefiLlama API获取池数据")
+                # 创建DefiLlama客户端并获取池数据
+                client = DefiLlamaClient()
+                pools = client.get_pools()
+
+                # 将数据存入缓存
+                self.historical_data_cache.set(cache_key, pools, cache_interval)
+                logger.info(f"已将{len(pools)}个池数据存入缓存")
+
+            # 处理池数据
+            for pool in pools:
+                # 只处理Ethereum链上的池
+                if pool.get("chain") == "Ethereum":
+                    symbol = pool.get("symbol", "")
+                    apy = pool.get("apy")
+
+                    if symbol == symbol:
+                        return apy
+
+            logger.info(f"从DefiLlama获取了{len(positions)}个Ethereum链上的池")
+            return positions
+        except Exception as e:
+            logger.error(f"获取DefiLlama池数据时出错: {e}")
             return []
 
     async def get_market_alerts(self, address: str) -> List[Dict]:
@@ -544,50 +893,24 @@ class BlockchainService:
             else:
                 logger.info(f"缓存中未找到 {asset} 的历史数据")
 
-            # 资产ID映射（不同API可能使用不同的ID）
-            asset_ids = {
-                # Binance交易对
-                "binance": {
-                    "ETH": "ETHUSDT",
-                    "BTC": "BTCUSDT",  # 使用BTC作为BTC的代理
-                    "USDC": "USDCUSDT",
-                    "USDT": "BUSDUSDT",  # USDT/USDC交易对
-                    "AAVE": "AAVEUSDT",
-                    "COMP": "COMPUSDT",
-                    "UNI": "UNIUSDT",
-                    "LINK": "LINKUSDT",
-                    "SNX": "SNXUSDT",
-                    "MKR": "MKRUSDT",
-                    "YFI": "YFIUSDT",
-                    "SUSHI": "SUSHIUSDT",
-                },
-            }
-
-            if asset not in asset_ids["binance"]:
-                logger.warning(f"不支持的资产 {asset}，使用演示数据")
-                return []
-
             # 尝试从不同的数据源获取数据
             df = None
             error_messages = []
 
             # 1. 尝试Binance API
-            if asset in asset_ids["binance"]:
-                try:
-                    logger.info(f"尝试从Binance获取{asset}数据")
-                    df = await self._get_binance_data(
-                        asset, asset_ids["binance"][asset]
-                    )
-                    if df is not None and not df.empty:
-                        logger.info(f"成功从Binance获取{asset}数据，设置到缓存")
-                        self.historical_data_cache.set(asset, df, "1d")
-                        return df
-                    else:
-                        logger.warning(f"从Binance获取的{asset}数据为空")
-                except Exception as e:
-                    error_msg = f"从Binance获取{asset}数据失败: {e}"
-                    logger.warning(error_msg)
-                    error_messages.append(error_msg)
+            try:
+                logger.info(f"尝试从Binance获取{asset}数据")
+                df = await self._get_binance_data(asset)
+                if df is not None and not df.empty:
+                    logger.info(f"成功从Binance获取{asset}数据，设置到缓存")
+                    self.historical_data_cache.set(asset, df, "1d")
+                    return df
+                else:
+                    logger.warning(f"从Binance获取的{asset}数据为空")
+            except Exception as e:
+                error_msg = f"从Binance获取{asset}数据失败: {e}"
+                logger.warning(error_msg)
+                error_messages.append(error_msg)
 
             # 5. 所有数据源都失败，使用演示数据
             logger.error(
@@ -612,27 +935,18 @@ class BlockchainService:
 
         url = "https://api.binance.com/api/v3/ticker/24hr"
 
-        asset_ids = {
-            # Binance交易对
-            "binance": {
-                "ETH": "ETHUSDT",
-                "BTC": "BTCUSDT",  # 使用BTC作为BTC的代理
-                "USDC": "USDCUSDT",
-                "USDT": "BUSDUSDT",  # USDT/USDC交易对
-                "AAVE": "AAVEUSDT",
-                "COMP": "COMPUSDT",
-                "UNI": "UNIUSDT",
-                "LINK": "LINKUSDT",
-                "SNX": "SNXUSDT",
-                "MKR": "MKRUSDT",
-                "YFI": "YFIUSDT",
-                "SUSHI": "SUSHIUSDT",
-            },
-        }
+        if "ETH" in asset:
+            asset = "ETHUSDT"
+        elif "BTC" in asset:
+            asset = "BTCUSDT"
+        elif "USDC" in asset:
+            asset = "USDCUSDT"
+        else:
+            asset = asset + "USDT"
 
         # 设置请求参数
         params = {
-            "symbol": asset_ids["binance"].get(asset, f"{asset}USDT"),
+            "symbol": asset,
         }
 
         try:
@@ -656,9 +970,17 @@ class BlockchainService:
             logger.error(f"从Binance获取{asset}数据失败: {e}")
             return None
 
-    async def _get_binance_data(
-        self, asset: str, symbol: str
-    ) -> Optional[pd.DataFrame]:
+    async def _get_binance_data(self, asset: str) -> Optional[pd.DataFrame]:
+
+        if "ETH" in asset:
+            asset = "ETHUSDT"
+        elif "BTC" in asset:
+            asset = "BTCUSDT"
+        elif "USDC" in asset:
+            asset = "USDCUSDT"
+        else:
+            asset = asset + "USDT"
+
         """从Binance API获取历史数据"""
         url = "https://api.binance.com/api/v3/klines"
         # 计算时间范围（过去30天）
@@ -667,7 +989,7 @@ class BlockchainService:
 
         # 设置请求参数
         params = {
-            "symbol": symbol,
+            "symbol": asset,
             "interval": "1d",  # 1天的K线
             "startTime": start_time,
             "endTime": end_time,
@@ -715,7 +1037,17 @@ class BlockchainService:
                 return df
             else:
                 logger.error(f"Binance API返回错误: {response.status}")
-                return None
+                # 返回默认数据
+                df = pd.DataFrame(
+                    {
+                        "timestamp": [],
+                        "price": [],
+                        "volume": [],
+                        "market_cap": [],
+                        "source": [],
+                    }
+                )
+                return df
         except Exception as e:
             logger.error(f"从Binance获取{asset}数据失败: {e}")
             return None
@@ -1443,6 +1775,7 @@ class BlockchainService:
             # 构建GraphQL查询，获取用户的存款和借款头寸
             # 根据Messari的Subgraph Schema构建查询
             query = """
+            {
               account(id: $userAddress) {
                 id
                 positions(where: {side: LENDER}) {
@@ -1474,10 +1807,8 @@ class BlockchainService:
                     maximumLTV
                     liquidationThreshold
                     liquidationPenalty
-                    totalValueLockedUSD
-                    totalBorrowBalanceUSD
                     inputTokenPriceUSD
-                    canUseAsCollateral
+                    indexLastUpdatedTimestamp
                   }
                 }
                 # 获取借款头寸
@@ -1499,19 +1830,18 @@ class BlockchainService:
                       side
                       type
                     }
+                    indexLastUpdatedTimestamp
                   }
                 }
               }
+            }
             """
-
-            # 设置查询变量
-            variables = {"userAddress": address.lower()}
 
             # 发送GraphQL请求
             logger.info(f"向Aave V3 Subgraph发送查询，获取地址{address}的头寸")
             response = requests.post(
                 subgraph_url,
-                json={"query": query, "variables": variables},
+                json={"query": query},
                 proxies=proxies,
             )
 
@@ -1677,6 +2007,7 @@ class BlockchainService:
             # 构建GraphQL查询，获取用户的所有头寸
             query = """
               # 获取用户账户信息
+            {
               account(id: $userAddress) {
                 id
                 positionCount
@@ -1743,6 +2074,7 @@ class BlockchainService:
                   }
                 }
               }
+            }
             """
 
             # 发送GraphQL查询

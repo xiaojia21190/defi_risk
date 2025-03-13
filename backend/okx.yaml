@@ -1,0 +1,281 @@
+// post 查询 https://www.okx.com/api/v5/defi/user/asset/platform/list 获取用户资产列表
+参数
+{
+   walletAddressList: [{
+    "walletAddress": "0x8f4d93d7-275e-45dd-a0ce-2014d82d4baf",
+    "chainId": 1
+   }]
+}
+{
+    "code": 0,
+    "msg": "",
+    "error_code": "0",
+    "error_message": "",
+    "detailMsg": "",
+    "data": {
+        "walletIdPlatformList": [
+            {
+                "platformList": [
+                    {
+                        "platformName": "Ethena",
+                        "analysisPlatformId": 118265,
+                        "platformLogo": "https://static.coinall.ltd/cdn/web3/protocol/logo/1702889213278.png/type=png_350_0",
+                        "platformColor": "",
+                        "currencyAmount": "10076.999426431322729394061370751783986",
+                        "isSupportInvest": true,
+                        "bonusTag": 0,
+                        "platformUrl": "https://app.ethena.fi",
+                        "networkBalanceVoList": [
+                            {
+                                "network": "ETH",
+                                "networkLogo": "https://static.coinall.ltd/cdn/wallet/logo/ETH-20220328.png",
+                                "chainId": 1,
+                                "currencyAmount": "10076.999426431322729394061370751783986"
+                            }
+                        ],
+                        "investmentCount": 1
+                    },
+                    {
+                        "platformName": "Pendle V2",
+                        "analysisPlatformId": 258,
+                        "platformLogo": "https://static.coinall.ltd/cdn/web3/protocol/logo/pendle-v2.png/type=png_350_0",
+                        "platformColor": "",
+                        "currencyAmount": "161.9345234089089141378517476223121560",
+                        "isSupportInvest": true,
+                        "bonusTag": 0,
+                        "platformUrl": "https://www.pendle.finance/",
+                        "networkBalanceVoList": [
+                            {
+                                "network": "ETH",
+                                "networkLogo": "https://static.coinall.ltd/cdn/wallet/logo/ETH-20220328.png",
+                                "chainId": 1,
+                                "currencyAmount": "161.9345234089089141378517476223121560"
+                            }
+                        ],
+                        "investmentCount": 2
+                    },
+                    {
+                        "platformName": "Zircuit",
+                        "analysisPlatformId": 119424,
+                        "platformLogo": "https://static.coinall.ltd/cdn/web3/protocol/logo/zircuit.png/type=png_350_0",
+                        "platformColor": "",
+                        "currencyAmount": "156.9108954533033331829362703655488",
+                        "isSupportInvest": true,
+                        "bonusTag": 0,
+                        "platformUrl": "https://stake.zircuit.com/",
+                        "networkBalanceVoList": [
+                            {
+                                "network": "ETH",
+                                "networkLogo": "https://static.coinall.ltd/cdn/wallet/logo/ETH-20220328.png",
+                                "chainId": 1,
+                                "currencyAmount": "156.9108954533033331829362703655488"
+                            }
+                        ],
+                        "investmentCount": 1
+                    }
+                ],
+                "walletId": "8f4d93d7-275e-45dd-a0ce-2014d82d4baf",
+                "totalAssets": "10395.8448452935349767148493887396449420"
+            }
+        ],
+        "lpTokenAddressList": [
+            {
+                "chainId": 1,
+                "tokenAddress": "0xdc02b77a3986da62c7a78fed73949c9767850809"
+            }
+        ],
+        "updateAt": 1727083602000,
+        "assetStatus": 1
+    }
+}
+
+
+// get 然后查询 https://www.okx.com/api/v5/defi/explore/protocol/list 获取协议列表
+// 根据 platformName 查询
+{
+    "code": 0,
+    "msg": "",
+    "data": [
+{
+    "platformId": 149,
+    "platformName": "MorphoCompound",
+    "platformWebSite": "https://compound.morpho.xyz/?network=mainnet",
+    "investmentApiUrlPattern": "",
+    "investmentPageUrlPattern": "",
+    "platformMinInfos": [
+{
+    "investmentId": "20926",
+    "protocolId": "194",
+    "network": "OP"
+},
+{
+    "investmentId": "20949",
+    "protocolId": "195",
+    "network": "OP"
+}
+    ]
+},
+{
+    "platformId": 144,
+    "platformName": "Compound V3",
+    "platformWebSite": "https://app.compound.finance",
+    "investmentUrlPattern": "",
+    "platformMinInfos": [
+{
+    "investmentId": "8973",
+    "protocolId": "75",
+    "network": "OP"
+}
+    ]
+}
+    ]
+}
+
+// 在查询 https://www.okx.com/api/v5/defi/explore/product/detail
+// 根据 investmentId 查询
+{
+    "code": 0,
+    "msg": "",
+    "data": {
+        "investmentId": "120",
+        "investmentName": "jEUR",
+        "chainId": "137",
+        "rate": "0.01129",
+        "investType": "1",
+        "platformName": "Aave V3",
+        "platformId": "24",
+        "analysisPlatformId": "10",
+        "rateType": "0",
+        "tvl": "51350.92499",
+        "underlyingToken": [
+            {
+                "tokenSymbol": "jEUR",
+                "tokenAddress": "0x4e3decbb3645551b8a19f0ea1678079fcb33fb4c",
+                "isBaseToken": false
+            }
+        ],
+        "isInvestable": false,
+        "earnedToken": [
+            {
+                "tokenSymbol": "jEUR",
+                "tokenAddress": "0x4e3decbb3645551b8a19f0ea1678079fcb33fb4c",
+                "isBaseToken": false
+            }
+        ],
+        "lpToken": [
+            {
+                "tokenSymbol": "aPolJEUR",
+                "tokenAddress": "0x6533afac2e7bccb20dca161449a13a32d391fb00",
+                "isBaseToken": false
+            }
+        ],
+        "utilizationRate": "0.76862"
+    }
+}
+
+
+// post https://www.okx.com/api/v5/defi/user/asset/platform/detail  查询用户协议维度持仓列表#
+参数
+{
+  analysisPlatformId: 149,
+  walletIdPlatformList: [{
+    "walletId": "8f4d93d7-275e-45dd-a0ce-2014d82d4baf",
+    "platformId": 149
+  }]
+}
+
+{
+    "code": 0,
+    "msg": "",
+    "error_code": "0",
+    "error_message": "",
+    "detailMsg": "",
+    "data": {
+        "walletIdPlatformDetailList": [
+            {
+                "networkHoldVoList": [
+                    {
+                        "network": "Arbitrum One",
+                        "chainId": 42161,
+                        "investTokenBalanceVoList": [
+                            {
+                                "investType": 5,
+                                "assetsTokenList": [
+                                    {
+                                        "tokenSymbol": "ETH",
+                                        "tokenLogo": "https://static.coinall.ltd/cdn/wallet/logo/ETH-20220328.png",
+                                        "coinAmount": "0.000044133940644863",
+                                        "currencyAmount": "0.11722724912266575471",
+                                        "tokenPrecision": 18,
+                                        "tokenAddress": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                                        "network": "ARB"
+                                    }
+                                ],
+                                "rewardDefiTokenInfo": [],
+                                "totalValue": "0.11722724912266575471"
+                            }
+                        ],
+                        "availableRewards": [],
+                        "airDropRewardInfo": []
+                    }
+                ],
+                "accountId": "278c58bb-5958-4301-a5b6-d670e1d9837f"
+            }
+        ],
+        "platformName": "ether.fi",
+        "analysisPlatformId": 260,
+        "platformLogo": "https://static.coinall.ltd/cdn/invest/platform/EtherFi.png",
+        "platformUrl": "https://www.ether.fi/"
+    }
+}
+
+
+// post  https://www.okx.com/api/v5/defi/user/investment/asset-detail 查询用户投资品维度的持仓列表#
+参数
+{
+  address: "0x8f4d93d7-275e-45dd-a0ce-2014d82d4baf",
+  chainId: 1,
+  investmentId: 149
+}
+
+{
+    "code": 0,
+    "msg": "",
+    "data": [
+        {
+            "investmentName": "Curve LP peUSD-USDC.e",
+            "investmentId": "21670",
+            "sourceInvestmentId": "21668",
+            "investType": "3",
+            "investName": "Farm",
+            "assetsTokenList": [
+                {
+                    "tokenSymbol": "peUSDUSDC-f",
+                    "tokenAddress": "0x1e2ebe2fffa7c9fa83486188f7c19f9acd1bb990",
+                    "tokenPrecision": "18",
+                    "coinAmount": "2.691174106339194701",
+                    "currencyAmount": "2.61869989433167351725360102089837"
+                }
+            ],
+            "rewardDefiTokenInfo": [
+                {
+                    "baseDefiTokenInfos": [
+                        {
+                            "tokenSymbol": "esLBR",
+                            "tokenAddress": "0x73b1988a3336208e55275c52fac7f5d3a7dfb89f",
+                            "network": "ARB",
+                            "tokenPrecision": "18",
+                            "coinAmount": "0.002555136460646101",
+                            "currencyAmount": "0.00307009284288151737625793354325",
+                            "buttonType": "0"
+                        }
+                    ],
+                    "buttonType": "3",
+                    "rewardType": "1"
+                }
+            ],
+            "totalValue": "2.62176998717455503462985895444162"
+        }
+    ]
+}
+
