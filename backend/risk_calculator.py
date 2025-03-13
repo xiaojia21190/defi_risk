@@ -95,7 +95,6 @@ class Position:
     asset: str
     amount: float
     apy: Optional[float] = None
-    entry_date: Optional[datetime] = None
 
 
 @dataclass

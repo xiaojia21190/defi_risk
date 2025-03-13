@@ -134,13 +134,20 @@ DEMO_PROTOCOLS = {
     "Balancer": {"risk": 0.30, "apy_range": (0.04, 0.12)},
 }
 
-
 @dataclass
-class ProtocolPosition:
+class PlatformAsset:
     protocol: str
     asset: str
     amount: float
     apy: Optional[float] = None
+
+
+@dataclass
+class ProtocolPosition:
+    total_assets: float
+    total_debts: float
+    leverage: float
+    positions: List[PlatformAsset]
 
 
 class BlockchainService:
@@ -337,8 +344,7 @@ class BlockchainService:
         """
         try:
             logger.info(f"使用OKX API获取地址 {address} 的DeFi头寸")
-            positions = []
-
+            positionAll = []
             # # 投资品类型映射
             # invest_type_map = {
             #     1: "存币",
@@ -453,7 +459,7 @@ class BlockchainService:
                                         )
 
                                         # 创建头寸对象
-                                        position = ProtocolPosition(
+                                        position = PlatformAsset(
                                             protocol=platform_name,
                                             asset=investment_name,
                                             amount=total_value,
@@ -475,28 +481,28 @@ class BlockchainService:
                                             "positions"
                                         ].append(position)
                                         positions.append(position)
-
                     except Exception as e:
                         logger.error(f"获取平台 {platform_name} 详情时出错: {e}")
 
                     # 如果没有获取到详细资产，则添加一个总体头寸
-                    if (
-                        platform_name not in platform_assets
-                        or not platform_assets[platform_name]["positions"]
-                    ):
-                        position = ProtocolPosition(
-                            protocol=platform_name,
-                            asset="USD",  # 使用USD作为默认资产
-                            amount=0.0,
-                            leverage=None,
-                            apy=None,
-                        )
-                        positions.append(position)
+                    # if (
+                    #     platform_name not in platform_assets
+                    #     or not platform_assets[platform_name]["positions"]
+                    # ):
+                    #     position = ProtocolPosition(
+                    #         protocol=platform_name,
+                    #         asset="USD",  # 使用USD作为默认资产
+                    #         amount=0.0,
+                    #         leverage=None,
+                    #         apy=None,
+                    #     )
+                    #     positions.append(position)
 
                 # 计算每个平台的杠杆率
                 for platform_name, platform_data in platform_assets.items():
                     total_assets = platform_data["total_assets"]
                     total_debts = platform_data["total_debts"]
+                    positions = platform_data["positions"]
 
                     # 计算杠杆率
                     if total_assets > 0:
@@ -510,21 +516,19 @@ class BlockchainService:
                         )
                         # 更新该平台所有头寸的杠杆率
                         platform_data["leverage"] = leverage
+                        # 尝试从DefiLlama获取额外信息并更新头寸
+                        try:
+                            # 更新OKX头寸的APY和其他信息
+                            for position in positions:
+                                defi_llama_pools = await self.get_defi_llama_pools(position.asset)
+                                if defi_llama_pools:
+                                    position.apy = defi_llama_pools
 
-            # 尝试从DefiLlama获取额外信息并更新头寸
-            try:
+                            logger.info(f"已使用DefiLlama数据更新OKX头寸信息")
+                        except Exception as e:
+                            logger.error(f"使用DefiLlama数据更新OKX头寸时出错: {e}")
 
-                # 更新OKX头寸的APY和其他信息
-                for position in positions:
-                    defi_llama_pools = await self.get_defi_llama_pools(position.asset)
-                    if defi_llama_pools:
-                        position.apy = defi_llama_pools
-
-                logger.info(f"已使用DefiLlama数据更新OKX头寸信息")
-            except Exception as e:
-                logger.error(f"使用DefiLlama数据更新OKX头寸时出错: {e}")
-
-            return positions
+            positionAll.append(platform_assets)
         except Exception as e:
             logger.error(f"获取OKX头寸时出错: {e}")
             return []
