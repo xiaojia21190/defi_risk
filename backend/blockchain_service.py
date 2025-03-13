@@ -200,6 +200,11 @@ class BlockchainService:
             # 获取各协议的头寸
             positions = []
 
+            try:
+                positions = await self.get_okx_positions(address)
+            except Exception as e:
+                logger.error(f"获取OKX头寸时出错: {e}")
+
             # 1. 获取Aave V3头寸
             try:
                 aave_positions = await self._get_aave_v3_positions(address)
@@ -334,25 +339,25 @@ class BlockchainService:
             logger.info(f"使用OKX API获取地址 {address} 的DeFi头寸")
             positions = []
 
-            # 投资品类型映射
-            invest_type_map = {
-                1: "存币",
-                2: "流动性池",
-                3: "挖矿",
-                4: "机枪池",
-                5: "质押",
-                6: "借贷",
-            }
+            # # 投资品类型映射
+            # invest_type_map = {
+            #     1: "存币",
+            #     2: "流动性池",
+            #     3: "挖矿",
+            #     4: "机枪池",
+            #     5: "质押",
+            #     6: "借贷",
+            # }
 
-            # 投资名称映射
-            invest_name_map = {
-                "Save": "存款",
-                "Stake": "质押",
-                "Farm": "挖矿",
-                "Vaults": "机枪池",
-                "Borrow": "借款",
-                "Lend": "借出",
-            }
+            # # 投资名称映射
+            # invest_name_map = {
+            #     "Save": "存款",
+            #     "Stake": "质押",
+            #     "Farm": "挖矿",
+            #     "Vaults": "机枪池",
+            #     "Borrow": "借款",
+            #     "Lend": "借出",
+            # }
 
             # 1. 获取用户资产列表
             payload = {
@@ -556,11 +561,10 @@ class BlockchainService:
 
             # 处理池数据
             for pool in pools:
-                # 只处理Ethereum链上的池
+                # 只处理Ethereum链上的池 多个
                 if pool.get("chain") == "Ethereum":
                     symbol = pool.get("symbol", "")
                     apy = pool.get("apy")
-
                     if symbol == symbol:
                         return apy
 
@@ -705,39 +709,124 @@ class BlockchainService:
             # 3. 检查APY变化
             for pos in positions:
                 if pos.apy:
-                    # 假设历史APY数据，实际应用中应从数据库或API获取
-                    historical_apy = pos.apy * 0.9  # 假设之前的APY
-                    apy_change = (pos.apy - historical_apy) / historical_apy
+                    try:
+                        # 获取DefiLlama数据
+                        defi_llama_data = await self.get_defi_llama_pools(pos.asset)
 
-                    # APY异常变化警报
-                    if abs(apy_change) > 0.2:  # APY变化超过20%
-                        severity = "HIGH" if abs(apy_change) > 0.5 else "MEDIUM"
-                        direction = "增加" if apy_change > 0 else "减少"
-                        recommendation = (
-                            "考虑增加投资" if apy_change > 0 else "评估风险回报比"
-                        )
+                        if defi_llama_data:
+                            # 使用DefiLlama提供的APY变化数据
+                            apy_change_1d = (
+                                float(defi_llama_data.get("apyPct1D", 0)) / 100
+                            )  # 转换为小数
+                            apy_change_7d = (
+                                float(defi_llama_data.get("apyPct7D", 0)) / 100
+                            )
+                            apy_change_30d = (
+                                float(defi_llama_data.get("apyPct30D", 0)) / 100
+                            )
+                            apy_mean_30d = float(defi_llama_data.get("apyMean30d", 0))
+                            current_apy = float(defi_llama_data.get("apy", 0))
 
-                        alerts.append(
-                            {
-                                "type": "APY_CHANGE",
-                                "severity": severity,
-                                "asset": pos.asset,
-                                "protocol": pos.protocol,
-                                "message": f"{pos.protocol}的{pos.asset} APY{direction}{abs(apy_change)*100:.1f}%",
-                                "timestamp": now,
-                                "details": {
-                                    "current_apy": pos.apy,
-                                    "previous_apy": historical_apy,
-                                    "apy_change": apy_change,
-                                    "recommendation": recommendation,
-                                    "potential_impact": (
-                                        "高收益可能伴随高风险"
-                                        if apy_change > 0.5
-                                        else "收益下降可能表明市场风险降低"
-                                    ),
-                                },
-                            }
-                        )
+                            # 检查各个时间维度的APY变化
+                            # 1天变化检查
+                            if abs(apy_change_1d) > 0.1:  # APY变化超过10%
+                                severity = (
+                                    "HIGH" if abs(apy_change_1d) > 0.2 else "MEDIUM"
+                                )
+                                direction = "增加" if apy_change_1d > 0 else "减少"
+                                alerts.append(
+                                    {
+                                        "type": "APY_CHANGE_1D",
+                                        "severity": severity,
+                                        "asset": pos.asset,
+                                        "protocol": pos.protocol,
+                                        "message": f"{pos.protocol}的{pos.asset} APY在24小时内{direction}{abs(apy_change_1d)*100:.1f}%",
+                                        "timestamp": now,
+                                        "details": {
+                                            "current_apy": current_apy,
+                                            "apy_change_1d": apy_change_1d,
+                                            "apy_mean_30d": apy_mean_30d,
+                                            "recommendation": "关注短期收益波动",
+                                            "analysis": f"当前APY {'高于' if current_apy > apy_mean_30d else '低于'}30天平均水平",
+                                        },
+                                    }
+                                )
+
+                            # 7天变化检查
+                            if abs(apy_change_7d) > 0.2:  # APY变化超过20%
+                                severity = (
+                                    "HIGH" if abs(apy_change_7d) > 0.3 else "MEDIUM"
+                                )
+                                direction = "增加" if apy_change_7d > 0 else "减少"
+                                alerts.append(
+                                    {
+                                        "type": "APY_CHANGE_7D",
+                                        "severity": severity,
+                                        "asset": pos.asset,
+                                        "protocol": pos.protocol,
+                                        "message": f"{pos.protocol}的{pos.asset} APY在7天内{direction}{abs(apy_change_7d)*100:.1f}%",
+                                        "timestamp": now,
+                                        "details": {
+                                            "current_apy": current_apy,
+                                            "apy_change_7d": apy_change_7d,
+                                            "apy_mean_30d": apy_mean_30d,
+                                            "recommendation": "评估中期收益趋势",
+                                            "analysis": f"收益率波动{'剧烈' if abs(apy_change_7d) > 0.3 else '显著'}",
+                                        },
+                                    }
+                                )
+
+                            # 30天变化检查
+                            if abs(apy_change_30d) > 0.5:  # APY变化超过50%
+                                severity = (
+                                    "HIGH" if abs(apy_change_30d) > 0.7 else "MEDIUM"
+                                )
+                                direction = "增加" if apy_change_30d > 0 else "减少"
+                                alerts.append(
+                                    {
+                                        "type": "APY_CHANGE_30D",
+                                        "severity": severity,
+                                        "asset": pos.asset,
+                                        "protocol": pos.protocol,
+                                        "message": f"{pos.protocol}的{pos.asset} APY在30天内{direction}{abs(apy_change_30d)*100:.1f}%",
+                                        "timestamp": now,
+                                        "details": {
+                                            "current_apy": current_apy,
+                                            "apy_change_30d": apy_change_30d,
+                                            "apy_mean_30d": apy_mean_30d,
+                                            "recommendation": "重新评估长期投资策略",
+                                            "analysis": "收益率出现显著长期趋势变化",
+                                        },
+                                    }
+                                )
+
+                            # 检查当前APY是否显著偏离30天平均值
+                            if apy_mean_30d > 0:
+                                deviation = (current_apy - apy_mean_30d) / apy_mean_30d
+                                if abs(deviation) > 0.3:  # 偏离30天平均值超过30%
+                                    severity = (
+                                        "HIGH" if abs(deviation) > 0.5 else "MEDIUM"
+                                    )
+                                    direction = "高于" if deviation > 0 else "低于"
+                                    alerts.append(
+                                        {
+                                            "type": "APY_DEVIATION",
+                                            "severity": severity,
+                                            "asset": pos.asset,
+                                            "protocol": pos.protocol,
+                                            "message": f"{pos.protocol}的{pos.asset}当前APY显著{direction}30天平均水平",
+                                            "timestamp": now,
+                                            "details": {
+                                                "current_apy": current_apy,
+                                                "apy_mean_30d": apy_mean_30d,
+                                                "deviation": deviation,
+                                                "recommendation": "关注收益率回归均值可能性",
+                                                "analysis": "收益率可能存在均值回归趋势",
+                                            },
+                                        }
+                                    )
+                    except Exception as e:
+                        logger.error(f"处理{pos.asset} APY变化检测时出错: {e}")
 
             # 5. 检查市场趋势
             try:
