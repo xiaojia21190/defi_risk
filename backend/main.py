@@ -8,6 +8,26 @@ import logging
 from risk_calculator import RiskCalculator, Position
 from blockchain_service import BlockchainService
 from ai_predictor import AiPredictor
+from dataclasses import dataclass
+
+
+# 定义新的数据结构
+@dataclass
+class PlatformAsset:
+    protocol: str
+    asset: str
+    amount: float
+    apy: Optional[float] = None
+    invest_type: int = 0
+
+
+@dataclass
+class ProtocolPosition:
+    total_assets: float
+    total_debts: float
+    leverage: float
+    positions: List[PlatformAsset]
+
 
 # 设置日志记录
 logger = logging.getLogger("defi_risk")
@@ -86,23 +106,39 @@ async def analyze_defi_deposits(request: PortfolioRequest):
         logger.info(f"分析钱包地址: {request.wallet_address} 的DeFi存款")
 
         # 获取用户在各协议中的存款头寸
-        protocol_position = await blockchain_service.get_all_positions(
+        protocol_positions = await blockchain_service.get_all_positions(
             request.wallet_address
         )
 
-        if not protocol_position or not protocol_position.positions:
+        if not protocol_positions:
             raise HTTPException(status_code=404, detail="未找到DeFi存款")
 
-        # 计算风险评估
-        risk_assessment = risk_calculator.assess_portfolio_risk(
-            protocol_position.positions
-        )
+        # 合并所有协议的头寸
+        all_positions = []
+        total_assets = 0
+        total_debts = 0
+        weighted_leverage = 0
+        total_weight = 0
 
-        # 使用 total_assets 作为总存款价值
-        total_value = protocol_position.total_assets
+        for protocol_pos in protocol_positions:
+            all_positions.extend(protocol_pos.positions)
+            total_assets += protocol_pos.total_assets
+            total_debts += protocol_pos.total_debts
+            # 计算加权杠杆率
+            weighted_leverage += protocol_pos.leverage * protocol_pos.total_assets
+            total_weight += protocol_pos.total_assets
+
+        if not all_positions:
+            raise HTTPException(status_code=404, detail="未找到有效的DeFi存款")
+
+        # 计算整体杠杆率
+        overall_leverage = weighted_leverage / total_weight if total_weight > 0 else 0
+
+        # 计算风险评估
+        risk_assessment = risk_calculator.assess_portfolio_risk(all_positions)
 
         # 获取市场分析数据
-        market_analysis = await get_market_analysis(protocol_position.positions)
+        market_analysis = await get_market_analysis(all_positions)
 
         # 转换为响应格式
         defi_positions = [
@@ -111,14 +147,14 @@ async def analyze_defi_deposits(request: PortfolioRequest):
                 asset=pos.asset,
                 amount=pos.amount,
                 apy=pos.apy or 0.0,
-                leverage=protocol_position.leverage,
+                leverage=overall_leverage,
             )
-            for pos in protocol_position.positions
+            for pos in all_positions
         ]
 
         # 构建并返回响应
         return PortfolioAnalysis(
-            total_value=total_value,
+            total_value=total_assets,
             positions=defi_positions,
             risk_level=risk_assessment.risk_level,
             recommendations=risk_assessment.recommendations,
@@ -310,7 +346,7 @@ async def get_gas_price() -> float:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def get_market_analysis(positions: List[Position]) -> Dict[str, Any]:
+async def get_market_analysis(positions: List[PlatformAsset]) -> Dict[str, Any]:
     """获取市场分析数据"""
     try:
         analysis = {}

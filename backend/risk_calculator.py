@@ -95,6 +95,7 @@ class Position:
     asset: str
     amount: float
     apy: Optional[float] = None
+    invest_type: Optional[int] = None  # 添加 invest_type 字段以兼容 PlatformAsset
 
 
 @dataclass
@@ -112,7 +113,7 @@ class RiskAssessment:
 
 
 class RiskCalculator:
-    def __init__(self):
+    def __init__(self, blockchain_service=None):
         # 风险阈值配置
         self.high_volatility_threshold = 0.5  # 50% 的价格波动作为高波动性阈值
 
@@ -184,6 +185,9 @@ class RiskCalculator:
             "memory_usage_warning": 500.0,  # MB
             "cache_hit_rate_warning": 0.5,  # 50%
         }
+
+        # 区块链服务引用
+        self.blockchain_service = blockchain_service
 
     def _generate_cache_key(self, positions: List[Position], **kwargs) -> str:
         """生成缓存键"""
@@ -285,7 +289,6 @@ class RiskCalculator:
         self,
         positions: List[Position],
         volatility_risk: float,
-        historical_data_map: Optional[Dict[str, pd.DataFrame]] = None,
     ) -> List[str]:
         """根据风险评估生成建议，可选择使用AI增强的建议"""
         recommendations = []
@@ -313,34 +316,40 @@ class RiskCalculator:
             if amount / total_value > 0.4:  # 如果单个资产占比超过40%
                 recommendations.append(f"建议分散 {asset} 资产的存款配置")
 
-                # 如果有历史数据，使用AI分析该资产的市场趋势
-                if historical_data_map and asset in historical_data_map:
-                    market_analysis = self.ai_predictor.analyze_market_trend(
-                        historical_data_map[asset], asset
-                    )
+                # 尝试获取资产的历史数据并使用AI分析市场趋势
+                try:
+                    # 使用新方法获取历史数据
+                    historical_data = self._get_asset_historical_data(asset)
 
-                    # 根据AI分析结果提供更具体的建议
-                    if market_analysis:
-                        if "trend" in market_analysis:
-                            trend = market_analysis["trend"]
-                            if trend == "bearish":
-                                recommendations.append(
-                                    f"{asset}当前处于下跌趋势，建议减少持仓或设置止损"
-                                )
-                            elif trend == "bullish":
-                                recommendations.append(
-                                    f"{asset}当前处于上涨趋势，可以考虑持有或适量增加"
-                                )
+                    if historical_data is not None and not historical_data.empty:
+                        market_analysis = self.ai_predictor.analyze_market_trend(
+                            historical_data, asset
+                        )
 
-                        # 添加AI推荐的交易信号
-                        if (
-                            "trading_signals" in market_analysis
-                            and market_analysis["trading_signals"]
-                        ):
-                            for signal in market_analysis["trading_signals"][
-                                :2
-                            ]:  # 只取前两个信号
-                                recommendations.append(f"{asset}交易信号: {signal}")
+                        # 根据AI分析结果提供更具体的建议
+                        if market_analysis:
+                            if "trend" in market_analysis:
+                                trend = market_analysis["trend"]
+                                if trend == "bearish":
+                                    recommendations.append(
+                                        f"{asset}当前处于下跌趋势，建议减少持仓或设置止损"
+                                    )
+                                elif trend == "bullish":
+                                    recommendations.append(
+                                        f"{asset}当前处于上涨趋势，可以考虑持有或适量增加"
+                                    )
+
+                            # 添加AI推荐的交易信号
+                            if (
+                                "trading_signals" in market_analysis
+                                and market_analysis["trading_signals"]
+                            ):
+                                for signal in market_analysis["trading_signals"][
+                                    :2
+                                ]:  # 只取前两个信号
+                                    recommendations.append(f"{asset}交易信号: {signal}")
+                except Exception as e:
+                    logger.error(f"获取{asset}历史数据或分析市场趋势时出错: {e}")
 
         # 根据波动性风险提供建议
         if volatility_risk > 0.7:
@@ -353,14 +362,11 @@ class RiskCalculator:
     def assess_portfolio_risk(
         self,
         positions: List[Position],
-        historical_data_map: Optional[Dict[str, pd.DataFrame]] = None,
     ) -> RiskAssessment:
         """评估整个投资组合的风险，包含多个维度的风险分析"""
         try:
             # 生成缓存键
-            cache_key = self._generate_cache_key(
-                positions, historical_data=bool(historical_data_map)
-            )
+            cache_key = self._generate_cache_key(positions)
 
             # 检查缓存
             cached_result = self.portfolio_cache.get(cache_key)
@@ -463,11 +469,17 @@ class RiskCalculator:
             # 1. 计算市场风险
             position_market_risks = []
             for pos in positions:
-                historical_data = (
-                    historical_data_map.get(pos.asset) if historical_data_map else None
-                )
-                risk = self.calculate_market_volatility_risk(pos, historical_data)
-                position_market_risks.append((pos, risk))
+                try:
+                    # 使用新方法获取历史数据
+                    historical_data = self._get_asset_historical_data(pos.asset)
+
+                    # 计算市场风险
+                    risk = self.calculate_market_volatility_risk(pos, historical_data)
+                    position_market_risks.append((pos, risk))
+                except Exception as e:
+                    logger.error(f"计算{pos.asset}市场风险时出错: {e}")
+                    # 使用默认风险值
+                    position_market_risks.append((pos, 0.5))
 
                 # 整合AI分析的市场风险
                 if pos.protocol in protocol_analysis:
@@ -732,7 +744,7 @@ class RiskCalculator:
             )
             risk_scores[RiskType.REGULATORY] = weighted_regulatory_risk
 
-            # 添加趋势分析
+            # 从历史数据中分析趋势
             trend_analysis = {
                 "short_term": "无数据",
                 "medium_term": "无数据",
@@ -742,35 +754,6 @@ class RiskCalculator:
                     "volume_analysis": "无数据",
                 },
             }
-
-            # 从历史数据中分析趋势
-            if historical_data_map:
-                for asset, data in historical_data_map.items():
-                    if len(data) > 30:  # 确保有足够数据
-                        try:
-                            # 计算技术指标
-                            macd, signal, _ = pandas_ta.MACD(data["close"])
-                            rsi = pandas_ta.RSI(data["close"])
-
-                            # 填充趋势分析
-                            trend_analysis["short_term"] = (
-                                "上升趋势" if macd[-1] > signal[-1] else "下降趋势"
-                            )
-                            trend_analysis["medium_term"] = (
-                                self._analyze_medium_term_trend(data)
-                            )
-                            trend_analysis["key_indicators"][
-                                "macd_signal"
-                            ] = f"MACD: {'看涨' if macd[-1] > signal[-1] else '看跌'}"
-                            trend_analysis["key_indicators"][
-                                "rsi_signal"
-                            ] = f"RSI: {rsi[-1]:.2f} - {'超买' if rsi[-1] > 70 else '超卖' if rsi[-1] < 30 else '中性'}"
-                            trend_analysis["key_indicators"]["volume_analysis"] = (
-                                self._analyze_volume(data)
-                            )
-                            break  # 暂时只分析第一个资产的趋势
-                        except Exception as e:
-                            logger.warning(f"计算{asset}的技术指标时出错: {e}")
 
             # 计算综合风险分数（整合AI分析）
             total_risk_score = sum(
@@ -984,3 +967,50 @@ class RiskCalculator:
 
         # 默认返回以太坊
         return "Ethereum"
+
+    def _get_asset_historical_data(self, asset: str) -> Optional[pd.DataFrame]:
+        """
+        获取资产的历史数据
+
+        Args:
+            asset: 资产名称
+
+        Returns:
+            Optional[pd.DataFrame]: 资产的历史数据，如果获取失败则返回None
+        """
+        try:
+            if not self.blockchain_service:
+                logger.warning(f"blockchain_service未初始化，无法获取{asset}的历史数据")
+                return None
+
+            # 由于_fetch_historical_data是异步方法，需要适当处理
+            import asyncio
+
+            try:
+                # 尝试在当前事件循环中运行
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    historical_data = asyncio.run_coroutine_threadsafe(
+                        self.blockchain_service._fetch_historical_data(asset), loop
+                    ).result()
+                else:
+                    historical_data = loop.run_until_complete(
+                        self.blockchain_service._fetch_historical_data(asset)
+                    )
+            except RuntimeError:
+                # 如果无法获取事件循环，创建一个新的
+                historical_data = asyncio.run(
+                    self.blockchain_service._fetch_historical_data(asset)
+                )
+
+            if historical_data is not None and not historical_data.empty:
+                logger.info(
+                    f"成功获取{asset}的历史数据，共{len(historical_data)}条记录"
+                )
+            else:
+                logger.warning(f"未能获取{asset}的历史数据")
+
+            return historical_data
+        except Exception as e:
+            logger.error(f"获取{asset}历史数据时出错: {e}")
+            return None
