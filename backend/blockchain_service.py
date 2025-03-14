@@ -134,12 +134,14 @@ DEMO_PROTOCOLS = {
     "Balancer": {"risk": 0.30, "apy_range": (0.04, 0.12)},
 }
 
+
 @dataclass
 class PlatformAsset:
     protocol: str
     asset: str
     amount: float
     apy: Optional[float] = None
+    invest_type: int
 
 
 @dataclass
@@ -399,6 +401,7 @@ class BlockchainService:
                     # 初始化平台资产数据
                     if platform_name not in platform_assets:
                         platform_assets[platform_name] = {
+                            "protocol": platform_name,
                             "total_assets": 0.0,  # 总资产价值
                             "total_debts": 0.0,  # 总负债价值
                             "leverage": 0.0,  # 杠杆率
@@ -407,6 +410,7 @@ class BlockchainService:
 
                     # 获取平台详细信息
                     try:
+                        platform_assets[platform_name]["protocol"] = platform_name
                         platform_detail_payload = {
                             "analysisPlatformId": analysis_platform_id,
                             "accountIdInfoList": [
@@ -463,6 +467,7 @@ class BlockchainService:
                                             protocol=platform_name,
                                             asset=investment_name,
                                             amount=total_value,
+                                            invest_type=invest_type,
                                             apy=None,
                                         )
 
@@ -480,55 +485,41 @@ class BlockchainService:
                                         platform_assets[platform_name][
                                             "positions"
                                         ].append(position)
-                                        positions.append(position)
+                            # 计算每个平台的杠杆率
+                            total_assets = platform_assets[platform_name][
+                                "total_assets"
+                            ]
+                            total_debts = platform_assets[platform_name]["total_debts"]
+                            leverage = (
+                                total_assets / (total_assets - total_debts)
+                                if total_debts < total_assets
+                                else 0
+                            )
+                            platform_assets[platform_name]["leverage"] = leverage
+                            # 尝试从DefiLlama获取额外信息并更新头寸
+                            try:
+                                # 更新OKX头寸的APY和其他信息
+                                for position in platform_assets[platform_name][
+                                    "positions"
+                                ]:
+                                    defi_llama_pools = await self.get_defi_llama_pools(
+                                        position.asset
+                                    )
+                                    if defi_llama_pools:
+                                        position.apy = defi_llama_pools
+
+                                logger.info(f"已使用DefiLlama数据更新OKX头寸信息")
+                            except Exception as e:
+                                logger.error(f"使用DefiLlama数据更新OKX头寸时出错: {e}")
                     except Exception as e:
                         logger.error(f"获取平台 {platform_name} 详情时出错: {e}")
 
-                    # 如果没有获取到详细资产，则添加一个总体头寸
-                    # if (
-                    #     platform_name not in platform_assets
-                    #     or not platform_assets[platform_name]["positions"]
-                    # ):
-                    #     position = ProtocolPosition(
-                    #         protocol=platform_name,
-                    #         asset="USD",  # 使用USD作为默认资产
-                    #         amount=0.0,
-                    #         leverage=None,
-                    #         apy=None,
-                    #     )
-                    #     positions.append(position)
+                # 将平台资产数据添加到总列表
 
-                # 计算每个平台的杠杆率
+                positionAll.append(platform_assets)
                 for platform_name, platform_data in platform_assets.items():
-                    total_assets = platform_data["total_assets"]
-                    total_debts = platform_data["total_debts"]
-                    positions = platform_data["positions"]
+                    positionAll.append(platform_data)
 
-                    # 计算杠杆率
-                    if total_assets > 0:
-                        leverage = (
-                            total_assets / (total_assets - total_debts)
-                            if total_debts < total_assets
-                            else 0
-                        )
-                        logger.info(
-                            f"平台 {platform_name} - 总资产: {total_assets:.4f}, 总负债: {total_debts:.4f}, 杠杆率: {leverage:.4f}x"
-                        )
-                        # 更新该平台所有头寸的杠杆率
-                        platform_data["leverage"] = leverage
-                        # 尝试从DefiLlama获取额外信息并更新头寸
-                        try:
-                            # 更新OKX头寸的APY和其他信息
-                            for position in positions:
-                                defi_llama_pools = await self.get_defi_llama_pools(position.asset)
-                                if defi_llama_pools:
-                                    position.apy = defi_llama_pools
-
-                            logger.info(f"已使用DefiLlama数据更新OKX头寸信息")
-                        except Exception as e:
-                            logger.error(f"使用DefiLlama数据更新OKX头寸时出错: {e}")
-
-            positionAll.append(platform_assets)
         except Exception as e:
             logger.error(f"获取OKX头寸时出错: {e}")
             return []

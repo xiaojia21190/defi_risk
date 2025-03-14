@@ -86,24 +86,23 @@ async def analyze_defi_deposits(request: PortfolioRequest):
         logger.info(f"分析钱包地址: {request.wallet_address} 的DeFi存款")
 
         # 获取用户在各协议中的存款头寸
-        positions = await blockchain_service.get_all_positions(request.wallet_address)
+        protocol_position = await blockchain_service.get_all_positions(
+            request.wallet_address
+        )
 
-        if not positions:
+        if not protocol_position or not protocol_position.positions:
             raise HTTPException(status_code=404, detail="未找到DeFi存款")
 
         # 计算风险评估
-        risk_assessment = risk_calculator.assess_portfolio_risk(positions)
+        risk_assessment = risk_calculator.assess_portfolio_risk(
+            protocol_position.positions
+        )
 
-        # 计算总存款价值
-        total_value = 0
-        for position in positions:
-            asset_type = position.asset.split("/")[0]  # 处理LP token的情况
-            asset_price = await blockchain_service.get_asset_price(asset_type)
-            position_value = position.amount * asset_price
-            total_value += position_value
+        # 使用 total_assets 作为总存款价值
+        total_value = protocol_position.total_assets
 
         # 获取市场分析数据
-        market_analysis = await get_market_analysis(positions)
+        market_analysis = await get_market_analysis(protocol_position.positions)
 
         # 转换为响应格式
         defi_positions = [
@@ -112,9 +111,9 @@ async def analyze_defi_deposits(request: PortfolioRequest):
                 asset=pos.asset,
                 amount=pos.amount,
                 apy=pos.apy or 0.0,
-                leverage=pos.leverage,
+                leverage=protocol_position.leverage,
             )
-            for pos in positions
+            for pos in protocol_position.positions
         ]
 
         # 构建并返回响应
