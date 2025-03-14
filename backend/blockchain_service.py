@@ -140,8 +140,8 @@ class PlatformAsset:
     protocol: str
     asset: str
     amount: float
-    apy: Optional[float] = None
     invest_type: int
+    apy: Optional[float] = None
 
 
 @dataclass
@@ -190,18 +190,18 @@ class BlockchainService:
     async def get_all_positions(self, address: str) -> List[ProtocolPosition]:
         """获取用户在所有支持的DeFi协议中的存款头寸"""
         try:
-            if address.lower() == DEMO_ADDRESS.lower() or self.demo_mode:
-                logger.info(f"为演示地址返回预设头寸数据")
-                return await self.get_demo_positions()
+            # if address.lower() == DEMO_ADDRESS.lower() or self.demo_mode:
+            #     logger.info(f"为演示地址返回预设头寸数据")
+            #     return await self.get_demo_positions()
 
-            if not self.w3.is_connected():
-                logger.error("Web3连接不可用，无法获取真实头寸数据")
-                return []
+            # if not self.w3.is_connected():
+            #     logger.error("Web3连接不可用，无法获取真实头寸数据")
+            #     return []
 
-            # 检查地址格式
-            if not self.w3.is_address(address):
-                logger.error(f"无效的以太坊地址: {address}")
-                return []
+            # # 检查地址格式
+            # if not self.w3.is_address(address):
+            #     logger.error(f"无效的以太坊地址: {address}")
+            #     return []
 
             # 规范化地址格式
             address = self.w3.to_checksum_address(address)
@@ -210,37 +210,37 @@ class BlockchainService:
             positions = []
 
             try:
-                positions = await self.get_okx_positions(address)
+                positions = await self._get_okx_positions(address)
             except Exception as e:
                 logger.error(f"获取OKX头寸时出错: {e}")
 
-            # 1. 获取Aave V3头寸
-            try:
-                aave_positions = await self._get_aave_v3_positions(address)
-                positions.extend(aave_positions)
-            except Exception as e:
-                logger.error(f"获取Aave V3头寸时出错: {e}")
+            # # 1. 获取Aave V3头寸
+            # try:
+            #     aave_positions = await self._get_aave_v3_positions(address)
+            #     positions.extend(aave_positions)
+            # except Exception as e:
+            #     logger.error(f"获取Aave V3头寸时出错: {e}")
 
-            # 2. 获取Compound V3头寸
-            try:
-                compound_positions = await self._get_compound_v3_positions(address)
-                positions.extend(compound_positions)
-            except Exception as e:
-                logger.error(f"获取Compound V3头寸时出错: {e}")
+            # # 2. 获取Compound V3头寸
+            # try:
+            #     compound_positions = await self._get_compound_v3_positions(address)
+            #     positions.extend(compound_positions)
+            # except Exception as e:
+            #     logger.error(f"获取Compound V3头寸时出错: {e}")
 
-            # 3. 获取Curve Finance头寸
-            try:
-                curve_positions = await self._get_curve_positions(address)
-                positions.extend(curve_positions)
-            except Exception as e:
-                logger.error(f"获取Curve Finance头寸时出错: {e}")
+            # # 3. 获取Curve Finance头寸
+            # try:
+            #     curve_positions = await self._get_curve_positions(address)
+            #     positions.extend(curve_positions)
+            # except Exception as e:
+            #     logger.error(f"获取Curve Finance头寸时出错: {e}")
 
-            # 4. 获取Uniswap V3头寸
-            try:
-                uniswap_positions = await self._get_uniswap_v3_positions(address)
-                positions.extend(uniswap_positions)
-            except Exception as e:
-                logger.error(f"获取Uniswap V3头寸时出错: {e}")
+            # # 4. 获取Uniswap V3头寸
+            # try:
+            #     uniswap_positions = await self._get_uniswap_v3_positions(address)
+            #     positions.extend(uniswap_positions)
+            # except Exception as e:
+            #     logger.error(f"获取Uniswap V3头寸时出错: {e}")
 
             # 过滤掉金额为0的头寸
             positions = [pos for pos in positions if pos.amount > 0]
@@ -269,7 +269,7 @@ class BlockchainService:
             包含签名和时间戳的字典
         """
         # 获取ISO 8601格式时间戳
-        timestamp = datetime.now(datetime.UTC).isoformat()[:-3] + "Z"
+        timestamp = datetime.utcnow().isoformat()[:-3] + "Z"
 
         # 生成预签名字符串
         query_string = ""
@@ -335,7 +335,7 @@ class BlockchainService:
 
         return data
 
-    async def get_okx_positions(self, address: str) -> List[ProtocolPosition]:
+    async def _get_okx_positions(self, address: str) -> List[ProtocolPosition]:
         """使用OKX API获取用户在各DeFi协议中的存款头寸
 
         Args:
@@ -503,7 +503,7 @@ class BlockchainService:
                                     "positions"
                                 ]:
                                     defi_llama_pools = await self.get_defi_llama_pools(
-                                        position.asset
+                                        position.protocol, position.asset
                                     )
                                     if defi_llama_pools:
                                         position.apy = defi_llama_pools
@@ -524,7 +524,7 @@ class BlockchainService:
             logger.error(f"获取OKX头寸时出错: {e}")
             return []
 
-    async def get_defi_llama_pools(self, symbol: str) -> str:
+    async def get_defi_llama_pools(self, protocol: str, symbol: str) -> str:
         """使用DefiLlama API获取DeFi协议池的最新数据
 
         Returns:
@@ -557,10 +557,10 @@ class BlockchainService:
             # 处理池数据
             for pool in pools:
                 # 只处理Ethereum链上的池 多个
-                if pool.get("chain") == "Ethereum":
-                    symbol = pool.get("symbol", "")
+                if pool.get("chain") == "Ethereum" and protocol == pool.get("protocol"):
+                    symbolA = pool.get("symbol", "")
                     apy = pool.get("apy")
-                    if symbol == symbol:
+                    if symbol == symbolA:
                         return apy
 
             logger.info(f"从DefiLlama获取了{len(positions)}个Ethereum链上的池")

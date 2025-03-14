@@ -1277,11 +1277,9 @@ TVL分析：
         try:
             # 权重设置
             weights = {
-                "tvl": 0.3,
-                "volatility": 0.2,
+                "tvl": 0.5,
+                "volatility": 0.3,
                 "concentration": 0.2,
-                "trend": 0.15,
-                "audit": 0.15,
             }
 
             # TVL得分 (0-100)
@@ -1299,23 +1297,208 @@ TVL分析：
                 0, 100 - metrics["chain_metrics"]["max_chain_concentration"]
             )
 
-            # 趋势得分
-            trend_score = 70 if metrics["tvl_metrics"]["trend"] == "up" else 30
-
-            # 审计得分
-            audit_count = metrics.get("audit_info", {}).get("count", 0)
-            audit_score = min(100, audit_count * 25)  # 每次审计25分，最高100分
-
             # 计算加权总分
             total_score = (
                 weights["tvl"] * tvl_score
                 + weights["volatility"] * volatility_score
                 + weights["concentration"] * concentration_score
-                + weights["trend"] * trend_score
-                + weights["audit"] * audit_score
             )
 
             return round(total_score, 2)
         except Exception as e:
             logger.error(f"计算风险评分时出错: {e}")
             return 50.0
+
+    def analyze_investment_type_risk(
+        self,
+        protocol: str,
+        asset: str,
+        invest_type: int,
+        amount: float,
+        invest_type_name: str,
+    ) -> Dict:
+        """
+        分析特定投资类型的风险
+
+        Args:
+            protocol: 协议名称
+            asset: 资产名称
+            invest_type: 投资类型ID
+            amount: 投资金额
+            invest_type_name: 投资类型名称
+
+        Returns:
+            Dict: 包含风险分析结果的字典
+        """
+        try:
+            # 构建AI分析提示
+            prompt = f"""
+分析以下DeFi投资的风险状况:
+- 协议: {protocol}
+- 资产: {asset}
+- 投资类型: {invest_type_name} (类型{invest_type})
+- 金额: {amount}
+
+请提供以下JSON格式的详细风险分析:
+{{
+    "risk_score": 0-100的综合风险评分,
+    "risk_level": "LOW/MEDIUM/HIGH",
+    "risk_factors": [
+        "具体风险因素1",
+        "具体风险因素2"
+    ],
+    "recommendations": [
+        "具体建议1",
+        "具体建议2"
+    ],
+    "monitoring_points": [
+        "需要监控的指标1",
+        "需要监控的指标2"
+    ]
+}}
+
+注意:
+1. 特别关注{invest_type_name}类型投资的特定风险
+2. 考虑{asset}资产的特性
+3. 评估{protocol}协议的安全性
+4. 提供具体可行的风险缓解建议
+"""
+
+            if hasattr(self, "client") and self.client is not None:
+                # 调用OpenAI API进行分析
+                response = self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "你是一个专业的DeFi风险分析师，擅长评估不同类型投资的风险特性。请基于投资类型、资产特性和协议安全性，提供全面的风险评估。",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                )
+
+                # 解析AI分析结果
+                ai_analysis = json.loads(response.choices[0].message.content)
+
+                # 添加元数据
+                ai_analysis["timestamp"] = datetime.now().isoformat()
+                ai_analysis["invest_type"] = invest_type
+                ai_analysis["invest_type_name"] = invest_type_name
+                ai_analysis["protocol"] = protocol
+                ai_analysis["asset"] = asset
+
+                logger.info(f"成功完成{protocol}的{invest_type_name}投资风险分析")
+                return ai_analysis
+            else:
+                logger.warning("AI客户端未初始化，返回基础分析结果")
+                return self._get_basic_investment_risk_analysis(
+                    protocol, asset, invest_type, invest_type_name
+                )
+
+        except Exception as e:
+            logger.error(f"分析投资类型风险时出错: {e}")
+            return self._get_basic_investment_risk_analysis(
+                protocol, asset, invest_type, invest_type_name
+            )
+
+    def _get_basic_investment_risk_analysis(
+        self, protocol: str, asset: str, invest_type: int, invest_type_name: str
+    ) -> Dict:
+        """
+        获取基础投资风险分析（当AI分析不可用时）
+
+        Args:
+            protocol: 协议名称
+            asset: 资产名称
+            invest_type: 投资类型ID
+            invest_type_name: 投资类型名称
+
+        Returns:
+            Dict: 包含基础风险分析的字典
+        """
+        # 基础风险评分映射
+        base_risk_scores = {
+            1: 20,  # 存币 - 较低风险
+            2: 60,  # 流动性池 - 较高风险
+            3: 50,  # 挖矿 - 中高风险
+            4: 70,  # 机枪池 - 高风险
+            5: 40,  # 质押 - 中低风险
+            6: 55,  # 借贷 - 中高风险
+        }
+
+        # 获取基础风险分数，默认为中等风险
+        risk_score = base_risk_scores.get(invest_type, 50)
+
+        # 确定风险等级
+        risk_level = "MEDIUM"
+        if risk_score >= 65:
+            risk_level = "HIGH"
+        elif risk_score <= 35:
+            risk_level = "LOW"
+
+        # 基础风险因素
+        risk_factors = []
+        recommendations = []
+        monitoring_points = []
+
+        # 根据不同投资类型添加基础风险因素
+        if invest_type == 1:  # 存币
+            risk_factors = ["平台安全风险", "存款合约风险"]
+            recommendations = ["定期检查平台安全状态", "分散存款到多个平台"]
+            monitoring_points = ["平台安全审计状态", "存款APY变化"]
+
+        elif invest_type == 2:  # 流动性池
+            risk_factors = ["无常损失风险", "流动性池合约风险", "价格波动风险"]
+            recommendations = [
+                "关注资产价格波动",
+                "设置止损策略",
+                "分散投资于多个流动性池",
+            ]
+            monitoring_points = ["资产价格相对变化", "池子总流动性变化", "交易费收益率"]
+
+        elif invest_type == 3:  # 挖矿
+            risk_factors = ["收益递减风险", "代币价格波动风险", "智能合约风险"]
+            recommendations = [
+                "定期评估挖矿收益",
+                "关注代币价格趋势",
+                "设置自动复投或提取策略",
+            ]
+            monitoring_points = ["挖矿APY变化", "奖励代币价格", "协议TVL变化"]
+
+        elif invest_type == 4:  # 机枪池
+            risk_factors = ["复杂策略风险", "杠杆风险", "协议组合风险", "智能合约风险"]
+            recommendations = [
+                "限制机枪池资金比例",
+                "选择经过多次审计的机枪池",
+                "关注策略变更",
+            ]
+            monitoring_points = ["策略变更", "底层协议安全状态", "收益率变化"]
+
+        elif invest_type == 5:  # 质押
+            risk_factors = ["锁定期流动性风险", "质押奖励变化风险", "解质押等待风险"]
+            recommendations = [
+                "评估锁定期与投资周期",
+                "关注质押奖励变化",
+                "分散质押到不同协议",
+            ]
+            monitoring_points = ["质押APY变化", "解质押条件变更", "协议治理变化"]
+
+        elif invest_type == 6:  # 借贷
+            risk_factors = ["利率波动风险", "清算风险", "抵押品价值波动风险"]
+            recommendations = ["保持健康抵押率", "设置清算预警", "关注借贷市场利率变化"]
+            monitoring_points = ["借贷利率变化", "抵押率变化", "清算阈值距离"]
+
+        return {
+            "risk_score": risk_score,
+            "risk_level": risk_level,
+            "risk_factors": risk_factors,
+            "recommendations": recommendations,
+            "monitoring_points": monitoring_points,
+            "timestamp": datetime.now().isoformat(),
+            "invest_type": invest_type,
+            "invest_type_name": invest_type_name,
+            "protocol": protocol,
+            "asset": asset,
+            "note": "基础风险分析（AI分析不可用）",
+        }

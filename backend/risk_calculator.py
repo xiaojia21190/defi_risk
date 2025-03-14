@@ -136,17 +136,6 @@ class RiskCalculator:
             "DAI": "Ethereum",
             "USDC": "Ethereum",
             "USDT": "Ethereum",
-            # BSC资产
-            "BNB": "BSC",
-            "CAKE": "BSC",
-            "BUSD": "BSC",
-            # Solana资产
-            "SOL": "Solana",
-            # Polygon资产
-            "MATIC": "Polygon",
-            "AAVE": "Polygon",
-            # Avalanche资产
-            "AVAX": "Avalanche",
         }
 
         # 多链资产的默认链映射
@@ -166,28 +155,33 @@ class RiskCalculator:
             RiskType.REGULATORY: 0.05,
         }
 
-        # 协议安全基准数据
-        self.protocol_security_baseline = {
-            "Aave": {"audit_count": 5, "security_score": 0.9},
-            "Compound": {"audit_count": 4, "security_score": 0.85},
-            "Uniswap": {"audit_count": 3, "security_score": 0.8},
-            # 可以添加更多协议的基准数据
-        }
-
         # 缓存配置
         self.protocol_cache = TTLCache(maxsize=1000, ttl=3600)  # 1小时过期
         self.portfolio_cache = TTLCache(maxsize=100, ttl=300)  # 5分钟过期
         self.market_data_cache = LRUCache(maxsize=500)  # LRU缓存
 
-        # 性能监控阈值
-        self.performance_thresholds = {
-            "execution_time_warning": 5.0,  # 秒
-            "memory_usage_warning": 500.0,  # MB
-            "cache_hit_rate_warning": 0.5,  # 50%
-        }
-
         # 区块链服务引用
         self.blockchain_service = blockchain_service
+
+        # 投资类型风险权重配置
+        self.invest_type_risk_weights = {
+            1: 0.1,  # 存币 - 较低风险
+            2: 0.4,  # 流动性池 - 较高风险
+            3: 0.3,  # 挖矿 - 中高风险
+            4: 0.5,  # 机枪池 - 高风险
+            5: 0.2,  # 质押 - 中低风险
+            6: 0.3,  # 借贷 - 中高风险
+        }
+
+        # 投资类型名称映射
+        self.invest_type_map = {
+            1: "存币",
+            2: "流动性池",
+            3: "挖矿",
+            4: "机枪池",
+            5: "质押",
+            6: "借贷",
+        }
 
     def _generate_cache_key(self, positions: List[Position], **kwargs) -> str:
         """生成缓存键"""
@@ -199,21 +193,6 @@ class RiskCalculator:
             "extra": kwargs,
         }
         return hashlib.md5(json.dumps(key_data, sort_keys=True).encode()).hexdigest()
-
-    def _check_cache_performance(self):
-        """检查缓存性能"""
-        metrics = PerformanceMetrics.get_metrics_summary()
-        for func_name, data in metrics.items():
-            if (
-                data["avg_execution_time"]
-                > self.performance_thresholds["execution_time_warning"]
-            ):
-                logger.warning(f"性能警告: {func_name} 平均执行时间过长")
-            if (
-                data["cache_hit_rate"]
-                < self.performance_thresholds["cache_hit_rate_warning"]
-            ):
-                logger.warning(f"缓存警告: {func_name} 缓存命中率过低")
 
     def calculate_market_volatility_risk(
         self, position: Position, historical_data: Optional[pd.DataFrame] = None
@@ -359,6 +338,220 @@ class RiskCalculator:
 
         return recommendations
 
+    def analyze_investment_type_risk(self, position: Position) -> Dict:
+        """
+        根据投资类型分析风险
+
+        Args:
+            position: 投资头寸
+
+        Returns:
+            Dict: 包含风险分析结果的字典
+        """
+        try:
+            # 如果没有投资类型，默认为存币(1)
+            invest_type = (
+                position.invest_type if position.invest_type is not None else 1
+            )
+            invest_type_name = self.invest_type_map.get(invest_type, "未知类型")
+
+            # 基础风险评分 (0-1范围)
+            base_risk = self.invest_type_risk_weights.get(invest_type, 0.3)
+
+            # 初始化风险分析结果
+            risk_analysis = {
+                "invest_type": invest_type,
+                "invest_type_name": invest_type_name,
+                "base_risk_score": base_risk,
+                "risk_factors": [],
+                "recommendations": [],
+                "monitoring_points": [],
+            }
+
+            # 根据不同投资类型进行特定分析
+            if invest_type == 1:  # 存币
+                risk_analysis["risk_factors"].append(
+                    "存币通常风险较低，但仍需关注平台安全性"
+                )
+                risk_analysis["recommendations"].append(
+                    f"定期检查{position.protocol}平台的安全状态"
+                )
+                risk_analysis["monitoring_points"].append("平台安全审计状态")
+
+            elif invest_type == 2:  # 流动性池
+                risk_analysis["risk_factors"].extend(
+                    [
+                        "流动性池面临无常损失风险",
+                        "价格波动可能导致资产比例变化",
+                        "流动性池合约可能存在安全漏洞",
+                    ]
+                )
+                risk_analysis["recommendations"].extend(
+                    [
+                        f"关注{position.asset}的价格波动",
+                        "设置止损策略以防止无常损失过大",
+                        "分散投资于多个流动性池",
+                    ]
+                )
+                risk_analysis["monitoring_points"].extend(
+                    ["资产价格相对变化", "池子总流动性变化", "交易费收益率"]
+                )
+
+                # 流动性池特有的风险调整
+                # 检查是否包含小市值代币
+                if "-" in position.asset:
+                    tokens = position.asset.split("-")
+                    for token in tokens:
+                        if token not in ["ETH", "WETH", "BTC", "USDC", "USDT", "DAI"]:
+                            risk_analysis["risk_factors"].append(
+                                f"{token}可能是小市值代币，存在较高波动风险"
+                            )
+                            risk_analysis["base_risk_score"] += 0.1  # 增加风险评分
+
+            elif invest_type == 3:  # 挖矿
+                risk_analysis["risk_factors"].extend(
+                    [
+                        "挖矿收益可能随时间降低",
+                        "代币价格波动可能影响总收益",
+                        "智能合约风险",
+                    ]
+                )
+                risk_analysis["recommendations"].extend(
+                    [
+                        "定期评估挖矿收益与风险",
+                        "关注代币价格趋势",
+                        "设置自动复投或提取策略",
+                    ]
+                )
+                risk_analysis["monitoring_points"].extend(
+                    ["挖矿APY变化", "奖励代币价格", "协议TVL变化"]
+                )
+
+            elif invest_type == 4:  # 机枪池
+                risk_analysis["risk_factors"].extend(
+                    [
+                        "机枪池涉及复杂的自动化策略，风险较高",
+                        "可能涉及杠杆操作",
+                        "依赖第三方协议，存在协议组合风险",
+                        "智能合约风险更为复杂",
+                    ]
+                )
+                risk_analysis["recommendations"].extend(
+                    [
+                        "限制在机枪池中的资金比例",
+                        "选择经过多次审计的机枪池",
+                        "关注机枪池策略的变更",
+                    ]
+                )
+                risk_analysis["monitoring_points"].extend(
+                    ["机枪池策略变更", "底层协议安全状态", "收益率变化趋势"]
+                )
+
+            elif invest_type == 5:  # 质押
+                risk_analysis["risk_factors"].extend(
+                    [
+                        "质押锁定期可能影响流动性",
+                        "质押奖励可能随时间变化",
+                        "解质押可能需要等待期",
+                    ]
+                )
+                risk_analysis["recommendations"].extend(
+                    [
+                        "评估质押锁定期与预期投资周期",
+                        "关注质押奖励变化",
+                        "分散质押到不同协议",
+                    ]
+                )
+                risk_analysis["monitoring_points"].extend(
+                    ["质押APY变化", "解质押条件变更", "协议治理变化"]
+                )
+
+            elif invest_type == 6:  # 借贷
+                risk_analysis["risk_factors"].extend(
+                    ["利率波动风险", "清算风险", "抵押品价值波动风险"]
+                )
+                risk_analysis["recommendations"].extend(
+                    ["保持健康的抵押率", "设置清算预警", "关注借贷市场利率变化"]
+                )
+                risk_analysis["monitoring_points"].extend(
+                    ["借贷利率变化", "抵押率变化", "清算阈值距离"]
+                )
+
+            # 使用AI预测器进行更深入的分析
+            try:
+                # 调用AI预测器的投资类型风险分析方法
+                ai_analysis = self.ai_predictor.analyze_investment_type_risk(
+                    protocol=position.protocol,
+                    asset=position.asset,
+                    invest_type=invest_type,
+                    amount=position.amount,
+                    invest_type_name=invest_type_name,
+                )
+
+                if ai_analysis:
+                    # 整合AI分析结果
+                    if "risk_score" in ai_analysis:
+                        # 将AI风险评分(0-100)转换为0-1范围
+                        ai_risk_score = ai_analysis["risk_score"] / 100
+                        # 综合基础风险和AI风险评分
+                        risk_analysis["risk_score"] = (base_risk + ai_risk_score) / 2
+                    else:
+                        risk_analysis["risk_score"] = base_risk
+
+                    if "risk_factors" in ai_analysis:
+                        risk_analysis["risk_factors"].extend(
+                            ai_analysis["risk_factors"]
+                        )
+
+                    if "recommendations" in ai_analysis:
+                        risk_analysis["recommendations"].extend(
+                            ai_analysis["recommendations"]
+                        )
+
+                    if "monitoring_points" in ai_analysis:
+                        risk_analysis["monitoring_points"].extend(
+                            ai_analysis["monitoring_points"]
+                        )
+
+                    if "risk_level" in ai_analysis:
+                        risk_analysis["risk_level"] = ai_analysis["risk_level"]
+                else:
+                    # 如果AI分析失败，使用基础风险评分
+                    risk_analysis["risk_score"] = base_risk
+            except Exception as e:
+                logger.error(f"使用AI分析投资类型风险时出错: {e}")
+                # 出错时使用基础风险评分
+                risk_analysis["risk_score"] = base_risk
+
+            # 去重
+            risk_analysis["risk_factors"] = list(set(risk_analysis["risk_factors"]))
+            risk_analysis["recommendations"] = list(
+                set(risk_analysis["recommendations"])
+            )
+            risk_analysis["monitoring_points"] = list(
+                set(risk_analysis["monitoring_points"])
+            )
+
+            return risk_analysis
+
+        except Exception as e:
+            logger.error(f"分析投资类型风险时出错: {e}")
+            return {
+                "invest_type": (
+                    position.invest_type if position.invest_type is not None else 1
+                ),
+                "invest_type_name": (
+                    self.invest_type_map.get(position.invest_type, "未知类型")
+                    if position.invest_type is not None
+                    else "存币"
+                ),
+                "base_risk_score": 0.5,  # 默认中等风险
+                "risk_score": 0.5,
+                "risk_factors": ["风险分析过程中出错"],
+                "recommendations": ["建议手动评估风险"],
+                "monitoring_points": ["系统错误修复状态"],
+            }
+
     def assess_portfolio_risk(
         self,
         positions: List[Position],
@@ -395,6 +588,11 @@ class RiskCalculator:
                             "analysis": "无资产",
                             "factors": [],
                         },
+                        "investment_type_risk": {
+                            "score": 0,
+                            "analysis": "无资产",
+                            "factors": [],
+                        },
                     },
                     trend_analysis={
                         "short_term": "无数据",
@@ -419,6 +617,11 @@ class RiskCalculator:
                 "chain_risk": {"score": 0, "analysis": "", "factors": []},
                 "market_risk": {"score": 0, "analysis": "", "factors": []},
                 "technical_risk": {"score": 0, "analysis": "", "factors": []},
+                "investment_type_risk": {
+                    "score": 0,
+                    "analysis": "基于投资类型的风险分析",
+                    "factors": [],
+                },
             }
             warnings = []
             recommendations = []
@@ -426,6 +629,7 @@ class RiskCalculator:
             monitoring_points = []
             detailed_analysis = {}
             protocol_analysis = {}
+            investment_type_analysis = {}
 
             # 获取每个协议的AI深度分析
             for pos in positions:
@@ -463,8 +667,31 @@ class RiskCalculator:
                                     risk_data["risk_mitigation_strategies"]
                                 )
 
+                    # 分析投资类型风险
+                    investment_risk = self.analyze_investment_type_risk(pos)
+                    investment_type_analysis[f"{pos.protocol}_{pos.asset}"] = (
+                        investment_risk
+                    )
+
+                    # 添加投资类型风险因素
+                    risk_factors["investment_type_risk"]["factors"].extend(
+                        investment_risk["risk_factors"]
+                    )
+
+                    # 添加投资类型相关建议
+                    recommendations.extend(investment_risk["recommendations"])
+
+                    # 添加投资类型相关监控点
+                    monitoring_points.extend(investment_risk["monitoring_points"])
+
+                    # 添加高风险警告
+                    if investment_risk.get("risk_score", 0) > 0.7:
+                        warnings.append(
+                            f"{pos.protocol}的{investment_risk['invest_type_name']}投资风险较高"
+                        )
+
                 except Exception as e:
-                    logger.warning(f"获取{pos.protocol}的AI分析时出错: {e}")
+                    logger.warning(f"获取{pos.protocol}的分析时出错: {e}")
 
             # 1. 计算市场风险
             position_market_risks = []
@@ -697,10 +924,15 @@ class RiskCalculator:
                 else:
                     protocol_risks[pos.protocol] = 0.5  # 默认中等风险
 
-            weighted_protocol_risk = sum(
-                risk * positions[i].amount / total_value
-                for i, (protocol, risk) in enumerate(protocol_risks.items())
-            )
+            weighted_protocol_risk = 0
+            for protocol, risk in protocol_risks.items():
+                # 查找属于该协议的所有头寸
+                protocol_positions = [p for p in positions if p.protocol == protocol]
+                # 计算该协议的加权风险
+                protocol_value = sum(p.amount for p in protocol_positions)
+                if protocol_value > 0:
+                    weighted_protocol_risk += risk * protocol_value / total_value
+
             risk_scores[RiskType.PROTOCOL] = weighted_protocol_risk
 
             # 更新链风险因素（基于相关性）
@@ -755,10 +987,71 @@ class RiskCalculator:
                 },
             }
 
-            # 计算综合风险分数（整合AI分析）
-            total_risk_score = sum(
-                score * self.risk_weights[risk_type]
-                for risk_type, score in risk_scores.items()
+            # 计算投资类型风险
+            investment_type_risks = []
+            for pos in positions:
+                key = f"{pos.protocol}_{pos.asset}"
+                if key in investment_type_analysis:
+                    risk_score = investment_type_analysis[key].get("risk_score", 0.5)
+                    investment_type_risks.append((pos, risk_score))
+                else:
+                    # 使用默认风险值
+                    default_risk = (
+                        self.invest_type_risk_weights.get(pos.invest_type, 0.3)
+                        if pos.invest_type
+                        else 0.3
+                    )
+                    investment_type_risks.append((pos, default_risk))
+
+            # 计算加权投资类型风险
+            weighted_investment_type_risk = sum(
+                risk * pos.amount / total_value for pos, risk in investment_type_risks
+            )
+
+            # 更新投资类型风险因素
+            risk_factors["investment_type_risk"]["score"] = int(
+                weighted_investment_type_risk * 100
+            )
+
+            # 添加投资类型分布分析
+            invest_type_distribution = {}
+            for pos in positions:
+                invest_type = pos.invest_type if pos.invest_type is not None else 1
+                invest_type_name = self.invest_type_map.get(invest_type, "未知类型")
+                if invest_type_name in invest_type_distribution:
+                    invest_type_distribution[invest_type_name] += pos.amount
+                else:
+                    invest_type_distribution[invest_type_name] = pos.amount
+
+            # 计算投资类型集中度
+            for invest_type, amount in invest_type_distribution.items():
+                percentage = amount / total_value * 100
+                risk_factors["investment_type_risk"]["factors"].append(
+                    f"{invest_type}占比{percentage:.1f}%"
+                )
+
+                # 添加高集中度警告
+                if percentage > 60:
+                    warnings.append(
+                        f"{invest_type}投资占比过高({percentage:.1f}%)，建议分散投资类型"
+                    )
+                    recommendations.append(f"减少{invest_type}投资比例，分散到其他类型")
+
+            # 计算综合风险分数（整合AI分析和投资类型风险）
+            # 更新风险权重，加入投资类型风险
+            updated_risk_weights = self.risk_weights.copy()
+            # 调整权重以包含投资类型风险
+            for risk_type in updated_risk_weights:
+                updated_risk_weights[risk_type] *= 0.9  # 减少原有权重
+            investment_type_risk_weight = 0.1  # 投资类型风险权重
+
+            # 计算综合风险分数
+            total_risk_score = (
+                sum(
+                    score * updated_risk_weights[risk_type]
+                    for risk_type, score in risk_scores.items()
+                )
+                + weighted_investment_type_risk * investment_type_risk_weight
             )
 
             # 转换为0-100的评分
@@ -777,6 +1070,15 @@ class RiskCalculator:
             for pos in positions:
                 if pos.protocol in protocol_analysis:
                     detailed_analysis[pos.protocol] = protocol_analysis[pos.protocol]
+
+                # 添加投资类型分析
+                key = f"{pos.protocol}_{pos.asset}"
+                if key in investment_type_analysis:
+                    if "investment_types" not in detailed_analysis:
+                        detailed_analysis["investment_types"] = {}
+                    detailed_analysis["investment_types"][key] = (
+                        investment_type_analysis[key]
+                    )
 
             # 生成投资组合优化建议
             if len(positions) < 3:
@@ -847,9 +1149,6 @@ class RiskCalculator:
             # 缓存结果
             self.portfolio_cache[cache_key] = result
 
-            # 检查性能
-            self._check_cache_performance()
-
             return result
 
         except Exception as e:
@@ -875,6 +1174,11 @@ class RiskCalculator:
                         "factors": ["系统错误"],
                     },
                     "technical_risk": {
+                        "score": 50,
+                        "analysis": "风险评估出错",
+                        "factors": ["系统错误"],
+                    },
+                    "investment_type_risk": {
                         "score": 50,
                         "analysis": "风险评估出错",
                         "factors": ["系统错误"],
@@ -968,40 +1272,16 @@ class RiskCalculator:
         # 默认返回以太坊
         return "Ethereum"
 
-    def _get_asset_historical_data(self, asset: str) -> Optional[pd.DataFrame]:
-        """
-        获取资产的历史数据
-
-        Args:
-            asset: 资产名称
-
-        Returns:
-            Optional[pd.DataFrame]: 资产的历史数据，如果获取失败则返回None
-        """
+    async def _get_asset_historical_data(self, asset: str) -> Optional[pd.DataFrame]:
+        """异步获取资产历史数据"""
         try:
             if not self.blockchain_service:
                 logger.warning(f"blockchain_service未初始化，无法获取{asset}的历史数据")
                 return None
 
-            # 由于_fetch_historical_data是异步方法，需要适当处理
-            import asyncio
-
-            try:
-                # 尝试在当前事件循环中运行
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    historical_data = asyncio.run_coroutine_threadsafe(
-                        self.blockchain_service._fetch_historical_data(asset), loop
-                    ).result()
-                else:
-                    historical_data = loop.run_until_complete(
-                        self.blockchain_service._fetch_historical_data(asset)
-                    )
-            except RuntimeError:
-                # 如果无法获取事件循环，创建一个新的
-                historical_data = asyncio.run(
-                    self.blockchain_service._fetch_historical_data(asset)
-                )
+            historical_data = await self.blockchain_service.get_asset_historical_data(
+                asset
+            )
 
             if historical_data is not None and not historical_data.empty:
                 logger.info(

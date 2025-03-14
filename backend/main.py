@@ -53,7 +53,7 @@ web3_provider = os.getenv(
     "https://eth-sepolia.g.alchemy.com/v2/8GHYFBqZcX9OEuKkgB1N3u1RDPBYy9Mm",
 )
 blockchain_service = BlockchainService(web3_provider)
-risk_calculator = RiskCalculator()
+risk_calculator = RiskCalculator(blockchain_service)
 ai_predictor = AiPredictor()
 
 
@@ -195,7 +195,7 @@ async def predict_market(request: MarketPredictionRequest):
 
         # # 获取市场警报
         # alerts = await blockchain_service.get_market_alerts(
-        #     "0xAbCdEf123456789AbCdEf123456789AbCdEf1234"
+        #     "0x655b35f11006617696a4b31978ba4c078b6b7145"
         # )  # 使用演示地址获取警报
         # relevant_alerts = [alert for alert in alerts if alert["asset"] == request.asset]
 
@@ -385,7 +385,7 @@ if __name__ == "__main__":
     load_dotenv()
 
     # 测试数据
-    DEMO_ADDRESS = "0xAbCdEf123456789AbCdEf123456789AbCdEf1234"
+    DEMO_ADDRESS = "0x655b35f11006617696a4b31978ba4c078b6b7145"
     TEST_ASSETS = ["ETH", "USDC", "USDT", "BTC"]
     TEST_PROTOCOLS = ["Aave-V3", "Compound-V3", "Curve Finance", "Uniswap-V3"]
 
