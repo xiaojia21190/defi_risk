@@ -10,30 +10,15 @@ from datetime import datetime
 
 import pandas as pd
 import uvicorn
+from dotenv import load_dotenv
 
 from risk_calculator import RiskCalculator, Position
-from blockchain_service import BlockchainService
+from blockchain_service import BlockchainService, PlatformAsset, ProtocolPosition
 from ai_predictor import AiPredictor
 from dataclasses import dataclass
 
-
-# 定义新的数据结构
-@dataclass
-class PlatformAsset:
-    protocol: str
-    asset: str
-    amount: float
-    apy: Optional[float] = None
-    invest_type: int = 0
-
-
-@dataclass
-class ProtocolPosition:
-    total_assets: float
-    total_debts: float
-    leverage: float
-    positions: List[PlatformAsset]
-
+# 加载环境变量
+load_dotenv()
 
 # 设置日志记录
 logger = logging.getLogger("defi_risk")
@@ -131,10 +116,10 @@ class MarketPredictionRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"message": "DeFi存款分析API"}
+    return {"message": "DeFi风险分析API"}
 
 
-@app.post("/analyze", response_model=PortfolioAnalysis)
+@app.post("/api/v1/portfolio/analyze", response_model=PortfolioAnalysis)
 async def analyze_defi_deposits(request: PortfolioRequest):
     """分析用户的DeFi存款情况"""
     try:
@@ -327,676 +312,351 @@ async def analyze_defi_deposits(request: PortfolioRequest):
             investment_type_risk_mitigations=investment_type_risk_mitigations,
             investment_type_warnings=investment_type_warnings,
         )
-
     except Exception as e:
         logger.error(f"分析DeFi存款时出错: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
 
 
-@app.post("/market-alerts")
-async def get_market_alerts(request: PortfolioRequest):
-    """获取市场警报"""
-    return await blockchain_service.get_market_alerts(request.wallet_address)
-
-
-@app.post("/predict/market")
-async def predict_market(request: MarketPredictionRequest):
-    """获取市场预测"""
+@app.get("/api/v1/market/data/{asset}", response_model=MarketData)
+async def get_market_data(asset: str) -> MarketData:
+    """获取资产的市场数据"""
     try:
-        # 跳过 USDT 资产的风险警报
-        if request.asset == "USDT":
-            raise HTTPException(status_code=400, detail="USDT 资产不支持市场预测")
+        logger.info(f"获取资产 {asset} 的市场数据")
+
+        # 获取资产价格
+        price = await blockchain_service.get_asset_price(asset)
+
+        # 获取24小时数据
+        data_24h = await blockchain_service._get_24h_data(asset)
+
+        if not data_24h:
+            raise HTTPException(
+                status_code=404, detail=f"未找到资产 {asset} 的市场数据"
+            )
+
+        return MarketData(
+            asset=asset,
+            price=price,
+            volume_24h=data_24h.get("volume", 0),
+            price_change_24h=data_24h.get("price_change_percentage", 0),
+            market_cap=data_24h.get("market_cap", 0),
+        )
+    except Exception as e:
+        logger.error(f"获取市场数据时出错: {e}")
+        raise HTTPException(status_code=500, detail=f"获取市场数据失败: {str(e)}")
+
+
+@app.get("/api/v1/market/gas")
+async def get_gas_price() -> Dict[str, float]:
+    """获取当前gas价格"""
+    try:
+        gas_price = await blockchain_service.get_gas_price()
+        return {"gas_price": gas_price}
+    except Exception as e:
+        logger.error(f"获取gas价格时出错: {e}")
+        raise HTTPException(status_code=500, detail=f"获取gas价格失败: {str(e)}")
+
+
+@app.post("/api/v1/market/predict/{asset}")
+async def predict_market(asset: str, request: MarketPredictionRequest):
+    """预测资产市场趋势"""
+    try:
+        logger.info(f"预测资产 {asset} 的市场趋势")
 
         # 获取历史数据
-        historical_data = await blockchain_service.get_asset_historical_data(
-            request.asset
-        )
+        historical_data = await blockchain_service.get_asset_historical_data(asset)
+
         if historical_data.empty:
             raise HTTPException(
-                status_code=404, detail=f"未找到 {request.asset} 的市场数据"
+                status_code=404, detail=f"未找到资产 {asset} 的历史数据"
             )
 
-        # 获取AI预测
-        prediction = ai_predictor.analyze_market_trend(historical_data, request.asset)
-
-        # # 获取市场警报
-        # alerts = await blockchain_service.get_market_alerts(
-        #     "0x655b35f11006617696a4b31978ba4c078b6b7145"
-        # )  # 使用演示地址获取警报
-        # relevant_alerts = [alert for alert in alerts if alert["asset"] == request.asset]
+        # 使用AI预测器分析市场趋势
+        market_trend = ai_predictor.analyze_market_trend(historical_data, asset)
 
         return {
-            "asset": request.asset,
-            "current_price": prediction["current_price"],
-            "predicted_price": (
-                prediction["predicted_price_range"]["24h"][0]
-                + prediction["predicted_price_range"]["24h"][1]
-            )
-            / 2,
-            "trend": prediction["trend"],
-            "risk_level": prediction["risk_level"],
-            "volatility": prediction["volatility"],
-            "recommendations": prediction["recommendations"],
-            "signals": prediction["trading_signals"],
-            "key_price_levels": {
-                "support": (
-                    prediction["key_levels"]["support"]
-                    if "key_levels" in prediction
-                    else prediction.get("support_levels", [])
-                ),
-                "resistance": (
-                    prediction["key_levels"]["resistance"]
-                    if "key_levels" in prediction
-                    else prediction.get("resistance_levels", [])
-                ),
-            },
+            "asset": asset,
+            "time_frame": request.time_frame,
+            "prediction": market_trend,
         }
-
     except Exception as e:
-        logger.error(f"获取市场预测时出错: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"预测市场趋势时出错: {e}")
+        raise HTTPException(status_code=500, detail=f"预测市场趋势失败: {str(e)}")
 
 
-@app.get("/predict/protocol/{protocol_name}")
-async def predict_protocol_risk(protocol_name: str):
-    """分析DeFi协议风险"""
-    try:
-        risk_analysis = ai_predictor.analyze_defi_protocol_risk(protocol_name)
-        return risk_analysis
-    except Exception as e:
-        logger.error(f"分析协议风险时出错: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/protocols")
+@app.get("/api/v1/protocol/list")
 async def get_supported_protocols():
-    """获取支持的DeFi协议列表"""
-    return {
-        "protocols": [
+    """获取支持的协议列表"""
+    try:
+        # 这里可以从配置或数据库中获取支持的协议列表
+        # 暂时返回一个固定的列表
+        protocols = [
             {
-                "name": "Aave-V3",
+                "name": "Aave",
                 "description": "去中心化借贷协议",
-                "supported_assets": ["ETH", "USDC", "DAI", "BTC"],
-                "features": ["存款", "借贷", "抵押"],
+                "category": "借贷",
+                "chain": "Ethereum",
+                "url": "https://aave.com",
             },
             {
-                "name": "Compound-V3",
-                "description": "去中心化借贷协议",
-                "supported_assets": ["ETH", "USDC", "DAI"],
-                "features": ["存款", "借贷"],
-            },
-            {
-                "name": "Curve Finance",
-                "description": "稳定币交易协议",
-                "supported_assets": ["USDC", "DAI", "USDT"],
-                "features": ["流动性挖矿", "稳定币交换"],
-            },
-            {
-                "name": "Uniswap-V3",
+                "name": "Uniswap",
                 "description": "去中心化交易所",
-                "supported_assets": ["ETH", "USDC", "BTC", "DAI"],
-                "features": ["流动性提供", "交易"],
+                "category": "DEX",
+                "chain": "Ethereum",
+                "url": "https://uniswap.org",
+            },
+            {
+                "name": "Curve",
+                "description": "稳定币交易协议",
+                "category": "DEX",
+                "chain": "Ethereum",
+                "url": "https://curve.fi",
+            },
+            {
+                "name": "Compound",
+                "description": "去中心化借贷协议",
+                "category": "借贷",
+                "chain": "Ethereum",
+                "url": "https://compound.finance",
             },
             {
                 "name": "MakerDAO",
                 "description": "去中心化稳定币协议",
-                "supported_assets": ["ETH", "BTC"],
-                "features": ["抵押", "稳定币铸造"],
-            },
-            {
-                "name": "Balancer",
-                "description": "多资产流动性池",
-                "supported_assets": ["ETH", "USDC", "DAI", "BTC"],
-                "features": ["流动性挖矿", "交易"],
-            },
-            {
-                "name": "Yearn-Finance",
-                "description": "收益聚合器",
-                "supported_assets": ["ETH", "USDC", "DAI", "BTC"],
-                "features": ["收益优化", "自动复投"],
-            },
-            {
-                "name": "dYdX",
-                "description": "去中心化衍生品交易所",
-                "supported_assets": ["ETH", "USDC"],
-                "features": ["杠杆交易", "永续合约"],
-            },
-            {
-                "name": "Synthetix",
-                "description": "合成资产协议",
-                "supported_assets": ["ETH", "SNX"],
-                "features": ["合成资产", "抵押"],
+                "category": "稳定币",
+                "chain": "Ethereum",
+                "url": "https://makerdao.com",
             },
         ]
-    }
+
+        return {"protocols": protocols}
+    except Exception as e:
+        logger.error(f"获取协议列表时出错: {e}")
+        raise HTTPException(status_code=500, detail=f"获取协议列表失败: {str(e)}")
 
 
-@app.get("/market-data/{asset}")
-async def get_market_data(asset: str) -> MarketData:
-    """获取资产的市场数据"""
+@app.get("/api/v1/protocol/{protocol_name}")
+async def get_protocol_info(protocol_name: str):
+    """获取协议信息"""
     try:
-        # 跳过 USDT 资产的市场数据
-        if asset == "USDT":
-            raise HTTPException(status_code=400, detail="USDT 资产不支持市场数据")
+        logger.info(f"获取协议 {protocol_name} 的信息")
 
-        # 获取历史数据
-        historical_data = await blockchain_service.get_asset_historical_data(asset)
-        if historical_data.empty:
-            raise HTTPException(status_code=404, detail=f"未找到 {asset} 的市场数据")
+        # 获取协议信息
+        protocol_info = await blockchain_service.get_protocol_info(protocol_name)
 
-        # 获取最新数据
-        latest_data = historical_data.iloc[-1]
-
-        return MarketData(
-            asset=asset,
-            price=latest_data["price"],
-            volume_24h=latest_data["volume"],
-            price_change_24h=(
-                latest_data["price"] / historical_data.iloc[-2]["price"] - 1
+        if not protocol_info:
+            raise HTTPException(
+                status_code=404, detail=f"未找到协议 {protocol_name} 的信息"
             )
-            * 100,
-            market_cap=latest_data["market_cap"],
-        )
+
+        return protocol_info
     except Exception as e:
-        logger.error(f"获取市场数据时出错: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"获取协议信息时出错: {e}")
+        raise HTTPException(status_code=500, detail=f"获取协议信息失败: {str(e)}")
 
 
-@app.get("/gas-price")
-async def get_gas_price() -> float:
-    """获取当前gas价格"""
+@app.get("/api/v1/protocol/risk/{protocol_name}")
+async def analyze_protocol_risk(protocol_name: str):
+    """分析协议风险"""
     try:
-        return await blockchain_service.get_gas_price()
+        logger.info(f"分析协议 {protocol_name} 的风险")
+
+        # 分析协议风险
+        risk_analysis = await blockchain_service.analyze_protocol_risk(protocol_name)
+
+        if not risk_analysis:
+            raise HTTPException(
+                status_code=404, detail=f"未能分析协议 {protocol_name} 的风险"
+            )
+
+        return risk_analysis
     except Exception as e:
-        logger.error(f"获取gas价格时出错: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"分析协议风险时出错: {e}")
+        raise HTTPException(status_code=500, detail=f"分析协议风险失败: {str(e)}")
+
+
+@app.get("/api/v1/wallet/{wallet_address}/balance")
+async def get_wallet_balance(wallet_address: str):
+    """获取钱包余额"""
+    try:
+        logger.info(f"获取钱包 {wallet_address} 的余额")
+
+        # 获取用户在各协议中的存款头寸
+        protocol_positions = await blockchain_service.get_all_positions(wallet_address)
+
+        if not protocol_positions:
+            raise HTTPException(status_code=404, detail="未找到DeFi存款")
+
+        # 计算总资产和总负债
+        total_assets = sum(pos.total_assets for pos in protocol_positions)
+        total_debts = sum(pos.total_debts for pos in protocol_positions)
+
+        # 构建资产列表
+        assets = []
+        for protocol_pos in protocol_positions:
+            for pos in protocol_pos.positions:
+                assets.append(
+                    {
+                        "protocol": pos.protocol,
+                        "asset": pos.asset,
+                        "amount": pos.amount,
+                        "value_usd": pos.amount,  # 这里应该是美元价值，暂时使用数量代替
+                    }
+                )
+
+        return {
+            "wallet_address": wallet_address,
+            "total_assets": total_assets,
+            "total_debts": total_debts,
+            "net_worth": total_assets - total_debts,
+            "assets": assets,
+        }
+    except Exception as e:
+        logger.error(f"获取钱包余额时出错: {e}")
+        raise HTTPException(status_code=500, detail=f"获取钱包余额失败: {str(e)}")
+
+
+@app.get("/api/v1/wallet/{wallet_address}/positions")
+async def get_wallet_positions(wallet_address: str):
+    """获取钱包在所有协议中的头寸"""
+    try:
+        logger.info(f"获取钱包 {wallet_address} 的头寸")
+
+        # 获取用户在各协议中的存款头寸
+        protocol_positions = await blockchain_service.get_all_positions(wallet_address)
+
+        if not protocol_positions:
+            raise HTTPException(status_code=404, detail="未找到DeFi存款")
+
+        # 构建头寸列表
+        positions = []
+        for protocol_pos in protocol_positions:
+            protocol_name = (
+                protocol_pos.positions[0].protocol
+                if protocol_pos.positions
+                else "未知协议"
+            )
+
+            positions.append(
+                {
+                    "protocol": protocol_name,
+                    "total_assets": protocol_pos.total_assets,
+                    "total_debts": protocol_pos.total_debts,
+                    "leverage": protocol_pos.leverage,
+                    "positions": [
+                        {
+                            "asset": pos.asset,
+                            "amount": pos.amount,
+                            "apy": pos.apy or 0.0,
+                            "invest_type": pos.invest_type,
+                        }
+                        for pos in protocol_pos.positions
+                    ],
+                }
+            )
+
+        return {
+            "wallet_address": wallet_address,
+            "positions": positions,
+        }
+    except Exception as e:
+        logger.error(f"获取钱包头寸时出错: {e}")
+        raise HTTPException(status_code=500, detail=f"获取钱包头寸失败: {str(e)}")
+
+
+@app.get("/api/v1/wallet/{wallet_address}/risk")
+async def analyze_wallet_risk(wallet_address: str):
+    """分析钱包风险"""
+    try:
+        logger.info(f"分析钱包 {wallet_address} 的风险")
+
+        # 获取用户在各协议中的存款头寸
+        protocol_positions = await blockchain_service.get_all_positions(wallet_address)
+
+        if not protocol_positions:
+            raise HTTPException(status_code=404, detail="未找到DeFi存款")
+
+        # 合并所有协议的头寸
+        all_positions = []
+        for protocol_pos in protocol_positions:
+            all_positions.extend(protocol_pos.positions)
+
+        # 计算风险评估
+        risk_assessment = risk_calculator.assess_portfolio_risk(all_positions)
+
+        return {
+            "wallet_address": wallet_address,
+            "risk_level": risk_assessment.risk_level.value,
+            "risk_score": risk_assessment.risk_score,
+            "risk_factors": risk_assessment.risk_factors,
+            "recommendations": risk_assessment.recommendations,
+            "risk_mitigation_strategies": risk_assessment.risk_mitigation_strategies,
+            "monitoring_points": risk_assessment.monitoring_points,
+        }
+    except Exception as e:
+        logger.error(f"分析钱包风险时出错: {e}")
+        raise HTTPException(status_code=500, detail=f"分析钱包风险失败: {str(e)}")
+
+
+@app.get("/api/v1/wallet/{wallet_address}/alerts")
+async def get_wallet_alerts(wallet_address: str):
+    """获取钱包相关的市场警报"""
+    try:
+        logger.info(f"获取钱包 {wallet_address} 的市场警报")
+
+        # 获取市场警报
+        alerts = await blockchain_service.get_market_alerts(wallet_address)
+
+        return {
+            "wallet_address": wallet_address,
+            "alerts": alerts,
+        }
+    except Exception as e:
+        logger.error(f"获取钱包警报时出错: {e}")
+        raise HTTPException(status_code=500, detail=f"获取钱包警报失败: {str(e)}")
 
 
 async def get_market_analysis(positions: List[PlatformAsset]) -> Dict[str, Any]:
     """获取市场分析数据"""
     try:
-        analysis = {}
-        for pos in positions:
-            # 获取资产的历史数据
-            asset = pos.asset.split("/")[0]
-            if asset == "USDT":
-                continue
-            historical_data = await blockchain_service.get_asset_historical_data(asset)
-            if not historical_data.empty:
-                latest_data = historical_data.iloc[-1]
-                analysis[pos.asset] = {
-                    "current_price": latest_data["price"],
-                    "volume_24h": latest_data["volume"],
-                    "market_cap": latest_data["market_cap"],
-                    "price_change_24h": (
-                        latest_data["price"] / historical_data.iloc[-2]["price"] - 1
+        # 提取资产列表
+        assets = list(set(pos.asset.split("/")[0] for pos in positions))
+
+        # 获取资产价格和趋势
+        market_data = {}
+        for asset in assets:
+            try:
+                # 获取资产历史数据
+                historical_data = await blockchain_service.get_asset_historical_data(
+                    asset
+                )
+
+                if not historical_data.empty:
+                    # 分析市场趋势
+                    market_trend = ai_predictor.analyze_market_trend(
+                        historical_data, asset
                     )
-                    * 100,
-                    "volatility_30d": historical_data["price"].std()
-                    / historical_data["price"].mean()
-                    * 100,
-                }
-        return analysis
+                    market_data[asset] = market_trend
+            except Exception as e:
+                logger.warning(f"获取资产 {asset} 的市场数据时出错: {e}")
+
+        return {
+            "assets": market_data,
+            "market_sentiment": "中性",  # 可以根据市场数据计算整体情绪
+            "key_indicators": {
+                "btc_dominance": 45.5,  # 示例数据
+                "market_cap": 1.2e12,  # 示例数据
+                "fear_greed_index": 55,  # 示例数据
+            },
+        }
     except Exception as e:
         logger.error(f"获取市场分析数据时出错: {e}")
-        return {}
-
-
-def monitor_liquidity_pool_example(pool_data):
-    """
-    流动性池风险监测示例函数
-
-    Args:
-        pool_data: 流动性池数据
-
-    Returns:
-        Dict: 风险分析结果
-    """
-    # 初始化风险计算器
-    risk_calculator = RiskCalculator()
-
-    # 调用流动性池风险监测方法
-    risk_analysis = risk_calculator.monitor_liquidity_pool_risk(pool_data)
-
-    # 打印风险分析结果
-    print(f"流动性池: {risk_analysis['pool_name']}")
-    print(f"风险评分: {risk_analysis['risk_score']}")
-    print(f"风险等级: {risk_analysis['risk_level']}")
-
-    print("\n风险因素:")
-    for factor in risk_analysis["risk_factors"]:
-        print(f"- {factor}")
-
-    print("\n建议:")
-    for recommendation in risk_analysis["recommendations"]:
-        print(f"- {recommendation}")
-
-    print("\n监控点:")
-    for point in risk_analysis["monitoring_points"]:
-        print(f"- {point}")
-
-    # 返回详细风险分析结果
-    return risk_analysis
-
-
-def monitor_mining_example(mining_data):
-    """
-    挖矿风险监测示例函数
-
-    Args:
-        mining_data: 挖矿数据
-
-    Returns:
-        Dict: 风险分析结果
-    """
-    # 初始化风险计算器
-    risk_calculator = RiskCalculator()
-
-    # 调用挖矿风险监测方法
-    risk_analysis = risk_calculator.monitor_mining_risk(mining_data)
-
-    # 打印风险分析结果
-    print(f"挖矿项目: {risk_analysis['pool_name']}")
-    print(f"风险评分: {risk_analysis['risk_score']}")
-    print(f"风险等级: {risk_analysis['risk_level']}")
-
-    print("\n风险因素:")
-    for factor in risk_analysis["risk_factors"]:
-        print(f"- {factor}")
-
-    print("\n建议:")
-    for recommendation in risk_analysis["recommendations"]:
-        print(f"- {recommendation}")
-
-    print("\n监控点:")
-    for point in risk_analysis["monitoring_points"]:
-        print(f"- {point}")
-
-    # 返回详细风险分析结果
-    return risk_analysis
-
-
-def monitor_staking_example(staking_data):
-    """
-    质押风险监测示例函数
-
-    Args:
-        staking_data: 质押数据
-
-    Returns:
-        Dict: 风险分析结果
-    """
-    # 初始化风险计算器
-    risk_calculator = RiskCalculator()
-
-    # 调用质押风险监测方法
-    risk_analysis = risk_calculator.monitor_staking_risk(staking_data)
-
-    # 打印风险分析结果
-    print(f"质押项目: {risk_analysis['pool_name']}")
-    print(f"风险评分: {risk_analysis['risk_score']}")
-    print(f"风险等级: {risk_analysis['risk_level']}")
-
-    print("\n风险因素:")
-    for factor in risk_analysis["risk_factors"]:
-        print(f"- {factor}")
-
-    print("\n建议:")
-    for recommendation in risk_analysis["recommendations"]:
-        print(f"- {recommendation}")
-
-    print("\n监控点:")
-    for point in risk_analysis["monitoring_points"]:
-        print(f"- {point}")
-
-    # 返回详细风险分析结果
-    return risk_analysis
-
-
-def monitor_save_example(save_data):
-    """
-    存币风险监测示例函数
-
-    Args:
-        save_data: 存币数据
-
-    Returns:
-        Dict: 风险分析结果
-    """
-    # 初始化风险计算器
-    risk_calculator = RiskCalculator()
-
-    # 调用存币风险监测方法
-    risk_analysis = risk_calculator.monitor_save_risk(save_data)
-
-    # 打印风险分析结果
-    print(f"存币项目: {risk_analysis['pool_name']}")
-    print(f"风险评分: {risk_analysis['risk_score']}")
-    print(f"风险等级: {risk_analysis['risk_level']}")
-
-    print("\n风险因素:")
-    for factor in risk_analysis["risk_factors"]:
-        print(f"- {factor}")
-
-    print("\n建议:")
-    for recommendation in risk_analysis["recommendations"]:
-        print(f"- {recommendation}")
-
-    print("\n监控点:")
-    for point in risk_analysis["monitoring_points"]:
-        print(f"- {point}")
-
-    # 返回详细风险分析结果
-    return risk_analysis
+        return {
+            "assets": {},
+            "market_sentiment": "未知",
+            "key_indicators": {},
+            "error": str(e),
+        }
 
 
 if __name__ == "__main__":
-    import uvicorn
-    import asyncio
-    from dotenv import load_dotenv
-
-    # 加载环境变量
-    load_dotenv()
-
-    # 测试数据
-    DEMO_ADDRESS = "0x655b35f11006617696a4b31978ba4c078b6b7145"
-    TEST_ASSETS = ["ETH", "USDC", "USDT", "BTC"]
-    TEST_PROTOCOLS = ["Aave-V3", "Compound-V3", "Curve Finance", "Uniswap-V3"]
-
-    async def test_api_endpoints():
-        """测试主要API端点"""
-        try:
-            print("\n=== 测试API端点 ===\n")
-
-            # for asset in TEST_ASSETS:
-            #     _get_24h_data = await blockchain_service._get_24h_data(asset)
-            #     print(f"24h data for {asset}: {_get_24h_data}")
-            #     price = await blockchain_service.get_asset_price(asset)
-            #     print(f"Price for {asset}: {price}")
-
-            # 1. 测试分析DeFi存款
-            print("1. 测试分析DeFi存款")
-            portfolio_request = PortfolioRequest(wallet_address=DEMO_ADDRESS)
-            portfolio_analysis = await analyze_defi_deposits(portfolio_request)
-            print("portfolio_analysis", portfolio_analysis)
-            print(f"总存款价值: ${portfolio_analysis.total_value:,.2f}")
-            print(f"风险等级: {portfolio_analysis.risk_level}")
-            print("-" * 50)
-
-            # # 2. 测试市场预测
-            # print("\n2. 测试市场预测")
-            # for asset in TEST_ASSETS[:2]:  # 只测试前两个资产
-            #     prediction_request = MarketPredictionRequest(asset=asset)
-            #     prediction = await predict_market(prediction_request)
-            #     print(f"\n{asset} 市场预测:")
-            #     print(f"当前价格: ${prediction['current_price']:,.2f}")
-            #     print(f"趋势: {prediction['trend']}")
-            #     print(f"风险等级: {prediction['risk_level']}")
-            # print("-" * 50)
-
-            # # 3. 测试协议风险分析
-            # print("\n3. 测试协议风险分析")
-            # for protocol in TEST_PROTOCOLS[:2]:  # 只测试前两个协议
-            #     risk_analysis = await predict_protocol_risk(protocol)
-            #     print(f"\n{protocol} 风险分析:")
-            #     print(
-            #         "risk_analysis.ai_risk_analysis",
-            #         risk_analysis["ai_risk_analysis"]["risk_score"],
-            #     )
-            # print("-" * 50)
-
-            # # 4. 测试市场数据
-            # print("\n4. 测试市场数据")
-            # for asset in TEST_ASSETS[:2]:  # 只测试前两个资产
-            #     market_data = await get_market_data(asset)
-            #     print(f"\n{asset} 市场数据:")
-            #     print(f"价格: ${market_data.price:,.2f}")
-            #     print(f"24h成交量: ${market_data.volume_24h:,.2f}")
-            #     print(f"24h价格变化: {market_data.price_change_24h:.2f}%")
-            # print("-" * 50)
-
-            print("\n所有测试完成!")
-
-        except Exception as e:
-            print(f"测试过程中出错: {e}")
-
-    # 运行测试
-    asyncio.run(test_api_endpoints())
-
-    # 示例调用流动性池风险监测
-    usdc_usdt_pool_data = {
-        "investmentName": "USDC-USDT",
-        "investmentKey": "1-0xc36442b4a4522e871399cd717abdd847ab11fe88-0x3416cf6c708da44db2624d63ea0aaef7113527c6",
-        "feeRate": "0.00010",
-        "investType": 2,
-        "investName": "Pool",
-        "positionList": [
-            {
-                "rangeInfo": {
-                    "lowerPrice": "0.994813755230067338",
-                    "upperPrice": "1.004911778445206683",
-                    "token0Symbol": "USDC",
-                    "token1Symbol": "USDT",
-                },
-                "tokenId": "541977",
-                "positionName": "USDC-USDT",
-                "positionStatus": "ACTIVE",
-                "assetsTokenList": [
-                    {
-                        "tokenSymbol": "USDC",
-                        "tokenLogo": "https://static.coinall.ltd/cdn/wallet/logo/USDC.png",
-                        "coinAmount": "0.978179",
-                        "currencyAmount": "0.9780811821",
-                        "tokenPrecision": 6,
-                        "tokenAddress": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-                        "network": "ETH",
-                    },
-                    {
-                        "tokenSymbol": "USDT",
-                        "tokenLogo": "https://static.coinall.ltd/cdn/wallet/logo/USDT-991ffed9-e495-4d1b-80c2-a4c5f96ce22d.png",
-                        "coinAmount": "1.003816",
-                        "currencyAmount": "1.00365538944",
-                        "tokenPrecision": 6,
-                        "tokenAddress": "0xdac17f958d2ee523a2206206994597c13d831ec7",
-                        "network": "ETH",
-                    },
-                ],
-                "unclaimFeesDefiTokenInfo": [
-                    {
-                        "baseDefiTokenInfos": [
-                            {
-                                "tokenSymbol": "USDC",
-                                "tokenLogo": "https://static.coinall.ltd/cdn/wallet/logo/USDC.png",
-                                "coinAmount": "0.080475",
-                                "currencyAmount": "0.0804669525",
-                                "tokenPrecision": 6,
-                                "tokenAddress": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-                                "network": "ETH",
-                            },
-                            {
-                                "tokenSymbol": "USDT",
-                                "tokenLogo": "https://static.coinall.ltd/cdn/wallet/logo/USDT-991ffed9-e495-4d1b-80c2-a4c5f96ce22d.png",
-                                "coinAmount": "0.080623",
-                                "currencyAmount": "0.08061010032",
-                                "tokenPrecision": 6,
-                                "tokenAddress": "0xdac17f958d2ee523a2206206994597c13d831ec7",
-                                "network": "ETH",
-                            },
-                        ],
-                        "currencyAmount": "0.16107705282",
-                    },
-                ],
-                "totalValue": "2.14281362436",
-            },
-        ],
-    }
-
-    # 调用风险监测函数
-    risk_result = monitor_liquidity_pool_example(usdc_usdt_pool_data)
-
-    # 可以进一步处理风险结果
-    # 例如，如果风险等级为HIGH，可以发送警报
-    if risk_result["risk_level"] == "HIGH":
-        print("\n⚠️ 高风险警报! 建议立即检查您的流动性池投资")
-
-    # 示例调用挖矿风险监测
-    ibeur_ageur_mining_data = {
-        "investmentName": "LP ibEUR-agEUR",
-        "investmentKey": "1-0x38039dd47636154273b287f74c432cac83da97e2-0xb37d6c07482bc11cd28a1f11f1a6ad7b66dec933",
-        "investType": 3,
-        "investName": "Farm",
-        "assetsTokenList": [
-            {
-                "tokenSymbol": "ibEUR",
-                "tokenLogo": "https://static.coinall.ltd/cdn/wallet/logo/ibeur-19cca0a3beaf4e83b4b52725e48a8e61-20220721.png",
-                "coinAmount": "34.578266602423679254",
-                "currencyAmount": "26.0954567003005293403445947583767916",
-                "tokenPrecision": 18,
-                "tokenAddress": "0x96e61422b6a9ba0e068b6c5add4ffabc6a4aae27",
-                "network": "ETH",
-            },
-            {
-                "tokenSymbol": "EURA",
-                "tokenLogo": "https://static.coinall.ltd/cdn/invest/coin/logo/ETH/AGEUR-0x1a7e4e63778b4f12a199c062f3efdd288afcbce8.png",
-                "coinAmount": "1.298239373044056277",
-                "currencyAmount": "1.4116594094769705924895889040857011",
-                "tokenPrecision": 18,
-                "tokenAddress": "0x1a7e4e63778b4f12a199c062f3efdd288afcbce8",
-                "network": "ETH",
-            },
-        ],
-        "rewardDefiTokenInfo": [
-            {
-                "baseDefiTokenInfos": [
-                    {
-                        "tokenSymbol": "ANGLE",
-                        "tokenLogo": "https://static.coinall.ltd/cdn/wallet/logo/ANGLE-0x31429d1856ad1377a8a0079410b297e1a9e214c2.png",
-                        "coinAmount": "0",
-                        "currencyAmount": "0",
-                        "tokenPrecision": 18,
-                        "tokenAddress": "0x31429d1856ad1377a8a0079410b297e1a9e214c2",
-                        "network": "ETH",
-                    },
-                    {
-                        "tokenSymbol": "rKP3R",
-                        "tokenLogo": "https://static.coinall.ltd/cdn/web3/currency/token/default-logo/token_custom_logo_default_r.png/type=default_350_0",
-                        "coinAmount": "0",
-                        "currencyAmount": "0",
-                        "tokenPrecision": 18,
-                        "tokenAddress": "0xedb67ee1b171c4ec66e6c10ec43edbba20fae8e9",
-                        "network": "ETH",
-                    },
-                ],
-                "rewardType": 1,
-            },
-            {
-                "baseDefiTokenInfos": [
-                    {
-                        "tokenSymbol": "CRV",
-                        "tokenLogo": "https://static.coinall.ltd/cdn/invest/coin/CRV.png",
-                        "coinAmount": "0.005633827373819009",
-                        "currencyAmount": "0.0022601550144048042276916685339936",
-                        "tokenPrecision": 18,
-                        "tokenAddress": "0xd533a949740bb3306d119cc777fa900ba034cd52",
-                        "network": "ETH",
-                    },
-                ],
-                "rewardType": 1,
-            },
-        ],
-        "totalValue": "27.5093762647919047370618753309964863",
-    }
-
-    # 调用挖矿风险监测函数
-    mining_risk_result = monitor_mining_example(ibeur_ageur_mining_data)
-
-    # 可以进一步处理风险结果
-    # 例如，如果风险等级为HIGH，可以发送警报
-    if mining_risk_result["risk_level"] == "HIGH":
-        print("\n⚠️ 高风险警报! 建议立即检查您的挖矿投资")
-
-    # 示例调用质押风险监测
-    ath_staking_data = {
-        "investmentName": "ATH",
-        "investmentKey": "1-0x6f5c81fe067ae25afd52218f140a73d51f0c6b31-0",
-        "investType": 5,
-        "investName": "Stake",
-        "assetsTokenList": [
-            {
-                "tokenSymbol": "ATH",
-                "tokenLogo": "https://static.coinall.ltd/cdn/web3/currency/token/1-0xbe0ed4138121ecfc5c0e56b40517da27e6c5226b-97.png/type=default_350_0",
-                "coinAmount": "700",
-                "currencyAmount": "25.527897036276257",
-                "tokenPrecision": 18,
-                "tokenAddress": "0xbe0ed4138121ecfc5c0e56b40517da27e6c5226b",
-                "network": "ETH",
-            }
-        ],
-        "rewardDefiTokenInfo": [
-            {
-                "baseDefiTokenInfos": [
-                    {
-                        "tokenSymbol": "ATH",
-                        "tokenLogo": "https://static.coinall.ltd/cdn/web3/currency/token/1-0xbe0ed4138121ecfc5c0e56b40517da27e6c5226b-97.png/type=default_350_0",
-                        "coinAmount": "141.566873923846617599",
-                        "currencyAmount": "5.16272083039351228430531090228863849",
-                        "tokenPrecision": 18,
-                        "tokenAddress": "0xbe0ed4138121ecfc5c0e56b40517da27e6c5226b",
-                        "network": "ETH",
-                    },
-                    {
-                        "tokenSymbol": "$MICRO",
-                        "tokenLogo": "https://static.coinall.ltd/cdn/web3/currency/token/1-0x8cedb0680531d26e62abdbd0f4c5428b7fdc26d5-97.png/type=default_350_0?v=1737438768635",
-                        "coinAmount": "0",
-                        "currencyAmount": "0",
-                        "tokenPrecision": 18,
-                        "tokenAddress": "0x8cedb0680531d26e62abdbd0f4c5428b7fdc26d5",
-                        "network": "ETH",
-                    },
-                ],
-                "rewardType": 1,
-            }
-        ],
-        "totalValue": "30.69061786666976928430531090228863849",
-    }
-
-    # 调用质押风险监测函数
-    staking_risk_result = monitor_staking_example(ath_staking_data)
-
-    # 可以进一步处理风险结果
-    # 例如，如果风险等级为HIGH，可以发送警报
-    if staking_risk_result["risk_level"] == "HIGH":
-        print("\n⚠️ 高风险警报! 建议立即检查您的质押投资")
-
-    # 示例调用存币风险监测
-    usdt_save_data = {
-        "investmentName": "USDT",
-        "investmentKey": "1-0x7d2768de32b0b80b7a3454c06bdac94a69ddc7a9-0x3ed3b47dd13ec9a98b44e6204a523e766b225811",
-        "investType": 1,
-        "investName": "Save",
-        "assetsTokenList": [
-            {
-                "tokenSymbol": "USDT",
-                "tokenLogo": "https://static.coinall.ltd/cdn/wallet/logo/USDT-991ffed9-e495-4d1b-80c2-a4c5f96ce22d.png",
-                "coinAmount": "1.541928",
-                "currencyAmount": "1.54152709872",
-                "tokenPrecision": 6,
-                "tokenAddress": "0xdac17f958d2ee523a2206206994597c13d831ec7",
-                "network": "ETH",
-            }
-        ],
-        "rewardDefiTokenInfo": [],
-        "totalValue": "1.54152709872",
-    }
-
-    # 调用存币风险监测函数
-    save_risk_result = monitor_save_example(usdt_save_data)
-
-    # 可以进一步处理风险结果
-    # 例如，如果风险等级为HIGH，可以发送警报
-    if save_risk_result["risk_level"] == "HIGH":
-        print("\n⚠️ 高风险警报! 建议立即检查您的存币投资")
-
-    # 启动FastAPI服务器
-    # print("\n启动FastAPI服务器...")
-    # uvicorn.run(app, host="0.0.0.0", port=9000, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=8000)

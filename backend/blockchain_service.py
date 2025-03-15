@@ -524,15 +524,18 @@ class BlockchainService:
             logger.error(f"获取OKX头寸时出错: {e}")
             return []
 
-    async def get_defi_llama_pools(self, protocol: str, symbol: str) -> str:
+    async def get_defi_llama_pools(self, protocol: str, symbol: str) -> float:
         """使用DefiLlama API获取DeFi协议池的最新数据
+
+        Args:
+            protocol: 协议名称
+            symbol: 资产名称
 
         Returns:
             float: DeFi池的APY
         """
         try:
-            logger.info("使用DefiLlama API获取DeFi池数据")
-            positions = []
+            logger.info(f"使用DefiLlama API获取{protocol}协议的{symbol}池数据")
             rApy = 0
 
             # 使用缓存获取数据，避免频繁请求API
@@ -557,17 +560,341 @@ class BlockchainService:
 
             # 处理池数据
             for pool in pools:
-                if pool.get("chain") == "Ethereum" and protocol == pool.get("protocol"):
-                    symbolA = pool.get("symbol", "")
+                if (
+                    pool.get("chain") == "Ethereum"
+                    and protocol.lower() == pool.get("protocol", "").lower()
+                ):
+                    pool_symbol = pool.get("symbol", "")
                     apy = pool.get("apy")
-                    if symbol == symbolA:
+                    if symbol.lower() in pool_symbol.lower():
                         rApy = apy
+                        break
 
-            logger.info(f"从DefiLlama获取了{len(positions)}个Ethereum链上的池")
+            logger.info(f"获取到{protocol}协议{symbol}资产的APY: {rApy}")
             return rApy
         except Exception as e:
             logger.error(f"获取DefiLlama池数据时出错: {e}")
-            return []
+            return 0.0
+
+    async def get_protocol_tvl(self, protocol: str) -> float:
+        """获取协议的TVL（总锁仓价值）
+
+        Args:
+            protocol: 协议名称
+
+        Returns:
+            float: 协议的TVL（美元）
+        """
+        try:
+            # 使用缓存获取数据
+            cache_key = "defi_llama_protocols"
+            cache_interval = "1h"  # 使用1小时缓存
+
+            # 检查缓存中是否有数据
+            cached_protocols = self.historical_data_cache.get(cache_key, cache_interval)
+
+            if cached_protocols is not None:
+                logger.info("从缓存获取DefiLlama协议数据")
+                protocols = cached_protocols
+            else:
+                logger.info("从DefiLlama API获取协议数据")
+                # 创建DefiLlama客户端并获取协议数据
+                client = DefiLlamaClient()
+                protocols = client.get_protocols()
+
+                # 将数据存入缓存
+                self.historical_data_cache.set(cache_key, protocols, cache_interval)
+                logger.info(f"已将{len(protocols)}个协议数据存入缓存")
+
+            # 查找特定协议
+            for proto in protocols:
+                if protocol.lower() == proto.get("name", "").lower():
+                    tvl = proto.get("tvl", 0)
+                    logger.info(f"获取到{protocol}协议的TVL: {tvl}")
+                    return float(tvl)
+
+            logger.warning(f"未找到{protocol}协议的TVL数据")
+            return 0.0
+        except Exception as e:
+            logger.error(f"获取协议TVL失败: {e}")
+            return 0.0
+
+    async def get_protocol_info(self, protocol: str) -> Dict[str, Any]:
+        """获取协议的详细信息
+
+        Args:
+            protocol: 协议名称
+
+        Returns:
+            Dict: 协议的详细信息
+        """
+        try:
+            # 使用缓存获取数据
+            cache_key = f"defi_llama_protocol_{protocol.lower()}"
+            cache_interval = "1d"  # 使用1天缓存
+
+            # 检查缓存中是否有数据
+            cached_info = self.historical_data_cache.get(cache_key, cache_interval)
+
+            if cached_info is not None:
+                logger.info(f"从缓存获取{protocol}协议的详细信息")
+                return cached_info
+
+            logger.info(f"从DefiLlama API获取{protocol}协议的详细信息")
+            # 创建DefiLlama客户端并获取协议详细信息
+            client = DefiLlamaClient()
+            protocol_info = client.get_protocol(protocol)
+
+            if protocol_info:
+                # 将数据存入缓存
+                self.historical_data_cache.set(cache_key, protocol_info, cache_interval)
+                logger.info(f"已将{protocol}协议的详细信息存入缓存")
+                return protocol_info
+
+            logger.warning(f"未找到{protocol}协议的详细信息")
+            return {}
+        except Exception as e:
+            logger.error(f"获取协议详细信息失败: {e}")
+            return {}
+
+    async def get_protocol_historical_tvl(self, protocol: str) -> Dict[str, Any]:
+        """获取协议的历史TVL数据
+
+        Args:
+            protocol: 协议名称
+
+        Returns:
+            Dict: 协议的历史TVL数据
+        """
+        try:
+            # 使用缓存获取数据
+            cache_key = f"defi_llama_historical_tvl_{protocol.lower()}"
+            cache_interval = "1d"  # 使用1天缓存
+
+            # 检查缓存中是否有数据
+            cached_data = self.historical_data_cache.get(cache_key, cache_interval)
+
+            if cached_data is not None:
+                logger.info(f"从缓存获取{protocol}协议的历史TVL数据")
+                return cached_data
+
+            logger.info(f"从DefiLlama API获取{protocol}协议的历史TVL数据")
+            # 创建DefiLlama客户端并获取协议历史TVL数据
+            client = DefiLlamaClient()
+            historical_tvl = client.get_protocol_historical_tvl(protocol)
+
+            if historical_tvl:
+                # 将数据存入缓存
+                self.historical_data_cache.set(
+                    cache_key, historical_tvl, cache_interval
+                )
+                logger.info(f"已将{protocol}协议的历史TVL数据存入缓存")
+                return historical_tvl
+
+            logger.warning(f"未找到{protocol}协议的历史TVL数据")
+            return {}
+        except Exception as e:
+            logger.error(f"获取协议历史TVL数据失败: {e}")
+            return {}
+
+    async def get_protocol_token_info(self, protocol: str) -> Dict[str, Any]:
+        """获取协议的代币信息
+
+        Args:
+            protocol: 协议名称
+
+        Returns:
+            Dict: 协议的代币信息
+        """
+        try:
+            # 使用缓存获取数据
+            cache_key = f"defi_llama_token_{protocol.lower()}"
+            cache_interval = "1h"  # 使用1小时缓存
+
+            # 检查缓存中是否有数据
+            cached_token = self.historical_data_cache.get(cache_key, cache_interval)
+
+            if cached_token is not None:
+                logger.info(f"从缓存获取{protocol}协议的代币信息")
+                return cached_token
+
+            logger.info(f"从DefiLlama API获取{protocol}协议的代币信息")
+
+            # 首先获取协议信息
+            client = DefiLlamaClient()
+            protocol_info = await self.get_protocol_info(protocol)
+
+            if protocol_info and "gecko_id" in protocol_info:
+                # 使用gecko_id获取代币信息
+                gecko_id = protocol_info["gecko_id"]
+                coin = client.get_coin(gecko_id)
+
+                if coin:
+                    # 将数据存入缓存
+                    self.historical_data_cache.set(cache_key, coin, cache_interval)
+                    logger.info(f"已将{protocol}协议的代币信息存入缓存")
+                    return coin
+
+            logger.warning(f"未找到{protocol}协议的代币信息")
+            return {}
+        except Exception as e:
+            logger.error(f"获取协议代币信息失败: {e}")
+            return {}
+
+    async def get_chain_tvl(self, chain: str) -> float:
+        """获取特定区块链的总TVL
+
+        Args:
+            chain: 区块链名称（如ethereum, bsc, polygon等）
+
+        Returns:
+            float: 区块链的总TVL（美元）
+        """
+        try:
+            # 使用缓存获取数据
+            cache_key = "defi_llama_chains"
+            cache_interval = "1h"  # 使用1小时缓存
+
+            # 检查缓存中是否有数据
+            cached_chains = self.historical_data_cache.get(cache_key, cache_interval)
+
+            if cached_chains is not None:
+                logger.info("从缓存获取DefiLlama链数据")
+                chains = cached_chains
+            else:
+                logger.info("从DefiLlama API获取链数据")
+                # 创建DefiLlama客户端并获取链数据
+                client = DefiLlamaClient()
+                chains = client.get_chains()
+
+                # 将数据存入缓存
+                self.historical_data_cache.set(cache_key, chains, cache_interval)
+                logger.info(f"已将{len(chains)}个链数据存入缓存")
+
+            # 查找特定链
+            for c in chains:
+                if chain.lower() == c.get("name", "").lower():
+                    tvl = c.get("tvl", 0)
+                    logger.info(f"获取到{chain}链的TVL: {tvl}")
+                    return float(tvl)
+
+            logger.warning(f"未找到{chain}链的TVL数据")
+            return 0.0
+        except Exception as e:
+            logger.error(f"获取链TVL失败: {e}")
+            return 0.0
+
+    async def analyze_protocol_risk(self, protocol: str) -> Dict[str, Any]:
+        """分析协议的风险指标
+
+        Args:
+            protocol: 协议名称
+
+        Returns:
+            Dict: 协议的风险分析结果
+        """
+        try:
+            # 获取协议的基本信息
+            protocol_info = await self.get_protocol_info(protocol)
+            if not protocol_info:
+                return {"error": f"未找到{protocol}协议的信息"}
+
+            # 获取协议的TVL
+            tvl = await self.get_protocol_tvl(protocol)
+
+            # 获取协议的历史TVL
+            historical_tvl = await self.get_protocol_historical_tvl(protocol)
+
+            # 计算TVL稳定性
+            tvl_stability = 0
+            if historical_tvl and len(historical_tvl) > 30:
+                recent_tvl = [item.get("tvl", 0) for item in historical_tvl[-30:]]
+                if len(recent_tvl) > 0 and sum(recent_tvl) > 0:
+                    tvl_std = np.std(recent_tvl)
+                    tvl_mean = np.mean(recent_tvl)
+                    tvl_stability = 1 - min(1, tvl_std / tvl_mean)
+
+            # 获取协议的审计状态
+            audit_status = await self.get_protocol_audit_status(protocol)
+
+            # 根据各项指标计算综合风险评分
+            risk_score = 0
+            max_score = 0
+
+            # TVL因素 (TVL越高，风险越低)
+            if tvl > 0:
+                tvl_score = min(5, np.log10(tvl) - 5)  # 假设TVL在1亿以上为低风险
+                risk_score += tvl_score
+                max_score += 5
+
+            # TVL稳定性因素
+            if tvl_stability > 0:
+                stability_score = tvl_stability * 3
+                risk_score += stability_score
+                max_score += 3
+
+            # 审计因素
+            if audit_status.get("audited", False):
+                audit_score = audit_status.get("audit_score", 0) / 20  # 满分5分
+                risk_score += audit_score
+                max_score += 5
+
+            # 规范化风险分数 (0-100，越高表示风险越低)
+            normalized_risk_score = 0
+            if max_score > 0:
+                normalized_risk_score = (risk_score / max_score) * 100
+
+            # 风险等级
+            risk_level = "高"
+            if normalized_risk_score >= 80:
+                risk_level = "极低"
+            elif normalized_risk_score >= 60:
+                risk_level = "低"
+            elif normalized_risk_score >= 40:
+                risk_level = "中"
+            elif normalized_risk_score >= 20:
+                risk_level = "高"
+
+            return {
+                "protocol": protocol,
+                "tvl": tvl,
+                "tvl_stability": tvl_stability * 100,  # 转换为百分比
+                "audit_status": audit_status,
+                "risk_score": normalized_risk_score,
+                "risk_level": risk_level,
+                "analysis": {
+                    "tvl_factor": f"TVL为{tvl:,.2f}美元，"
+                    + (
+                        "较高"
+                        if tvl > 100000000
+                        else "中等" if tvl > 10000000 else "较低"
+                    ),
+                    "stability_factor": f"TVL稳定性为{tvl_stability*100:.2f}%，"
+                    + (
+                        "很稳定"
+                        if tvl_stability > 0.8
+                        else "较稳定" if tvl_stability > 0.5 else "波动较大"
+                    ),
+                    "audit_factor": (
+                        "已通过专业审计"
+                        if audit_status.get("audited", False)
+                        else "未经专业审计或缺乏审计信息"
+                    ),
+                    "recommendation": f"综合评估，{protocol}协议的风险等级为{risk_level}，"
+                    + (
+                        "建议可以适量配置"
+                        if normalized_risk_score >= 60
+                        else (
+                            "建议谨慎参与"
+                            if normalized_risk_score >= 40
+                            else "建议避免参与或严格控制仓位"
+                        )
+                    ),
+                },
+            }
+        except Exception as e:
+            logger.error(f"分析协议风险失败: {e}")
+            return {"error": f"分析协议风险时出错: {str(e)}"}
 
     async def get_market_alerts(self, address: str) -> List[Dict]:
         """获取市场警报"""
@@ -1032,6 +1359,33 @@ class BlockchainService:
         params = {
             "symbol": asset,
         }
+
+        # 返回的数据结构
+        """
+        {
+  "symbol": "ETHBTC",
+  "priceChange": "-0.00015000",
+  "priceChangePercent": "-0.651",
+  "weightedAvgPrice": "0.02282925",
+  "prevClosePrice": "0.02303000",
+  "lastPrice": "0.02288000",
+  "lastQty": "2.86990000",
+  "bidPrice": "0.02288000",
+  "bidQty": "38.02750000",
+  "askPrice": "0.02289000",
+  "askQty": "90.67380000",
+  "openPrice": "0.02303000",
+  "highPrice": "0.02312000",
+  "lowPrice": "0.02259000",
+  "volume": "18407.29140000",
+  "quoteVolume": "420.22466190",
+  "openTime": 1741939103309,
+  "closeTime": 1742025503309,
+  "firstId": 490763962,
+  "lastId": 490807101,
+  "count": 43140
+}
+        """
 
         try:
             response = requests.get(url, params=params, proxies=proxies)
