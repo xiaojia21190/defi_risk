@@ -14,7 +14,7 @@ class PositionSchema(BaseModel):
     invest_type_name: Optional[str] = None
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "protocol": "Aave",
                 "asset": "ETH",
@@ -33,7 +33,7 @@ class PortfolioRequest(BaseModel):
     positions: Optional[List[PositionSchema]] = None
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "wallet_address": "0x1234...",
                 "positions": [

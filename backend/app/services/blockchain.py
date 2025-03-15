@@ -28,7 +28,7 @@ logger = logging.getLogger("defi_risk.blockchain_service")
 # 设置代理
 proxies = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
 
-from dfllama import DefiLlamaClient, Coin
+from defillama import DefiLlama
 
 
 class HistoricalDataCache:
@@ -151,6 +151,7 @@ class PlatformAsset:
     amount: float
     invest_type: int
     apy: Optional[float] = None
+    tokenList: Optional[List[Dict[str, Any]]] = None
 
 
 @dataclass
@@ -173,12 +174,12 @@ class BlockchainService:
         self.proxy_url = settings.PROXY_URL
         self.logger = logger
         self.historical_data_cache = HistoricalDataCache()
-        self.defi_llama_client = DefiLlamaClient()
+        self.defi_llama_client = DefiLlama()
         # OKX API 配置
         self.okx_api_config = {
-            "api_key": "",
-            "secret_key": "",
-            "passphrase": "",
+            "api_key": "af83a6eb-080f-4287-af07-a5038a75f552",
+            "secret_key": "52BCC8FDDA57E991F917C58DE9A3186F",
+            "passphrase": "Jiashuai2190@",
             "project": "",  # 此处仅适用于 WaaS APIs
         }
         # OKX API 基础 URL
@@ -318,61 +319,6 @@ class BlockchainService:
             self.logger.error(f"获取代币余额失败: {str(e)}")
             return 0.0
 
-    async def get_protocol_positions(
-        self, wallet_address: str, protocol: str
-    ) -> List[Dict[str, Any]]:
-        """
-        获取钱包在特定协议中的头寸
-
-        Args:
-            wallet_address: 钱包地址
-            protocol: 协议名称
-
-        Returns:
-            头寸列表
-        """
-        try:
-            # 这里应该调用特定协议的API或合约
-            # 现在使用模拟数据
-            if protocol.lower() == "aave":
-                return [
-                    {
-                        "protocol": "Aave",
-                        "asset": "ETH",
-                        "amount": 2.5,
-                        "apy": 3.2,
-                        "invest_type": 6,
-                        "invest_type_name": "借贷",
-                    }
-                ]
-            elif protocol.lower() == "uniswap":
-                return [
-                    {
-                        "protocol": "Uniswap",
-                        "asset": "ETH/USDC",
-                        "amount": 5000,
-                        "apy": 15.8,
-                        "invest_type": 2,
-                        "invest_type_name": "流动性池",
-                    }
-                ]
-            elif protocol.lower() == "curve":
-                return [
-                    {
-                        "protocol": "Curve",
-                        "asset": "USDC/USDT/DAI",
-                        "amount": 10000,
-                        "apy": 5.5,
-                        "invest_type": 2,
-                        "invest_type_name": "流动性池",
-                    }
-                ]
-            else:
-                return []
-        except Exception as e:
-            self.logger.error(f"获取协议头寸失败: {str(e)}")
-            return []
-
     async def get_all_positions(self, wallet_address: str) -> List[Dict[str, Any]]:
         """
         获取钱包在所有协议中的头寸
@@ -441,23 +387,9 @@ class BlockchainService:
 
             # 如果OKX API获取失败，回退到基础方法
             self.logger.info("使用基础方法获取有限的协议头寸数据")
-            # 支持的协议列表
-            protocols = ["Aave", "Uniswap", "Curve", "Compound", "MakerDAO"]
-
-            # 并行获取所有协议的头寸
-            tasks = []
-            for protocol in protocols:
-                tasks.append(self.get_protocol_positions(wallet_address, protocol))
-
-            # 等待所有任务完成
-            results = await asyncio.gather(*tasks)
-
             # 合并结果
             all_positions = []
-            for positions in results:
-                all_positions.extend(positions)
 
-            self.logger.info(f"使用基础方法获取到 {len(all_positions)} 个头寸")
             return all_positions
         except Exception as e:
             self.logger.error(f"获取所有头寸失败: {str(e)}")
@@ -706,15 +638,50 @@ class BlockchainService:
                                         total_value = float(
                                             invest_token.get("totalValue", "0")
                                         )
-
                                         # 创建头寸对象
                                         position = PlatformAsset(
                                             protocol=platform_name,
                                             asset=investment_name,
+                                            tokenList=[],
                                             amount=total_value,
                                             invest_type=invest_type,
                                             apy=None,
                                         )
+                                        if invest_type == 2:
+                                            # 流动性池
+                                            posi
+                                            pass
+                                        else:
+                                            assets = invest_token.get(
+                                                "assetsTokenList", []
+                                            )
+                                            for asset in assets:
+                                                tokenSymbol = asset.get(
+                                                    "tokenSymbol", ""
+                                                )
+                                                tokenLogo = asset.get("tokenLogo", "")
+                                                coinAmount = asset.get("coinAmount", "")
+                                                currencyAmount = asset.get(
+                                                    "currencyAmount", ""
+                                                )
+                                                tokenPrecision = asset.get(
+                                                    "tokenPrecision", ""
+                                                )
+                                                tokenAddress = asset.get(
+                                                    "tokenAddress", ""
+                                                )
+                                                network = asset.get("network", "")
+                                                position.tokenList.append(
+                                                    {
+                                                        "tokenSymbol": tokenSymbol,
+                                                        "tokenLogo": tokenLogo,
+                                                        "coinAmount": coinAmount,
+                                                        "currencyAmount": currencyAmount,
+                                                        "tokenPrecision": tokenPrecision,
+                                                        "tokenAddress": tokenAddress,
+                                                        "network": network,
+                                                    }
+                                                )
 
                                         # 更新平台资产统计
                                         if invest_type == 6:  # 借贷
@@ -799,22 +766,22 @@ class BlockchainService:
             else:
                 logger.info("从DefiLlama API获取池数据")
                 # 创建DefiLlama客户端并获取池数据
-                client = DefiLlamaClient()
-                pools = client.get_pools()
+                pools = self.defi_llama_client.get_pools()
 
                 # 将数据存入缓存
                 self.historical_data_cache.set(cache_key, pools, cache_interval)
                 logger.info(f"已将{len(pools)}个池数据存入缓存")
 
             # 处理池数据
-            for pool in pools:
+            for pool in pools.get("data", []):
                 if (
                     pool.get("chain") == "Ethereum"
                     and protocol.lower() == pool.get("protocol", "").lower()
                 ):
                     pool_symbol = pool.get("symbol", "")
+                    # 添加检查，确保apy不为None
                     apy = pool.get("apy")
-                    if symbol.lower() in pool_symbol.lower():
+                    if apy is not None and symbol.lower() in pool_symbol.lower():
                         rApy = apy
                         break
 
@@ -1072,6 +1039,36 @@ class BlockchainService:
             self.logger.error(f"获取资产历史数据失败: {str(e)}")
             return {}
 
+    # 获取 get_protocol 作缓存
+    async def get_protocol(self, protocol: str) -> float:
+        """
+        获取协议的详细信息
+
+        Args:
+            protocol: 协议名称
+
+        Returns:
+            协议的详细信息
+        """
+        try:
+            # 检查缓存
+            cache_key = f"protocol_{protocol}"
+            cache_interval = "1h"
+            cached_protocol = self.historical_data_cache.get(cache_key, cache_interval)
+
+            if cached_protocol is not None:
+                self.logger.info(f"从缓存获取{protocol}的详细信息")
+                return cached_protocol
+
+            if protocol == "Pendle V2":
+                protocol = "Pendle"
+            protocol = self.defi_llama_client.get_protocol(protocol)
+            self.historical_data_cache.set(cache_key, protocol, cache_interval)
+            return protocol
+        except Exception as e:
+            self.logger.error(f"获取协议的详细信息失败: {str(e)}")
+            return 0.0
+
     async def get_protocol_tvl(self, protocol: str) -> float:
         """
         获取协议的TVL
@@ -1092,9 +1089,11 @@ class BlockchainService:
                 self.logger.info(f"从缓存获取{protocol}的TVL数据")
                 return cached_tvl
 
-            # 这里应该调用DeFiLlama或类似的API
+            if protocol == "Pendle V2":
+                protocol = "Pendle"
 
-            tvl = await self.defi_llama_client.get_current_tvl_for_protocol(protocol)
+            # 这里应该调用DeFiLlama或类似的API
+            tvl = self.defi_llama_client.get_protocol_current_tvl(protocol)
 
             # 存入缓存
             self.historical_data_cache.set(cache_key, tvl, cache_interval)
@@ -1125,7 +1124,7 @@ class BlockchainService:
                 return cached_data
 
             # 获取协议数据
-            protocol_data = await self.defi_llama_client.get_protocol(protocol)
+            protocol_data = await self.get_protocol(protocol)
 
             # 提取历史TVL数据
             historical_tvl = protocol_data.get("tvl", [])
@@ -1173,7 +1172,7 @@ class BlockchainService:
 
             # 从DefiLlama API获取协议数据
             self.logger.info(f"从DefiLlama API获取{protocol}的审计状态")
-            protocol_data = await self.defi_llama_client.get_protocol(protocol)
+            protocol_data = await self.get_protocol(protocol)
 
             if not protocol_data:
                 self.logger.warning(f"DefiLlama API未返回{protocol}的数据")
@@ -1307,7 +1306,7 @@ class BlockchainService:
         """
         try:
             # 获取完整的协议数据
-            protocol_data = await self.defi_llama_client.get_protocol(protocol)
+            protocol_data = await self.get_protocol(protocol)
 
             # 提取基本信息
             protocol_name = protocol_data.get("name", protocol)
@@ -1315,10 +1314,18 @@ class BlockchainService:
             protocol_chains = protocol_data.get("chains", [])
 
             # 获取当前TVL
-            tvl = await self.get_protocol_tvl(protocol)
-
+            tvl = protocol_data.get("tvl", [])[0].get("totalLiquidityUSD", 0)
             # 获取历史TVL数据
-            historical_tvl = await self.get_protocol_historical_tvl(protocol)
+            historical_tvl = protocol_data.get("tvl", [])
+            formatted_data = []
+            for item in historical_tvl:
+                formatted_data.append(
+                    {
+                        "date": datetime.fromtimestamp(item.get("date", 0)),
+                        "tvl": item.get("totalLiquidityUSD", 0),
+                    }
+                )
+            historical_tvl = formatted_data
 
             # 提取审计信息
             audit_count = int(protocol_data.get("audits", 0))

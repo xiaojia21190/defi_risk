@@ -17,6 +17,7 @@ class RiskEngine:
         self.risk_weights = settings.RISK_WEIGHTS
         self.blockchain_service = blockchain_service
         self.ai_predictor = AiPredictor()
+        self.ai_service = None  # 初始化ai_service属性
 
     def register_analyzer(self, risk_type: str, analyzer):
         """
@@ -29,6 +30,14 @@ class RiskEngine:
         self.logger.info(
             f"注册风险分析器: {risk_type} -> {analyzer.__class__.__name__}"
         )
+        # 设置AI服务和预测器
+        if hasattr(analyzer, "ai_service") and self.ai_service:
+            analyzer.ai_service = self.ai_service
+        if hasattr(analyzer, "ai_predictor") and self.ai_predictor:
+            analyzer.ai_predictor = self.ai_predictor
+        if hasattr(analyzer, "blockchain_service") and self.blockchain_service:
+            analyzer.blockchain_service = self.blockchain_service
+
         self.risk_analyzers[risk_type] = analyzer
 
     async def analyze_wallet_risk(self, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -574,3 +583,85 @@ class RiskEngine:
                 for k, v in sorted(assets.items(), key=lambda x: x[1], reverse=True)[:5]
             ],
         }
+
+    async def _analyze_protocol_security(self, protocol: str) -> Optional[RiskFactor]:
+        """分析协议安全风险"""
+        try:
+            # 使用AI预测器分析协议风险
+            if self.ai_predictor:
+                protocol_data = {
+                    "protocol_metadata": {"name": protocol},
+                    "basic_analysis": {},
+                    "historical_tvl": [],
+                    "chain_distribution": {},
+                }
+
+                # 如果有区块链服务，获取更多数据
+                if self.blockchain_service:
+                    try:
+                        # 获取协议TVL
+                        tvl = await self.blockchain_service.get_protocol_tvl(protocol)
+                        protocol_data["basic_analysis"]["tvl"] = tvl
+
+                        # 获取协议历史TVL
+                        historical_tvl = (
+                            await self.blockchain_service.get_protocol_historical_tvl(
+                                protocol
+                            )
+                        )
+                        protocol_data["historical_tvl"] = historical_tvl
+
+                        # 获取协议审计状态
+                        audit_status = (
+                            await self.blockchain_service.get_protocol_audit_status(
+                                protocol
+                            )
+                        )
+                        protocol_data["basic_analysis"]["audit_status"] = audit_status
+                    except Exception as e:
+                        self.logger.error(f"获取协议数据时出错: {str(e)}")
+
+                # 使用AI预测器分析
+                analysis = self.ai_predictor.analyze_defi_protocol_risk(protocol_data)
+
+                # 提取安全风险评分
+                security_score = analysis.get("risk_metrics", {}).get(
+                    "security_risk", 50
+                )
+
+                # 生成描述
+                description = f"{protocol}协议安全风险评分: {security_score}"
+                if "recommendations" in analysis:
+                    description += f"。建议: {analysis['recommendations'][0] if analysis['recommendations'] else ''}"
+
+                # 确定趋势
+                trend = "稳定"
+
+                return self.create_risk_factor(
+                    risk_type="PROTOCOL",
+                    factor_name="协议安全性",
+                    score=security_score,
+                    weight=0.4,
+                    description=description,
+                    trend=trend,
+                    data_points=[
+                        {"protocol": protocol, "security_score": security_score}
+                    ],
+                    metadata=analysis,
+                )
+
+            # 如果没有AI预测器，使用现有的硬编码逻辑
+            # 现有代码保持不变...
+
+        except Exception as e:
+            self.logger.error(f"分析协议安全风险时出错: {str(e)}")
+            # 返回默认风险因子
+            return self.create_risk_factor(
+                risk_type="PROTOCOL",
+                factor_name="协议安全性",
+                score=70,  # 默认高风险
+                weight=0.4,
+                description=f"{protocol}协议安全风险分析失败",
+                trend="稳定",
+                data_points=[{"protocol": protocol, "security_score": 70}],
+            )

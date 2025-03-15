@@ -1,5 +1,6 @@
 # AI预测器服务
 
+import httpx
 import pandas as pd
 import numpy as np
 import logging
@@ -21,8 +22,13 @@ class AiPredictor:
         # 初始化OpenAI客户端
         self.client = None
         try:
+            client_http = httpx.Client(proxy="http://127.0.0.1:7890")
             if settings.OPENAI_API_KEY:
-                self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+                self.client = OpenAI(
+                    api_key=settings.OPENAI_API_KEY,
+                    base_url=settings.OPENAI_API_URL,
+                    http_client=client_http,
+                )
                 self.logger.info("OpenAI客户端初始化成功")
             else:
                 self.logger.warning("未设置OpenAI API密钥，AI预测功能将受限")

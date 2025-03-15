@@ -1,30 +1,26 @@
 import os
 from typing import Dict, Any, Optional
-from pydantic import BaseSettings, Field
+from pydantic import Field
 
 
-class Settings(BaseSettings):
+class Settings:
     """应用配置设置"""
 
     # 应用设置
     APP_NAME: str = "DeFi风险分析API"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = Field(default=False, env="DEBUG")
+    DEBUG: bool = os.getenv("DEBUG")
 
     # API设置
     API_PREFIX: str = "/api/v1"
 
     # 区块链设置
-    WEB3_PROVIDER_URL: str = Field(
-        default="https://eth-sepolia.g.alchemy.com/v2/8GHYFBqZcX9OEuKkgB1N3u1RDPBYy9Mm",
-        env="WEB3_PROVIDER_URL",
-    )
+    WEB3_PROVIDER_URL: str = os.getenv("WEB3_PROVIDER_URL")
 
     # AI设置
-    OPENAI_API_KEY: str = Field(default="", env="OPENAI_API_KEY")
-    OPENAI_API_URL: str = Field(
-        default="https://api.openai.com/v1", env="OPENAI_API_URL"
-    )
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
+    OPENAI_API_URL: str = os.getenv("OPENAI_API_URL")
+
     AI_MODEL: str = Field(default="gpt-4", env="AI_MODEL")
 
     # 代理设置

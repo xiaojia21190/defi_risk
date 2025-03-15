@@ -100,73 +100,136 @@ class SmartContractRiskAnalyzer(RiskAnalyzerBase):
         self, protocols: Dict[str, float]
     ) -> Optional[RiskFactor]:
         """分析审计风险"""
-        # 这里应该调用区块链服务获取协议的审计状态
-        # 现在使用模拟数据
+        try:
+            # 如果没有协议，返回None
+            if not protocols:
+                return None
 
-        # 预定义的审计评分（0-100，越低越安全）
-        audit_scores = {
-            "Aave": 10,  # 低风险，多次审计
-            "Compound": 15,  # 低风险，多次审计
-            "Uniswap": 20,  # 低风险，多次审计
-            "Curve": 25,  # 低风险，多次审计
-            "MakerDAO": 20,  # 低风险，多次审计
-            "SushiSwap": 40,  # 中等风险，有审计但较少
-            "Balancer": 35,  # 中等风险，有审计但较少
-            "Yearn": 30,  # 中等风险，有审计但较少
-            "PancakeSwap": 45,  # 中等风险，有审计但较少
-            "dYdX": 30,  # 中等风险，有审计但较少
-            "Synthetix": 35,  # 中等风险，有审计但较少
-            "1inch": 40,  # 中等风险，有审计但较少
-            "Bancor": 50,  # 中高风险，审计较少
-            "Cream": 60,  # 中高风险，审计较少
-            "Alpha": 65,  # 中高风险，审计较少
-            "BarnBridge": 70,  # 高风险，审计很少
-            "Harvest": 75,  # 高风险，审计很少
-            "Badger": 65,  # 中高风险，审计较少
-            "ForTube": 80,  # 高风险，审计很少或没有
-            "AnySwap": 85,  # 高风险，审计很少或没有
-        }
+            # 使用AI服务分析审计风险
+            if self.ai_service:
+                try:
+                    # 准备上下文数据
+                    context = {
+                        "protocols": [
+                            {"name": protocol, "amount": amount}
+                            for protocol, amount in protocols.items()
+                        ],
+                        "analysis_type": "audit_risk",
+                    }
 
-        # 计算加权审计评分
-        total_value = sum(protocols.values())
-        if total_value == 0:
-            return None
+                    # 调用AI服务
+                    analysis = await self.ai_service.analyze_with_predictor(
+                        analysis_type="protocol_risk",
+                        data={"protocols": list(protocols.keys())},
+                    )
 
-        weighted_score = 0
-        for protocol, amount in protocols.items():
-            score = audit_scores.get(protocol, 70)  # 默认为中高风险
-            weighted_score += score * (amount / total_value)
+                    # 提取审计风险评分
+                    audit_risk_score = analysis.supporting_data.get(
+                        "risk_metrics", {}
+                    ).get("audit_risk", 50)
 
-        # 根据加权评分评估风险
-        if weighted_score > 70:
-            description = "投资组合中的协议大多缺乏充分的安全审计，存在高安全风险"
-            trend = "上升"
-        elif weighted_score > 50:
-            description = "投资组合中的部分协议审计不足，存在中等安全风险"
-            trend = "稳定"
-        elif weighted_score > 30:
-            description = "投资组合中的协议大多经过审计，但仍有一定安全风险"
-            trend = "稳定"
-        else:
-            description = "投资组合中的协议大多经过多次审计，安全风险相对较低"
-            trend = "下降"
+                    # 提取洞察
+                    insights = analysis.insights
+                    description = insights[0] if insights else "智能合约审计风险分析"
 
-        return self.create_risk_factor(
-            risk_type="SMART_CONTRACT",
-            factor_name="审计状态",
-            score=weighted_score,
-            weight=0.4,
-            description=description,
-            trend=trend,
-            data_points=[
-                {
-                    "protocol": protocol,
-                    "amount": amount,
-                    "audit_score": audit_scores.get(protocol, 70),
-                }
-                for protocol, amount in protocols.items()
-            ],
-        )
+                    # 提取建议
+                    recommendations = analysis.recommendations
+
+                    return self.create_risk_factor(
+                        risk_type="SMART_CONTRACT",
+                        factor_name="审计状态",
+                        score=audit_risk_score,
+                        weight=0.4,
+                        description=description,
+                        trend="稳定",
+                        data_points=[
+                            {"protocol": protocol, "amount": amount}
+                            for protocol, amount in protocols.items()
+                        ],
+                        metadata={"recommendations": recommendations},
+                    )
+                except Exception as e:
+                    self.logger.error(f"使用AI服务分析审计风险时出错: {str(e)}")
+                    # 继续使用硬编码逻辑
+
+            # 如果没有AI服务或分析失败，使用现有的硬编码逻辑
+            # 预定义的审计评分（0-100，越低越安全）
+            audit_scores = {
+                "Aave": 10,  # 低风险，多次审计
+                "Compound": 15,  # 低风险，多次审计
+                "Uniswap": 20,  # 低风险，多次审计
+                "Curve": 25,  # 低风险，多次审计
+                "MakerDAO": 20,  # 低风险，多次审计
+                "SushiSwap": 40,  # 中等风险，有审计但较少
+                "Balancer": 35,  # 中等风险，有审计但较少
+                "Yearn": 30,  # 中等风险，有审计但较少
+                "PancakeSwap": 45,  # 中等风险，有审计但较少
+                "dYdX": 30,  # 中等风险，有审计但较少
+                "Synthetix": 35,  # 中等风险，有审计但较少
+                "1inch": 40,  # 中等风险，有审计但较少
+                "Bancor": 50,  # 中高风险，审计较少
+                "Cream": 60,  # 中高风险，审计较少
+                "Alpha": 65,  # 中高风险，审计较少
+                "BarnBridge": 70,  # 高风险，审计很少
+                "Harvest": 75,  # 高风险，审计很少
+                "Badger": 65,  # 中高风险，审计较少
+                "ForTube": 80,  # 高风险，审计很少或没有
+                "AnySwap": 85,  # 高风险，审计很少或没有
+            }
+
+            # 计算加权审计评分
+            total_value = sum(protocols.values())
+            if total_value == 0:
+                return None
+
+            weighted_score = 0
+            for protocol, amount in protocols.items():
+                score = audit_scores.get(protocol, 70)  # 默认为中高风险
+                weighted_score += score * (amount / total_value)
+
+            # 根据加权评分评估风险
+            if weighted_score > 70:
+                description = "投资组合中的协议大多缺乏充分的安全审计，存在高安全风险"
+                trend = "上升"
+            elif weighted_score > 50:
+                description = "投资组合中的部分协议审计不足，存在中等安全风险"
+                trend = "稳定"
+            elif weighted_score > 30:
+                description = "投资组合中的协议大多经过审计，但仍有一定安全风险"
+                trend = "稳定"
+            else:
+                description = "投资组合中的协议大多经过多次审计，安全风险相对较低"
+                trend = "下降"
+
+            return self.create_risk_factor(
+                risk_type="SMART_CONTRACT",
+                factor_name="审计状态",
+                score=weighted_score,
+                weight=0.4,
+                description=description,
+                trend=trend,
+                data_points=[
+                    {
+                        "protocol": protocol,
+                        "amount": amount,
+                        "audit_score": audit_scores.get(protocol, 70),
+                    }
+                    for protocol, amount in protocols.items()
+                ],
+            )
+
+        except Exception as e:
+            self.logger.error(f"分析审计风险时出错: {str(e)}")
+            # 返回默认风险因子
+            return self.create_risk_factor(
+                risk_type="SMART_CONTRACT",
+                factor_name="审计状态",
+                score=70,  # 默认高风险
+                weight=0.4,
+                description="智能合约审计风险分析失败，使用默认高风险评分",
+                trend="稳定",
+                data_points=[],
+            )
 
     async def _analyze_code_quality_risk(
         self, protocols: Dict[str, float]

@@ -113,33 +113,3 @@ async def analyze_protocol_risk(
     except Exception as e:
         logger.error(f"分析协议风险时出错: {str(e)}")
         raise HTTPException(status_code=500, detail=f"分析协议风险失败: {str(e)}")
-
-
-@router.get("/positions/{wallet_address}/{protocol_name}")
-async def get_protocol_positions(
-    wallet_address: str,
-    protocol_name: str,
-    blockchain_service: BlockchainService = Depends(get_blockchain_service),
-):
-    """
-    获取钱包在特定协议中的头寸
-
-    - **wallet_address**: 钱包地址
-    - **protocol_name**: 协议名称
-    """
-    try:
-        logger.info(f"收到协议头寸请求: {wallet_address}, 协议: {protocol_name}")
-
-        # 获取协议头寸
-        positions = await blockchain_service.get_protocol_positions(
-            wallet_address, protocol_name
-        )
-
-        return {
-            "wallet_address": wallet_address,
-            "protocol": protocol_name,
-            "positions": positions,
-        }
-    except Exception as e:
-        logger.error(f"获取协议头寸时出错: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"获取协议头寸失败: {str(e)}")

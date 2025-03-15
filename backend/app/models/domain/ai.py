@@ -40,10 +40,10 @@ class AiRecommendation:
 class AiAnalysis:
     """AI分析结果"""
 
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
     analysis_type: str  # 分析类型
-    timestamp: datetime = field(default_factory=datetime.utcnow)
     confidence: float  # 总体置信度
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: datetime = field(default_factory=datetime.utcnow)
     predictions: List[AiPrediction] = field(default_factory=list)  # 预测列表
     insights: List[str] = field(default_factory=list)  # 洞察列表
     recommendations: List[str] = field(default_factory=list)  # 建议列表

@@ -33,6 +33,9 @@ def init_risk_engine() -> RiskEngine:
     # 创建AI服务
     ai_service = AiService()
 
+    # 设置风险引擎的AI服务
+    risk_engine.ai_service = ai_service
+
     # 创建区块链服务
     blockchain_service = BlockchainService()
 

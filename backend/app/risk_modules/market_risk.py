@@ -187,34 +187,123 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
         self, positions: List[Dict[str, Any]]
     ) -> Optional[RiskFactor]:
         """分析市场趋势风险"""
-        # 这里应该调用AI预测器获取市场趋势预测
-        # 现在使用模拟数据
+        try:
+            # 如果没有头寸，返回None
+            if not positions:
+                return None
 
-        # 假设我们有一个趋势评分（0-100，越高表示下跌趋势越强）
-        trend_score = 40  # 轻微下跌趋势
+            # 提取资产
+            assets = set()
+            for pos in positions:
+                asset = pos.get("asset", "").split("/")[0]
+                if asset:
+                    assets.add(asset)
 
-        if trend_score > 75:
-            description = "市场处于强烈下跌趋势，短期内可能继续下跌"
-            trend = "上升"
-        elif trend_score > 50:
-            description = "市场处于下跌趋势，需要谨慎操作"
-            trend = "上升"
-        elif trend_score > 25:
-            description = "市场趋势不明确，可能出现波动"
-            trend = "稳定"
-        else:
-            description = "市场处于上升趋势，风险相对较低"
-            trend = "下降"
+            # 如果没有资产，返回None
+            if not assets:
+                return None
 
-        return self.create_risk_factor(
-            risk_type="MARKET",
-            factor_name="市场趋势",
-            score=trend_score,
-            weight=0.2,
-            description=description,
-            trend=trend,
-            data_points=[{"trend_score": trend_score}],
-        )
+            # 计算总体趋势风险
+            trend_risk_score = 0
+            asset_trends = {}
+
+            # 使用AI预测器分析每个资产的市场趋势
+            if self.ai_predictor:
+                for asset in assets:
+                    try:
+                        # 使用AI预测器分析市场趋势
+                        trend_analysis = self.ai_predictor.analyze_market_trend(
+                            asset=asset
+                        )
+
+                        # 提取趋势信息
+                        trend = trend_analysis.get("trend", "neutral")
+                        trend_strength = trend_analysis.get(
+                            "trend_strength", "moderate"
+                        )
+                        risk_level = trend_analysis.get("risk_level", "MEDIUM")
+
+                        # 计算趋势风险评分
+                        if trend == "bearish":
+                            if trend_strength == "strong":
+                                asset_score = 80
+                            elif trend_strength == "moderate":
+                                asset_score = 60
+                            else:
+                                asset_score = 40
+                        elif trend == "bullish":
+                            if trend_strength == "strong":
+                                asset_score = 20
+                            elif trend_strength == "moderate":
+                                asset_score = 30
+                            else:
+                                asset_score = 40
+                        else:  # neutral
+                            asset_score = 50
+
+                        # 保存资产趋势信息
+                        asset_trends[asset] = {
+                            "trend": trend,
+                            "strength": trend_strength,
+                            "risk_level": risk_level,
+                            "score": asset_score,
+                        }
+
+                        # 累加趋势风险评分
+                        trend_risk_score += asset_score
+                    except Exception as e:
+                        self.logger.error(f"分析{asset}市场趋势时出错: {str(e)}")
+                        # 使用默认评分
+                        asset_trends[asset] = {
+                            "trend": "neutral",
+                            "strength": "moderate",
+                            "risk_level": "MEDIUM",
+                            "score": 50,
+                        }
+                        trend_risk_score += 50
+
+            # 计算平均趋势风险评分
+            if assets:
+                trend_risk_score /= len(assets)
+
+            # 生成描述
+            if trend_risk_score > 70:
+                description = "投资组合中的资产整体呈现强烈下跌趋势，市场风险较高"
+                trend = "上升"
+            elif trend_risk_score > 50:
+                description = "投资组合中的资产整体呈现轻微下跌趋势，市场风险中等"
+                trend = "稳定"
+            elif trend_risk_score > 30:
+                description = "投资组合中的资产整体呈现轻微上涨趋势，市场风险中等"
+                trend = "稳定"
+            else:
+                description = "投资组合中的资产整体呈现强烈上涨趋势，市场风险较低"
+                trend = "下降"
+
+            return self.create_risk_factor(
+                risk_type="MARKET",
+                factor_name="市场趋势",
+                score=trend_risk_score,
+                weight=0.3,
+                description=description,
+                trend=trend,
+                data_points=[
+                    {"asset": asset, **data} for asset, data in asset_trends.items()
+                ],
+            )
+
+        except Exception as e:
+            self.logger.error(f"分析市场趋势风险时出错: {str(e)}")
+            # 返回默认风险因子
+            return self.create_risk_factor(
+                risk_type="MARKET",
+                factor_name="市场趋势",
+                score=50,  # 默认中等风险
+                weight=0.3,
+                description="市场趋势分析失败，使用默认中等风险评分",
+                trend="稳定",
+                data_points=[],
+            )
 
     async def _analyze_correlation_risk(
         self, positions: List[Dict[str, Any]]

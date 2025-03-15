@@ -2,19 +2,22 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
 import logging
 from app.models.domain.risk import RiskFactor, RiskAssessment
+from app.services.ai_predictor import AiPredictor
 
 
 class RiskAnalyzerBase(ABC):
     """风险分析器基类"""
 
-    def __init__(self, ai_predictor=None, blockchain_service=None):
+    def __init__(self, ai_service=None, ai_predictor=None, blockchain_service=None):
         """
         初始化风险分析器
 
         Args:
+            ai_service: AI服务实例
             ai_predictor: AI预测器实例
             blockchain_service: 区块链服务实例
         """
+        self.ai_service = ai_service
         self.ai_predictor = ai_predictor
         self.blockchain_service = blockchain_service
         self.logger = logging.getLogger(f"defi_risk.{self.__class__.__name__}")
