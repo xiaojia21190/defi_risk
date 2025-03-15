@@ -1502,3 +1502,263 @@ TVL分析：
             "asset": asset,
             "note": "基础风险分析（AI分析不可用）",
         }
+
+    def analyze_protocol_risk_from_position(self, position) -> Dict:
+        """
+        直接从Position对象分析DeFi协议风险
+
+        Args:
+            position: Position对象，包含protocol、asset、amount等信息
+
+        Returns:
+            Dict: 包含风险分析结果的字典
+        """
+        try:
+            protocol_name = position.protocol
+            logger.info(f"从Position对象分析协议风险: {protocol_name}")
+
+            # 调用现有的协议风险分析函数
+            risk_analysis = self.analyze_defi_protocol_risk(protocol_name)
+
+            # 添加Position相关信息到分析结果
+            risk_analysis["position_info"] = {
+                "asset": position.asset,
+                "amount": position.amount,
+                "apy": position.apy,
+            }
+
+            # 如果Position包含invest_type，添加投资类型风险分析
+            if position.invest_type is not None:
+                invest_type_name = self._get_invest_type_name(position.invest_type)
+                investment_risk = self.analyze_investment_type_risk_from_position(
+                    position, invest_type_name
+                )
+                risk_analysis["investment_type_risk"] = investment_risk
+
+            return risk_analysis
+
+        except Exception as e:
+            logger.error(f"从Position分析协议风险时出错: {e}")
+            return self._get_basic_protocol_risk_analysis(position.protocol)
+
+    def _get_invest_type_name(self, invest_type: int) -> str:
+        """获取投资类型名称"""
+        invest_type_names = {
+            1: "存币",
+            2: "流动性池",
+            3: "挖矿",
+            4: "机枪池",
+            5: "质押",
+            6: "借贷",
+        }
+        return invest_type_names.get(invest_type, "未知投资类型")
+
+    def analyze_investment_type_risk_from_position(
+        self, position, invest_type_name: str = None
+    ) -> Dict:
+        """
+        从Position对象分析特定投资类型的风险
+
+        Args:
+            position: Position对象
+            invest_type_name: 投资类型名称，如果为None则自动获取
+
+        Returns:
+            Dict: 包含风险分析结果的字典
+        """
+        if invest_type_name is None:
+            invest_type_name = self._get_invest_type_name(position.invest_type)
+
+        return self.analyze_investment_type_risk(
+            position.protocol,
+            position.asset,
+            position.invest_type,
+            position.amount,
+            invest_type_name,
+        )
+
+    def analyze_portfolio_correlation(self, investments: List[Dict]) -> Dict:
+        """
+        分析投资组合中各资产之间的相关性
+
+        Args:
+            investments: 投资列表，每个投资是一个字典，包含协议、资产、金额等信息
+
+        Returns:
+            Dict: 包含相关性分析结果的字典
+        """
+        try:
+            # 提取资产列表
+            assets = []
+            for investment in investments:
+                if "asset" in investment:
+                    assets.append(investment["asset"])
+                elif (
+                    "assetsTokenList" in investment
+                    and len(investment["assetsTokenList"]) > 0
+                ):
+                    for asset in investment["assetsTokenList"]:
+                        if "tokenSymbol" in asset:
+                            assets.append(asset["tokenSymbol"])
+
+            # 去重
+            unique_assets = list(set(assets))
+
+            if len(unique_assets) <= 1:
+                return {
+                    "correlation_matrix": {},
+                    "diversification_score": 0,
+                    "risk_level": "HIGH",
+                    "analysis": "投资组合仅包含单一资产，缺乏多样性",
+                    "recommendations": [
+                        "增加不同类型的资产以分散风险",
+                        "考虑添加负相关资产以降低整体波动性",
+                    ],
+                }
+
+            # 构建相关性矩阵
+            correlation_matrix = {}
+            for i, asset1 in enumerate(unique_assets):
+                correlation_matrix[asset1] = {}
+                for asset2 in unique_assets:
+                    if asset1 == asset2:
+                        correlation_matrix[asset1][asset2] = 1.0
+                    else:
+                        # 使用预设的相关性数据或估计值
+                        correlation_matrix[asset1][asset2] = (
+                            self._estimate_asset_correlation(asset1, asset2)
+                        )
+
+            # 计算多样化得分 (0-1，越高越多样化)
+            avg_correlation = self._calculate_average_correlation(correlation_matrix)
+            diversification_score = 1 - avg_correlation
+
+            # 确定风险等级
+            risk_level = "MEDIUM"
+            if diversification_score < 0.3:
+                risk_level = "HIGH"
+            elif diversification_score > 0.6:
+                risk_level = "LOW"
+
+            # 生成分析和建议
+            analysis = f"投资组合包含{len(unique_assets)}种资产，多样化得分为{diversification_score:.2f}"
+            recommendations = []
+
+            if diversification_score < 0.4:
+                recommendations.append("增加更多不相关或负相关的资产以提高多样性")
+                recommendations.append(
+                    "考虑添加不同类别的资产（如稳定币、大型加密货币、DeFi代币等）"
+                )
+            elif avg_correlation > 0.7:
+                recommendations.append("当前资产相关性较高，市场下跌时可能同时贬值")
+                recommendations.append("考虑添加与现有资产负相关的资产")
+
+            return {
+                "correlation_matrix": correlation_matrix,
+                "diversification_score": diversification_score,
+                "risk_level": risk_level,
+                "analysis": analysis,
+                "recommendations": recommendations,
+                "assets_analyzed": unique_assets,
+            }
+
+        except Exception as e:
+            logger.error(f"分析投资组合相关性时出错: {e}")
+            return {
+                "correlation_matrix": {},
+                "diversification_score": 0.5,
+                "risk_level": "MEDIUM",
+                "analysis": "无法完成相关性分析",
+                "recommendations": [
+                    "建议手动评估投资组合多样性",
+                    "考虑分散投资到不同类型的资产",
+                ],
+                "error": str(e),
+            }
+
+    def _estimate_asset_correlation(self, asset1: str, asset2: str) -> float:
+        """
+        估计两个资产之间的相关性
+
+        Args:
+            asset1: 第一个资产的符号
+            asset2: 第二个资产的符号
+
+        Returns:
+            float: 估计的相关性系数 (-1 到 1)
+        """
+        # 预设的相关性数据
+        known_correlations = {
+            ("BTC", "ETH"): 0.8,
+            ("BTC", "USDT"): 0.1,
+            ("BTC", "USDC"): 0.1,
+            ("ETH", "USDT"): 0.1,
+            ("ETH", "USDC"): 0.1,
+            ("USDT", "USDC"): 0.9,
+        }
+
+        # 标准化资产名称
+        asset1 = asset1.upper()
+        asset2 = asset2.upper()
+
+        # 检查是否有预设的相关性数据
+        if (asset1, asset2) in known_correlations:
+            return known_correlations[(asset1, asset2)]
+        elif (asset2, asset1) in known_correlations:
+            return known_correlations[(asset2, asset1)]
+
+        # 基于资产类型估计相关性
+        if self._is_stablecoin(asset1) and self._is_stablecoin(asset2):
+            return 0.9  # 稳定币之间高度相关
+        elif self._is_stablecoin(asset1) or self._is_stablecoin(asset2):
+            return 0.1  # 稳定币与其他资产低相关
+        else:
+            return 0.6  # 默认中等相关性
+
+    def _is_stablecoin(self, asset: str) -> bool:
+        """
+        判断资产是否为稳定币
+
+        Args:
+            asset: 资产符号
+
+        Returns:
+            bool: 是否为稳定币
+        """
+        stablecoins = [
+            "USDT",
+            "USDC",
+            "DAI",
+            "BUSD",
+            "UST",
+            "TUSD",
+            "USDP",
+            "GUSD",
+            "LUSD",
+            "FRAX",
+        ]
+        return asset.upper() in stablecoins
+
+    def _calculate_average_correlation(self, correlation_matrix: Dict) -> float:
+        """
+        计算相关性矩阵的平均相关性
+
+        Args:
+            correlation_matrix: 相关性矩阵
+
+        Returns:
+            float: 平均相关性
+        """
+        total = 0
+        count = 0
+
+        for asset1, correlations in correlation_matrix.items():
+            for asset2, value in correlations.items():
+                if asset1 != asset2:  # 排除自相关
+                    total += abs(value)  # 使用绝对值，因为负相关也是一种多样化
+                    count += 1
+
+        if count == 0:
+            return 0
+
+        return total / count

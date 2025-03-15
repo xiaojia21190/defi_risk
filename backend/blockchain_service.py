@@ -533,6 +533,7 @@ class BlockchainService:
         try:
             logger.info("使用DefiLlama API获取DeFi池数据")
             positions = []
+            rApy = 0
 
             # 使用缓存获取数据，避免频繁请求API
             cache_key = "defi_llama_pools"
@@ -556,15 +557,14 @@ class BlockchainService:
 
             # 处理池数据
             for pool in pools:
-                # 只处理Ethereum链上的池 多个
                 if pool.get("chain") == "Ethereum" and protocol == pool.get("protocol"):
                     symbolA = pool.get("symbol", "")
                     apy = pool.get("apy")
                     if symbol == symbolA:
-                        return apy
+                        rApy = apy
 
             logger.info(f"从DefiLlama获取了{len(positions)}个Ethereum链上的池")
-            return positions
+            return rApy
         except Exception as e:
             logger.error(f"获取DefiLlama池数据时出错: {e}")
             return []
