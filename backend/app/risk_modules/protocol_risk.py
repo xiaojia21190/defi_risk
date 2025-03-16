@@ -49,27 +49,12 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
             # 如果没有收集到任何风险因素，返回默认风险分析结果
             if not risk_factors:
                 self.logger.warning(f"未能收集到协议 {protocol} 的任何风险因素")
-                return RiskAnalysisResult(
-                    risk_type=RiskType.PROTOCOL.value,
-                    target=protocol,
-                    score=50,  # 默认中等风险
-                    factors=[],
-                    recommendations=[],
-                    monitoring_points=[],
+                return self.create_default_risk_result(
+                    RiskType.PROTOCOL.value, protocol
                 )
 
             # 计算总体风险评分（加权平均）
-            total_weight = sum(factor.weight for factor in risk_factors)
-            if total_weight > 0:
-                weighted_score = (
-                    sum(factor.score * factor.weight for factor in risk_factors)
-                    / total_weight
-                )
-            else:
-                weighted_score = 50  # 默认中等风险
-
-            # 确保评分在0-100范围内
-            weighted_score = max(0, min(100, weighted_score))
+            weighted_score = self.calculate_weighted_score(risk_factors)
 
             # 获取协议名称（如果可能）
             protocol_name = protocol

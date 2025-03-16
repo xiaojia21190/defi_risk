@@ -2,10 +2,13 @@
 
 import React, { useState, useEffect } from "react";
 import { apiService } from "../services/api";
-import { AlertTriangle, BarChart3, Lightbulb, CheckCircle, Bell, Wallet, Target, ArrowUpDown, Loader2 } from "lucide-react";
+import { AlertTriangle, BarChart3, Lightbulb, CheckCircle, Bell, Wallet, Target, ArrowUpDown, Loader2, Filter } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
 
 interface AlertsListProps {
-  walletAddress: string;
+  address?: string;
 }
 
 interface Alert {
@@ -45,400 +48,395 @@ interface AlertStats {
 interface SeverityConfig {
   label: string;
   color: string;
-  bg: string;
+  variant: string;
 }
 
 interface AlertTypeConfig {
   label: string;
   icon: React.ReactNode;
   color: string;
-  bg: string;
+  variant: string;
 }
 
 interface SeverityConfigMap {
   [key: string]: SeverityConfig;
 }
 
-const severityOrder: Record<Alert["severity"], number> = {
-  high: 0,
-  medium: 1,
-  low: 2,
-};
+interface AlertTypeConfigMap {
+  [key: string]: AlertTypeConfig;
+}
 
-const severityConfigMap: SeverityConfigMap = {
+const severityConfig: SeverityConfigMap = {
   high: {
-    label: "高",
+    label: "高风险",
     color: "text-destructive",
-    bg: "bg-destructive/10",
+    variant: "destructive",
   },
   medium: {
-    label: "中",
-    color: "text-amber-500",
-    bg: "bg-amber-500/10",
+    label: "中风险",
+    color: "text-warning",
+    variant: "warning",
   },
   low: {
-    label: "低",
+    label: "低风险",
     color: "text-success",
-    bg: "bg-success/10",
+    variant: "success",
   },
 };
 
-// 更新警报类型映射
-const alertTypeConfig: Record<Alert["type"], AlertTypeConfig> = {
+const alertTypeConfig: AlertTypeConfigMap = {
   liquidation: {
     label: "清算风险",
-    icon: <Wallet className="h-4 w-4" />,
+    icon: <AlertTriangle className="h-4 w-4" />,
     color: "text-destructive",
-    bg: "bg-destructive/10",
+    variant: "destructive",
   },
   marketVolatility: {
     label: "市场波动",
-    icon: <ArrowUpDown className="h-4 w-4" />,
-    color: "text-amber-500",
-    bg: "bg-amber-500/10",
+    icon: <BarChart3 className="h-4 w-4" />,
+    color: "text-warning",
+    variant: "warning",
   },
   technicalSignal: {
     label: "技术信号",
-    icon: <BarChart3 className="h-4 w-4" />,
+    icon: <ArrowUpDown className="h-4 w-4" />,
     color: "text-primary",
-    bg: "bg-primary/10",
+    variant: "default",
   },
   riskWarning: {
     label: "风险警告",
-    icon: <AlertTriangle className="h-4 w-4" />,
+    icon: <Target className="h-4 w-4" />,
     color: "text-destructive",
-    bg: "bg-destructive/10",
+    variant: "destructive",
   },
   opportunityAlert: {
     label: "机会提醒",
     icon: <Lightbulb className="h-4 w-4" />,
     color: "text-success",
-    bg: "bg-success/10",
+    variant: "success",
   },
 };
 
-// 更新后端警报类型到前端类型的映射
 const mapAlertType = (backendType: string): Alert["type"] => {
   const typeMap: Record<string, Alert["type"]> = {
-    LIQUIDATION_RISK: "liquidation",
-    HIGH_VOLATILITY: "marketVolatility",
-    PRICE_VOLATILITY: "marketVolatility",
-    PRICE_CHANGE: "marketVolatility",
-    OVERBOUGHT: "technicalSignal",
-    OVERSOLD: "technicalSignal",
-    MA_CROSS: "technicalSignal",
-    APY_CHANGE: "opportunityAlert",
-    CORRELATION_CHANGE: "riskWarning",
-    MARKET_TREND: "riskWarning",
+    "liquidation_risk": "liquidation",
+    "market_volatility": "marketVolatility",
+    "technical_signal": "technicalSignal",
+    "risk_warning": "riskWarning",
+    "opportunity": "opportunityAlert",
   };
 
   return typeMap[backendType] || "riskWarning";
 };
 
-// 映射后端严重程度到前端严重程度
 const mapSeverity = (backendSeverity: string): Alert["severity"] => {
-  if (backendSeverity === "HIGH") return "high";
-  if (backendSeverity === "MEDIUM") return "medium";
+  if (backendSeverity === "high") return "high";
+  if (backendSeverity === "medium") return "medium";
   return "low";
 };
 
-const AlertsList: React.FC<AlertsListProps> = ({ walletAddress }) => {
-  const [filter, setFilter] = useState<Alert["type"] | "all">("all");
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [severityFilter, setSeverityFilter] = useState<Alert["severity"] | "all">("all");
+const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<AlertStats>({ total: 0, high: 0, medium: 0, low: 0, byType: {} });
+  const [filter, setFilter] = useState<{ severity: string | null; type: string | null }>({
+    severity: null,
+    type: null,
+  });
 
   useEffect(() => {
-    fetchAlerts();
-  }, []);
+    if (address) {
+      fetchAlerts();
+    } else {
+      setLoading(false);
+    }
+  }, [address]);
 
   const fetchAlerts = async () => {
+    if (!address) return;
+
+    setLoading(true);
+    setError(null);
+
     try {
-      setLoading(true);
-      setError(null);
+      const data = await apiService.getAlerts(address);
 
-      // 获取市场警报
-      const apiAlerts = await apiService.getAlerts(walletAddress);
-
-      // 转换警报格式
-      const formattedAlerts: Alert[] = apiAlerts.map((apiAlert) => ({
-        id: `${apiAlert.type}-${apiAlert.asset}-${apiAlert.timestamp}_${apiAlert.protocol}`,
-        type: mapAlertType(apiAlert.type),
-        severity: mapSeverity(apiAlert.severity),
-        message: apiAlert.message,
-        timestamp: new Date(apiAlert.timestamp * 1000).toISOString(),
-        protocol: apiAlert.protocol,
-        asset: apiAlert.asset,
-        details: {
-          recommendation: apiAlert.details?.recommendation,
-          value: apiAlert.details?.value || apiAlert.details?.volatility || apiAlert.details?.leverage || apiAlert.details?.price_change_24h,
-          threshold: apiAlert.details?.threshold || apiAlert.details?.safe_leverage,
-          ...apiAlert.details,
-        },
+      // 转换后端数据格式为前端格式
+      const formattedAlerts: Alert[] = data.map((alert: any) => ({
+        id: alert.id || Math.random().toString(36).substring(2),
+        type: mapAlertType(alert.type),
+        severity: mapSeverity(alert.severity),
+        message: alert.message,
+        timestamp: alert.timestamp,
+        protocol: alert.protocol || "未知协议",
+        asset: alert.asset || "未知资产",
+        details: alert.details || {},
       }));
 
       setAlerts(formattedAlerts);
-    } catch (error) {
-      console.error("获取警报失败:", error);
-      setError("获取警报数据失败，请稍后重试");
+
+      // 计算统计数据
+      const newStats: AlertStats = {
+        total: formattedAlerts.length,
+        high: formattedAlerts.filter(a => a.severity === "high").length,
+        medium: formattedAlerts.filter(a => a.severity === "medium").length,
+        low: formattedAlerts.filter(a => a.severity === "low").length,
+        byType: {},
+      };
+
+      formattedAlerts.forEach(alert => {
+        newStats.byType[alert.type] = (newStats.byType[alert.type] || 0) + 1;
+      });
+
+      setStats(newStats);
+    } catch (err) {
+      console.error("获取警报失败:", err);
+      setError("无法获取警报数据，请稍后重试");
     } finally {
       setLoading(false);
     }
   };
 
-  // 使用useEffect确保日期格式化只在客户端进行
-  const formatDate = (timestamp: string) => {
-    // 在服务端返回一个固定格式，避免服务端和客户端差异
-    if (typeof window === "undefined") {
-      return new Date(timestamp).toISOString();
-    }
-    // 客户端使用本地化格式
-    return new Date(timestamp).toLocaleString();
+  const formatDate = (timestamp: string | number) => {
+    const date = typeof timestamp === 'string' ? new Date(timestamp) : new Date(timestamp);
+    return new Intl.DateTimeFormat('zh-CN', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
   };
 
-  // 过滤和排序警报
-  const filteredAlerts = alerts
-    .filter((alert) => {
-      const matchesType = filter === "all" || alert.type === filter;
-      const matchesSeverity = severityFilter === "all" || alert.severity === severityFilter;
-      return matchesType && matchesSeverity;
-    })
-    .sort((a, b) => {
-      // 首先按严重程度排序
-      const severityDiff = severityOrder[a.severity] - severityOrder[b.severity];
-      if (severityDiff !== 0) return severityDiff;
+  const filteredAlerts = alerts.filter(alert => {
+    if (filter.severity && alert.severity !== filter.severity) return false;
+    if (filter.type && alert.type !== filter.type) return false;
+    return true;
+  });
 
-      // 然后按时间戳排序（新的在前）
-      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-    });
-
-  // 获取警报统计信息
-  const alertStats: AlertStats = {
-    total: alerts.length,
-    high: alerts.filter((a) => a.severity === "high").length,
-    medium: alerts.filter((a) => a.severity === "medium").length,
-    low: alerts.filter((a) => a.severity === "low").length,
-    byType: Object.fromEntries(Object.keys(alertTypeConfig).map((type) => [type, alerts.filter((a) => a.type === type).length])),
+  const clearFilter = () => {
+    setFilter({ severity: null, type: null });
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
-          <p className="text-muted">加载警报数据中...</p>
-        </div>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>风险警报</CardTitle>
+          <CardDescription>加载中...</CardDescription>
+        </CardHeader>
+        <CardContent className="flex justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </CardContent>
+      </Card>
     );
   }
 
   if (error) {
     return (
-      <div className="text-center py-8">
-        <div className="w-12 h-12 rounded-full bg-destructive/10 text-destructive mx-auto mb-4 flex items-center justify-center">
-          <AlertTriangle className="h-6 w-6" />
-        </div>
-        <h3 className="text-lg font-medium mb-2">获取警报失败</h3>
-        <p className="text-muted mb-4">{error}</p>
-        <button onClick={fetchAlerts} className="px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors">
-          重试
-        </button>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>风险警报</CardTitle>
+          <CardDescription className="text-destructive">{error}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button onClick={fetchAlerts} variant="outline">
+            重试
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!address) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>风险警报</CardTitle>
+          <CardDescription>请连接钱包以查看警报</CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  if (alerts.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>风险警报</CardTitle>
+          <CardDescription>暂无警报</CardDescription>
+        </CardHeader>
+        <CardContent className="text-center py-8">
+          <CheckCircle className="h-12 w-12 text-success mx-auto mb-4" />
+          <p className="text-muted-foreground">您的投资组合目前没有风险警报</p>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-semibold flex items-center gap-2">
-          <Bell className="h-5 w-5 text-primary" />
-          风险警报
-          <span className="ml-2 text-sm px-2 py-0.5 rounded-full bg-muted">{alertStats.total.toString()} 个警报</span>
-        </h2>
-        <div className="flex gap-2">
-          <select value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value as Alert["severity"] | "all")} className="px-3 py-1 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50">
-            <option value="all">全部严重度</option>
-            {Object.entries(severityConfigMap).map(([value, config]) => (
-              <option key={value} value={value}>
-                {config.label}级 ({alertStats[value as keyof AlertStats].toString()})
-              </option>
-            ))}
-          </select>
-          <select value={filter} onChange={(e) => setFilter(e.target.value as Alert["type"] | "all")} className="px-3 py-1 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50">
-            <option value="all">全部类型</option>
-            {Object.entries(alertTypeConfig).map(([value, config]) => (
-              <option key={value} value={value}>
-                {config.label} ({alertStats.byType[value].toString()})
-              </option>
-            ))}
-          </select>
+    <Card>
+      <CardHeader>
+        <div className="flex justify-between items-center">
+          <div>
+            <CardTitle>风险警报</CardTitle>
+            <CardDescription>
+              共 {stats.total} 条警报
+              {filter.severity || filter.type ? " (已筛选)" : ""}
+            </CardDescription>
+          </div>
+          <div className="flex gap-2">
+            {(filter.severity || filter.type) && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={clearFilter}
+                className="flex items-center gap-1"
+              >
+                <Filter className="h-3 w-3" />
+                清除筛选
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchAlerts}
+              className="flex items-center gap-1"
+            >
+              <Bell className="h-3 w-3" />
+              刷新
+            </Button>
+          </div>
         </div>
-      </div>
+      </CardHeader>
+      <CardContent>
+        <div className="mb-6 flex flex-wrap gap-2">
+          <Badge
+            variant={filter.severity === null ? "default" : "outline"}
+            className="cursor-pointer"
+            onClick={() => setFilter({ ...filter, severity: null })}
+          >
+            全部 ({stats.total})
+          </Badge>
+          <Badge
+            variant={filter.severity === "high" ? "destructive" : "outline"}
+            className="cursor-pointer"
+            onClick={() => setFilter({ ...filter, severity: "high" })}
+          >
+            高风险 ({stats.high})
+          </Badge>
+          <Badge
+            variant={filter.severity === "medium" ? "warning" : "outline"}
+            className="cursor-pointer"
+            onClick={() => setFilter({ ...filter, severity: "medium" })}
+          >
+            中风险 ({stats.medium})
+          </Badge>
+          <Badge
+            variant={filter.severity === "low" ? "success" : "outline"}
+            className="cursor-pointer"
+            onClick={() => setFilter({ ...filter, severity: "low" })}
+          >
+            低风险 ({stats.low})
+          </Badge>
+        </div>
 
-      {/* 警报统计 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <div className="p-3 rounded-lg bg-card border border-border">
-          <div className="flex items-center gap-2 text-destructive">
-            <AlertTriangle className="h-4 w-4" />
-            <span className="text-sm font-medium">高风险</span>
-          </div>
-          <p className="text-xl font-bold mt-1">{alertStats.high.toString()}</p>
-        </div>
-        <div className="p-3 rounded-lg bg-card border border-border">
-          <div className="flex items-center gap-2 text-amber-500">
-            <AlertTriangle className="h-4 w-4" />
-            <span className="text-sm font-medium">中风险</span>
-          </div>
-          <p className="text-xl font-bold mt-1">{alertStats.medium.toString()}</p>
-        </div>
-        <div className="p-3 rounded-lg bg-card border border-border">
-          <div className="flex items-center gap-2 text-success">
-            <CheckCircle className="h-4 w-4" />
-            <span className="text-sm font-medium">低风险</span>
-          </div>
-          <p className="text-xl font-bold mt-1">{alertStats.low.toString()}</p>
-        </div>
-        <div className="p-3 rounded-lg bg-card border border-border">
-          <div className="flex items-center gap-2 text-primary">
-            <Target className="h-4 w-4" />
-            <span className="text-sm font-medium">总计</span>
-          </div>
-          <p className="text-xl font-bold mt-1">{alertStats.total.toString()}</p>
-        </div>
-      </div>
-
-      {/* 警报列表 */}
-      <div className="space-y-4">
-        {filteredAlerts.length === 0 ? (
-          <div className="text-center py-8">
-            <div className="w-12 h-12 rounded-full bg-muted mx-auto mb-4 flex items-center justify-center">
-              <CheckCircle className="h-6 w-6 text-success" />
-            </div>
-            <h3 className="text-lg font-medium mb-2">暂无警报</h3>
-            <p className="text-muted">当前没有符合筛选条件的警报</p>
-          </div>
-        ) : (
-          filteredAlerts.map((alert) => {
-            const typeConfig = alertTypeConfig[alert.type];
-            const severityConfig = severityConfigMap[alert.severity];
-            const isExpanded = expanded[alert.id];
+        <div className="space-y-4">
+          {filteredAlerts.map((alert) => {
+            const typeInfo = alertTypeConfig[alert.type];
+            const severityInfo = severityConfig[alert.severity];
 
             return (
-              <div key={alert.id} className={`p-4 rounded-lg border transition-all ${severityConfig.bg} ${severityConfig.color} hover:shadow-md`} onClick={() => setExpanded({ ...expanded, [alert.id]: !isExpanded })}>
-                <div className="flex items-start gap-3">
-                  <div className={`mt-1 ${typeConfig.color}`}>{typeConfig.icon}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${severityConfig.bg} ${severityConfig.color}`}>{severityConfig.label}级</span>
-                      <span className="text-xs text-muted">{formatDate(alert.timestamp)}</span>
+              <div
+                key={alert.id}
+                className="p-4 rounded-lg border bg-card/50 hover:bg-card/80 transition-colors"
+              >
+                <div className="flex justify-between items-start mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className={`p-1.5 rounded-full bg-${typeInfo.variant}/10 ${typeInfo.color}`}>
+                      {typeInfo.icon}
                     </div>
-                    <p className="font-medium">{alert.message}</p>
-                    <div className="flex items-center gap-2 mt-1 text-sm">
-                      <span className="text-muted">{alert.protocol}</span>
-                      <span className="text-muted">·</span>
-                      <span className="text-muted">{alert.asset}</span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{typeInfo.label}</span>
+                        <Badge variant={severityInfo.variant as any}>
+                          {severityInfo.label}
+                        </Badge>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {alert.protocol} · {alert.asset} · {formatDate(alert.timestamp)}
+                      </div>
                     </div>
+                  </div>
+                </div>
 
-                    {isExpanded && alert.details && (
-                      <div className="mt-3 space-y-2 text-sm">
-                        {alert.details.value !== undefined && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-muted">当前值</span>
-                            <span>{alert.details.value.toFixed(2)}</span>
-                          </div>
-                        )}
-                        {alert.details.threshold !== undefined && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-muted">阈值</span>
-                            <span>{alert.details.threshold.toFixed(2)}</span>
-                          </div>
-                        )}
-                        {alert.details.leverage !== undefined && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-muted">杠杆率</span>
-                            <span className={alert.details.leverage > 1.5 ? "text-destructive" : "text-success"}>{alert.details.leverage.toFixed(2)}x</span>
-                          </div>
-                        )}
-                        {alert.details.current_apy !== undefined && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-muted">当前APY</span>
-                            <span className="text-success">{(alert.details.current_apy * 100).toFixed(2)}%</span>
-                          </div>
-                        )}
-                        {alert.details.previous_apy !== undefined && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-muted">之前APY</span>
-                            <span>{(alert.details.previous_apy * 100).toFixed(2)}%</span>
-                          </div>
-                        )}
-                        {alert.details.apy_change !== undefined && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-muted">APY变化</span>
-                            <span className={alert.details.apy_change > 0 ? "text-success" : "text-destructive"}>
-                              {alert.details.apy_change > 0 ? "+" : ""}
-                              {(alert.details.apy_change * 100).toFixed(2)}%
-                            </span>
-                          </div>
-                        )}
-                        {alert.details.volatility !== undefined && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-muted">波动率</span>
-                            <span className={alert.details.volatility > 20 ? "text-destructive" : "text-amber-500"}>{alert.details.volatility.toFixed(2)}%</span>
-                          </div>
-                        )}
-                        {alert.details.price_change_24h !== undefined && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-muted">24h价格变化</span>
-                            <span className={alert.details.price_change_24h > 0 ? "text-success" : "text-destructive"}>
-                              {alert.details.price_change_24h > 0 ? "+" : ""}
-                              {alert.details.price_change_24h.toFixed(2)}%
-                            </span>
-                          </div>
-                        )}
-                        {alert.details.ma7 !== undefined && alert.details.ma20 !== undefined && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-muted">均线状态</span>
-                            <span>
-                              MA7: {alert.details.ma7.toFixed(2)} / MA20: {alert.details.ma20.toFixed(2)}
-                            </span>
-                          </div>
-                        )}
-                        {alert.details.correlation !== undefined && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-muted">相关性</span>
-                            <span>{alert.details.correlation.toFixed(2)}</span>
-                          </div>
-                        )}
-                        {alert.details.recommendation && (
-                          <div className="mt-3 p-3 rounded-lg bg-background/50">
-                            <div className="flex items-center gap-2 mb-1">
-                              <Lightbulb className="h-4 w-4 text-primary" />
-                              <span className="font-medium">建议</span>
-                            </div>
-                            <p className="text-muted">{alert.details.recommendation}</p>
-                          </div>
-                        )}
-                        {alert.details.analysis && (
-                          <div className="mt-3 p-3 rounded-lg bg-background/50">
-                            <div className="flex items-center gap-2 mb-1">
-                              <BarChart3 className="h-4 w-4 text-primary" />
-                              <span className="font-medium">分析</span>
-                            </div>
-                            <p className="text-muted">{alert.details.analysis}</p>
-                          </div>
-                        )}
+                <p className="text-sm mb-3">{alert.message}</p>
+
+                {alert.details && alert.details.recommendation && (
+                  <div className="text-xs bg-muted/20 p-2 rounded-md">
+                    <span className="font-medium">建议: </span>
+                    {alert.details.recommendation}
+                  </div>
+                )}
+
+                {alert.details && (
+                  <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    {alert.details.value !== undefined && (
+                      <div className="p-1.5 rounded bg-muted/10">
+                        <span className="text-muted-foreground">当前值: </span>
+                        <span className="font-medium">{alert.details.value.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {alert.details.threshold !== undefined && (
+                      <div className="p-1.5 rounded bg-muted/10">
+                        <span className="text-muted-foreground">阈值: </span>
+                        <span className="font-medium">{alert.details.threshold.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {alert.details.leverage !== undefined && (
+                      <div className="p-1.5 rounded bg-muted/10">
+                        <span className="text-muted-foreground">杠杆: </span>
+                        <span className="font-medium">{alert.details.leverage.toFixed(2)}x</span>
+                      </div>
+                    )}
+                    {alert.details.volatility !== undefined && (
+                      <div className="p-1.5 rounded bg-muted/10">
+                        <span className="text-muted-foreground">波动率: </span>
+                        <span className="font-medium">{alert.details.volatility.toFixed(2)}%</span>
+                      </div>
+                    )}
+                    {alert.details.price_change_24h !== undefined && (
+                      <div className="p-1.5 rounded bg-muted/10">
+                        <span className="text-muted-foreground">24h变化: </span>
+                        <span className={`font-medium ${alert.details.price_change_24h >= 0 ? 'text-success' : 'text-destructive'}`}>
+                          {alert.details.price_change_24h >= 0 ? '+' : ''}
+                          {alert.details.price_change_24h.toFixed(2)}%
+                        </span>
                       </div>
                     )}
                   </div>
-                </div>
+                )}
               </div>
             );
-          })
+          })}
+        </div>
+
+        {filteredAlerts.length === 0 && (
+          <div className="text-center py-8">
+            <p className="text-muted-foreground">没有符合筛选条件的警报</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={clearFilter}
+              className="mt-2"
+            >
+              清除筛选
+            </Button>
+          </div>
         )}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 };
 

@@ -5,7 +5,7 @@ declare const process: {
   };
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
 
 export interface Position {
   protocol: string;
@@ -268,77 +268,133 @@ class ApiService {
   }
 
   async getPortfolio(address: string): Promise<Portfolio> {
-    // 移除演示模式相关逻辑
     if (!address || address === '') {
       throw new Error('未提供钱包地址');
     }
 
-    return this.fetchJson<Portfolio>('/analyze', {
-      method: 'POST',
-      body: JSON.stringify({ wallet_address: address }),
-    });
+    try {
+      // 使用后端的钱包风险分析API
+      const response = await this.fetchJson<any>(`/wallet/${address}/risk`);
+
+      // 将后端响应转换为前端期望的Portfolio格式
+      const portfolio: Portfolio = {
+        total_value: response.portfolio_summary?.total_value || 0,
+        positions: [],
+        risk_level: response.risk_assessment?.risk_level || "medium",
+        recommendations: response.risk_assessment?.recommendations || [],
+        market_analysis: {}
+      };
+
+      // 获取钱包头寸
+      const positionsResponse = await this.fetchJson<any>(`/wallet/${address}/positions`);
+
+      // 转换头寸数据
+      if (positionsResponse && positionsResponse.positions) {
+        portfolio.positions = positionsResponse.positions.map((pos: any) => ({
+          protocol: pos.protocol,
+          asset: pos.asset,
+          amount: pos.amount,
+          leverage: pos.leverage,
+          apy: pos.apy
+        }));
+      }
+
+      // 获取市场分析数据
+      const assets = [...new Set(portfolio.positions.map(p => p.asset.split('/')[0]))];
+      for (const asset of assets) {
+        try {
+          const marketData = await this.getMarketData(asset);
+          portfolio.market_analysis[asset] = {
+            current_price: marketData.price,
+            volume_24h: marketData.volume_24h,
+            market_cap: marketData.market_cap,
+            price_change_24h: marketData.price_change_24h,
+            volatility_30d: Math.abs(marketData.price_change_24h) // 简化处理
+          };
+        } catch (error) {
+          console.error(`获取${asset}市场数据失败:`, error);
+        }
+      }
+
+      return portfolio;
+    } catch (error) {
+      console.error('获取投资组合数据失败:', error);
+      throw error;
+    }
   }
 
   async getMarketData(asset: string): Promise<MarketData> {
-    return this.fetchJson<MarketData>(`/market-data/${asset}`);
-  }
-
-
-  async predictMarket(asset: string, timeFrame: string = '24h'): Promise<MarketPrediction> {
-    return this.fetchJson<MarketPrediction>('/predict/market', {
-      method: 'POST',
-      body: JSON.stringify({ asset, time_frame: timeFrame }),
-    });
-  }
-
-  async getProtocolRisk(protocolName: string): Promise<ProtocolRisk> {
     try {
-      // 注意：后端暂时没有实现此端点，返回模拟数据
-      console.warn('Protocol risk API endpoint is not implemented in the backend');
+      // 使用后端的市场数据API
+      const response = await this.fetchJson<any>(`/market/data/${asset}`);
 
-      // 返回模拟数据
+      // 将后端响应转换为前端期望的MarketData格式
       return {
-        risk_score: 0.65,
-        risk_level: "medium",
-        security_score: 0.75,
-        liquidity_score: 0.8,
-        centralization_risk: "medium",
-        audit_status: {
-          score: 0.7,
-          last_audit_date: "2023-12-15",
-          audit_firms: ["CertiK", "Trail of Bits"]
-        },
-        risk_factors: [
-          "中等流动性风险",
-          "智能合约复杂度较高",
-          "治理集中度中等"
-        ],
-        recommendations: [
-          "分散投资以降低风险",
-          "关注协议治理更新",
-          "设置止损以防风险"
-        ]
+        asset: response.asset,
+        price: response.price,
+        volume_24h: response.volume_24h,
+        price_change_24h: response.price_change_24h,
+        market_cap: response.market_cap
       };
     } catch (error) {
-      console.error(`获取协议风险数据失败: ${error}`);
+      console.error(`获取${asset}市场数据失败:`, error);
+      throw error;
+    }
+  }
+
+  async predictMarket(asset: string, timeFrame: string = '24h'): Promise<MarketPrediction> {
+    try {
+      // 使用后端的市场预测API
+      const response = await this.fetchJson<any>(`/market/predict/${asset}`, {
+        method: 'POST',
+        body: JSON.stringify({ time_frame: timeFrame }),
+      });
+
+      // 将后端响应转换为前端期望的MarketPrediction格式
+      return {
+        trend: response.trend || "neutral",
+        trend_strength: response.trend_strength || "medium",
+        risk_level: response.risk_level || "medium",
+        predicted_price_range: response.predicted_price_range || {
+          "24h": [0, 0],
+          "7d": [0, 0]
+        },
+        technical_analysis: response.technical_analysis || {
+          ma_trend: "neutral",
+          macd_signal: "neutral",
+          bollinger_signal: "neutral",
+          volume_analysis: "normal"
+        },
+        recommendations: response.recommendations || [],
+        trading_signals: response.trading_signals || [],
+        key_levels: response.key_levels
+      };
+    } catch (error) {
+      console.error(`获取${asset}市场预测失败:`, error);
       throw error;
     }
   }
 
   async getGasPrice(): Promise<number> {
-    return this.fetchJson<number>('/gas-price');
+    try {
+      // 使用后端的gas价格API
+      const response = await this.fetchJson<any>('/market/gas-price');
+      return response.gas_price || 0;
+    } catch (error) {
+      console.error('获取Gas价格失败:', error);
+      return 0;
+    }
   }
 
   async getAlerts(address: string): Promise<Alert[]> {
     try {
-      // 使用提供的地址获取警报
-      return this.fetchJson<Alert[]>('/market-alerts', {
-        method: 'POST',
-        body: JSON.stringify({ wallet_address: address }),
-      });
+      // 使用后端的警报API
+      const response = await this.fetchJson<any>(`/wallet/${address}/alerts`);
+
+      // 将后端响应转换为前端期望的Alert[]格式
+      return response.alerts || [];
     } catch (error) {
       console.error('获取警报失败:', error);
-      // 出错时返回空数组而不是抛出错误
       return [];
     }
   }
@@ -357,7 +413,6 @@ class ApiService {
       throw error;
     }
   }
-
 
   async getMarketAnalysis(asset: string): Promise<MarketAnalysis> {
     try {
@@ -542,8 +597,8 @@ class ApiService {
   // 添加一个健康检查方法
   async checkApiHealth(): Promise<boolean> {
     try {
-      await fetch(`${API_BASE_URL}/`);
-      return true;
+      const response = await fetch(`${API_BASE_URL.replace('/api', '')}/health`);
+      return response.ok;
     } catch (error) {
       console.error('API健康检查失败:', error);
       return false;
@@ -552,13 +607,18 @@ class ApiService {
 
   async getProtocols(): Promise<{ protocols: Protocol[] }> {
     try {
-      // // 检查是否处于演示模式
-      // const demoMode = await this.isDemoMode();
-      // if (demoMode) {
-      //   return { protocols: demoProtocols };
-      // }
+      // 使用后端的协议列表API
+      const response = await this.fetchJson<any>('/protocol/list');
 
-      return this.fetchJson<{ protocols: Protocol[] }>('/protocols');
+      // 将后端响应转换为前端期望的Protocol[]格式
+      const protocols: Protocol[] = response.protocols.map((p: any) => ({
+        name: p.name,
+        description: p.description || `${p.name}是一个DeFi协议，总锁仓价值(TVL)为$${(p.tvl / 1000000000).toFixed(2)}B`,
+        supported_assets: p.supported_assets || ["ETH", "USDC", "DAI"],
+        features: p.features || ["借贷", "流动性挖矿"]
+      }));
+
+      return { protocols };
     } catch (error) {
       console.error('获取协议列表失败:', error);
       // 出错时返回演示数据

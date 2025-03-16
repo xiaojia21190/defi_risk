@@ -8,10 +8,16 @@ import numpy as np
 import pandas as pd
 from app.models.domain.risk import RiskFactor, RiskType, RiskAnalysisResult
 from app.risk_modules.base import RiskAnalyzerBase
+from app.services.recommendation_service import RecommendationService
 
 
 class CorrelationRiskAnalyzer(RiskAnalyzerBase):
     """相关性风险分析器"""
+
+    def __init__(self, ai_service=None, ai_predictor=None, blockchain_service=None):
+        """初始化相关性风险分析器"""
+        super().__init__(ai_service, ai_predictor, blockchain_service)
+        self.recommendation_service = RecommendationService()
 
     async def analyze(self, data: Dict[str, Any]) -> RiskAnalysisResult:
         """
@@ -32,27 +38,12 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
             # 如果没有收集到任何风险因素，返回默认风险分析结果
             if not risk_factors:
                 self.logger.warning("未能收集到任何相关性风险因素")
-                return RiskAnalysisResult(
-                    risk_type=RiskType.CORRELATION.value,
-                    target="投资组合",
-                    score=50,  # 默认中等风险
-                    factors=[],
-                    recommendations=[],
-                    monitoring_points=[],
+                return self.create_default_risk_result(
+                    RiskType.CORRELATION.value, "投资组合"
                 )
 
             # 计算总体风险评分（加权平均）
-            total_weight = sum(factor.weight for factor in risk_factors)
-            if total_weight > 0:
-                weighted_score = (
-                    sum(factor.score * factor.weight for factor in risk_factors)
-                    / total_weight
-                )
-            else:
-                weighted_score = 50  # 默认中等风险
-
-            # 确保评分在0-100范围内
-            weighted_score = max(0, min(100, weighted_score))
+            weighted_score = self.calculate_weighted_score(risk_factors)
 
             # 生成建议和监控点
             recommendations = await self.get_recommendations(risk_factors)
@@ -74,19 +65,8 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
         except Exception as e:
             self.logger.error(f"分析相关性风险时出错: {str(e)}")
             # 返回默认风险分析结果
-            return RiskAnalysisResult(
-                risk_type=RiskType.CORRELATION.value,
-                target="投资组合",
-                score=50,  # 默认中等风险
-                factors=[],
-                recommendations=[
-                    "无法完成相关性风险分析，请检查输入数据是否正确",
-                    "确保区块链服务正常运行",
-                    "尝试稍后再次分析",
-                ],
-                monitoring_points=[
-                    "监控系统日志以排查风险分析失败的原因",
-                ],
+            return self.create_default_risk_result(
+                RiskType.CORRELATION.value, "投资组合", str(e)
             )
 
     async def get_risk_factors(self, data: Dict[str, Any]) -> List[RiskFactor]:
@@ -655,130 +635,10 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
         Returns:
             建议列表
         """
-        recommendations = []
-
-        # 根据风险因子生成建议
-        for factor in risk_factors:
-            if factor.factor_name == "资产相关性风险":
-                if factor.score > 70:
-                    recommendations.append(
-                        "投资组合中资产高度相关，建议大幅增加不同类型资产的配置"
-                    )
-                    recommendations.append(
-                        "考虑添加与加密市场相关性较低的资产，如稳定币或跨行业代币"
-                    )
-                    recommendations.append("评估引入对冲策略以降低系统性风险")
-                elif factor.score > 50:
-                    recommendations.append(
-                        "投资组合中资产相关性较高，建议适当增加不同类型资产"
-                    )
-                    recommendations.append(
-                        "关注高相关性资产对，考虑减少其中一种资产的比例"
-                    )
-                else:
-                    recommendations.append(
-                        "投资组合资产相关性适中或较低，继续保持多样化策略"
-                    )
-
-                # 检查是否有高相关性资产对
-                high_correlation_pairs = []
-                for data_point in factor.data_points:
-                    if data_point.get("correlation", 0) > 0.7:
-                        high_correlation_pairs.append(
-                            (data_point.get("asset1", ""), data_point.get("asset2", ""))
-                        )
-
-                if high_correlation_pairs:
-                    asset_pairs_str = ", ".join(
-                        [f"{a1}/{a2}" for a1, a2 in high_correlation_pairs[:3]]
-                    )
-                    if len(high_correlation_pairs) > 3:
-                        asset_pairs_str += f" 等{len(high_correlation_pairs)}对"
-                    recommendations.append(
-                        f"特别关注高相关性资产对: {asset_pairs_str}，考虑减少其中一种资产的比例"
-                    )
-
-            elif factor.factor_name == "协议相关性风险":
-                if factor.score > 70:
-                    recommendations.append(
-                        "投资组合高度集中在少数协议，建议分散投资到更多不同的协议"
-                    )
-                    recommendations.append(
-                        "考虑引入不同类别的协议，如借贷、DEX、收益聚合器等"
-                    )
-                elif factor.score > 50:
-                    recommendations.append(
-                        "投资组合在协议分布上较为集中，建议适当增加协议多样性"
-                    )
-                    recommendations.append(
-                        "关注主要协议之间的相关性，选择相关性较低的协议组合"
-                    )
-                else:
-                    recommendations.append(
-                        "投资组合在协议分布上相对分散，继续保持多样化策略"
-                    )
-
-                # 检查是否有高集中度协议
-                high_concentration_protocols = []
-                for data_point in factor.data_points:
-                    if (
-                        data_point.get("name") == "协议权重"
-                        and data_point.get("value", 0) > 0.3
-                    ):
-                        high_concentration_protocols.append(
-                            data_point.get("protocol", "")
-                        )
-
-                if high_concentration_protocols:
-                    protocols_str = ", ".join(high_concentration_protocols)
-                    recommendations.append(
-                        f"考虑降低在以下协议中的高集中度: {protocols_str}"
-                    )
-
-            elif factor.factor_name == "投资类型相关性风险":
-                if factor.score > 70:
-                    recommendations.append(
-                        "投资组合高度集中在少数投资类型，建议扩展到更多不同的投资类型"
-                    )
-                    recommendations.append(
-                        "考虑增加与现有投资类型相关性较低的新投资类型"
-                    )
-                elif factor.score > 50:
-                    recommendations.append(
-                        "投资组合在投资类型分布上较为集中，建议适当平衡不同投资类型的比例"
-                    )
-                    recommendations.append(
-                        "评估不同投资类型在市场波动时的表现，选择互补性强的组合"
-                    )
-                else:
-                    recommendations.append(
-                        "投资组合在投资类型分布上相对分散，继续保持多样化策略"
-                    )
-
-                # 检查是否有高集中度投资类型
-                high_concentration_types = []
-                for data_point in factor.data_points:
-                    if (
-                        data_point.get("name") == "投资类型权重"
-                        and data_point.get("value", 0) > 0.3
-                    ):
-                        high_concentration_types.append(
-                            data_point.get("invest_type_name", "")
-                        )
-
-                if high_concentration_types:
-                    types_str = ", ".join(high_concentration_types)
-                    recommendations.append(
-                        f"考虑降低在以下投资类型中的高集中度: {types_str}"
-                    )
-
-        # 添加通用建议
-        if not recommendations:
-            recommendations.append("定期评估投资组合的相关性，确保足够的多样化")
-            recommendations.append("关注市场波动时不同资产、协议和投资类型的相关性变化")
-            recommendations.append("考虑使用相关性分析工具优化投资组合配置")
-
-        return recommendations
+        # 使用推荐服务生成建议
+        return self.recommendation_service.get_correlation_risk_recommendations(
+            risk_factors
+        )
 
     async def get_monitoring_points(self, risk_factors: List[RiskFactor]) -> List[str]:
         """
@@ -790,106 +650,7 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
         Returns:
             监控点列表
         """
-        monitoring_points = []
-
-        # 根据风险因子生成监控点
-        for factor in risk_factors:
-            if factor.factor_name == "资产相关性风险":
-                if factor.score > 70:
-                    monitoring_points.append(
-                        "密切监控主要资产之间的相关性变化，特别是在市场波动期间"
-                    )
-                    monitoring_points.append(
-                        "设置相关性阈值警报，当资产相关性超过特定阈值时发出提醒"
-                    )
-                elif factor.score > 50:
-                    monitoring_points.append("定期监控主要资产之间的相关性变化")
-                    monitoring_points.append("关注市场波动对资产相关性的影响")
-                else:
-                    monitoring_points.append("定期检查资产相关性矩阵，确保多样化效果")
-
-                # 检查是否有高相关性资产对
-                high_correlation_pairs = []
-                for data_point in factor.data_points:
-                    if data_point.get("correlation", 0) > 0.7:
-                        high_correlation_pairs.append(
-                            (data_point.get("asset1", ""), data_point.get("asset2", ""))
-                        )
-
-                if high_correlation_pairs:
-                    asset_pairs_str = ", ".join(
-                        [f"{a1}/{a2}" for a1, a2 in high_correlation_pairs[:3]]
-                    )
-                    if len(high_correlation_pairs) > 3:
-                        asset_pairs_str += f" 等{len(high_correlation_pairs)}对"
-                    monitoring_points.append(
-                        f"特别监控高相关性资产对: {asset_pairs_str}"
-                    )
-
-            elif factor.factor_name == "协议相关性风险":
-                if factor.score > 70:
-                    monitoring_points.append("密切关注主要协议之间的相互影响和联动效应")
-                    monitoring_points.append(
-                        "监控协议特定事件（如治理变更、安全事件）对整个投资组合的影响"
-                    )
-                elif factor.score > 50:
-                    monitoring_points.append("定期关注不同协议之间的相互影响")
-                    monitoring_points.append("监控主要协议的重大更新和变化")
-                else:
-                    monitoring_points.append("关注协议间的相关性变化趋势")
-
-                # 检查是否有高集中度协议
-                high_concentration_protocols = []
-                for data_point in factor.data_points:
-                    if (
-                        data_point.get("name") == "协议权重"
-                        and data_point.get("value", 0) > 0.3
-                    ):
-                        high_concentration_protocols.append(
-                            data_point.get("protocol", "")
-                        )
-
-                if high_concentration_protocols:
-                    protocols_str = ", ".join(high_concentration_protocols)
-                    monitoring_points.append(
-                        f"重点监控高集中度协议的风险事件: {protocols_str}"
-                    )
-
-            elif factor.factor_name == "投资类型相关性风险":
-                if factor.score > 70:
-                    monitoring_points.append(
-                        "密切跟踪不同投资类型在市场波动时的表现相关性"
-                    )
-                    monitoring_points.append(
-                        "监控投资类型特定风险事件对整个投资组合的影响"
-                    )
-                elif factor.score > 50:
-                    monitoring_points.append("定期评估不同投资类型的相关性变化")
-                    monitoring_points.append("关注市场环境变化对投资类型相关性的影响")
-                else:
-                    monitoring_points.append("关注投资类型多样化效果的长期趋势")
-
-                # 检查是否有高集中度投资类型
-                high_concentration_types = []
-                for data_point in factor.data_points:
-                    if (
-                        data_point.get("name") == "投资类型权重"
-                        and data_point.get("value", 0) > 0.3
-                    ):
-                        high_concentration_types.append(
-                            data_point.get("invest_type_name", "")
-                        )
-
-                if high_concentration_types:
-                    types_str = ", ".join(high_concentration_types)
-                    monitoring_points.append(
-                        f"重点监控高集中度投资类型的风险事件: {types_str}"
-                    )
-
-        # 添加通用监控点
-        if not monitoring_points:
-            monitoring_points.append("定期计算投资组合的相关性矩阵，评估多样化效果")
-            monitoring_points.append("关注市场波动期间资产、协议和投资类型的相关性变化")
-            monitoring_points.append("监控宏观经济因素对投资组合相关性的影响")
-
-        return monitoring_points
+        # 使用推荐服务生成监控点
+        return self.recommendation_service.get_monitoring_points(
+            "CORRELATION", risk_factors
+        )

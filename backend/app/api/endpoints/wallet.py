@@ -2,8 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Dict, Any, Optional
 from app.services.blockchain import BlockchainService
 from app.services.ai_service import AiService
+from app.services.demo_data import DemoDataService, get_demo_data_service
 from app.models.schemas.portfolio import PortfolioAnalysisResponse
 from app.core.init_app import get_blockchain_service, get_ai_service, get_risk_engine
+from app.core.config import settings
 import logging
 
 from app.services.risk_engine import RiskEngine
@@ -17,6 +19,7 @@ logger = logging.getLogger("defi_risk.api.wallet")
 async def get_wallet_positions(
     wallet_address: str,
     blockchain_service: BlockchainService = Depends(get_blockchain_service),
+    demo_service: DemoDataService = Depends(get_demo_data_service),
 ):
     """
     获取钱包在所有协议中的头寸
@@ -25,6 +28,11 @@ async def get_wallet_positions(
     """
     try:
         logger.info(f"收到钱包头寸请求: {wallet_address}")
+
+        # 如果是演示模式，使用演示数据
+        if settings.DEMO_MODE:
+            logger.info(f"使用演示数据: 钱包头寸 {wallet_address}")
+            return demo_service.get_wallet_positions(wallet_address)
 
         # 获取所有协议头寸
         positions = await blockchain_service.get_all_positions(wallet_address)
@@ -40,6 +48,10 @@ async def get_wallet_positions(
         }
     except Exception as e:
         logger.error(f"获取钱包头寸时出错: {str(e)}")
+        # 如果出错且是演示模式，返回演示数据
+        if settings.DEMO_MODE:
+            logger.info(f"出错时使用演示数据: 钱包头寸 {wallet_address}")
+            return demo_service.get_wallet_positions(wallet_address)
         raise HTTPException(status_code=500, detail=f"获取钱包头寸失败: {str(e)}")
 
 
@@ -49,86 +61,56 @@ async def analyze_wallet_risk(
     blockchain_service: BlockchainService = Depends(get_blockchain_service),
     risk_engine: RiskEngine = Depends(get_risk_engine),
     ai_service: AiService = Depends(get_ai_service),
+    demo_service: DemoDataService = Depends(get_demo_data_service),
 ):
     """
-    分析钱包整体风险
+    分析钱包风险
 
     - **wallet_address**: 钱包地址
     """
     try:
         logger.info(f"收到钱包风险分析请求: {wallet_address}")
 
-        # 检查AI服务是否可用
-        ai_available = await ai_service.is_available()
-        logger.info(f"AI服务可用性: {ai_available}")
+        # 如果是演示模式，使用演示数据
+        if settings.DEMO_MODE:
+            logger.info(f"使用演示数据: 钱包风险 {wallet_address}")
+            return demo_service.analyze_wallet_risk(wallet_address)
 
         # 获取钱包头寸
         positions = await blockchain_service.get_all_positions(wallet_address)
 
-        if not positions:
-            return {
-                "wallet_address": wallet_address,
-                "risk_level": "LOW",
-                "risk_score": 0,
-                "message": "钱包中没有发现任何头寸",
-                "recommendations": ["添加资产以获取风险分析"],
-                "ai_available": ai_available,
-            }
-
         # 分析风险
-        risk_assessment = await risk_engine.analyze_portfolio(positions)
+        risk_analysis = await risk_engine.analyze_portfolio_risk(positions)
 
         # 获取AI洞察
-        ai_insights = []
-        ai_recommendations = []
+        ai_insights = await ai_service.get_portfolio_insights(
+            wallet_address, positions, risk_analysis
+        )
 
-        if ai_available:
-            try:
-                # 准备AI分析的上下文数据
-                ai_context = {
-                    "portfolio_summary": risk_assessment.detailed_analysis[
-                        "portfolio_summary"
-                    ],
-                    "risk_level": risk_assessment.risk_level.value,
-                    "risk_score": risk_assessment.total_score,
-                    "top_assets": risk_assessment.detailed_analysis[
-                        "portfolio_summary"
-                    ].get("top_assets", []),
-                }
-
-                # 调用AI服务进行分析
-                ai_analysis = await ai_service.analyze("portfolio_insights", ai_context)
-                ai_insights = ai_analysis.insights
-
-                # 如果AI分析中包含建议，添加到建议列表
-                if ai_analysis.recommendations:
-                    ai_recommendations = ai_analysis.recommendations
-            except Exception as ai_error:
-                logger.error(f"AI分析失败: {str(ai_error)}")
-                ai_insights = [f"AI分析过程中出错: {str(ai_error)}"]
-
-        # 构建响应
-        response = {
+        # 合并结果
+        result = {
             "wallet_address": wallet_address,
-            "report_id": risk_assessment.id,
-            "timestamp": risk_assessment.timestamp,
-            "portfolio_summary": risk_assessment.detailed_analysis["portfolio_summary"],
-            "risk_assessment": {
-                "total_score": risk_assessment.total_score,
-                "risk_level": risk_assessment.risk_level.value,
-                "risk_by_type": risk_assessment.detailed_analysis["risk_by_type"],
-                "warnings": risk_assessment.warnings,
-                "recommendations": risk_assessment.recommendations + ai_recommendations,
-                "mitigation_strategies": risk_assessment.mitigation_strategies,
-                "monitoring_points": risk_assessment.monitoring_points,
+            "risk_score": risk_analysis.get("risk_score", 0),
+            "risk_level": risk_analysis.get("risk_level", "未知"),
+            "risk_factors": risk_analysis.get("risk_factors", []),
+            "recommendations": ai_insights.get("recommendations", []),
+            "positions_summary": {
+                "total_value": sum(
+                    position.get("usd_value", 0) for position in positions
+                ),
+                "position_count": len(positions),
+                "protocols": list(set(p.get("protocol", "") for p in positions)),
+                "assets": list(set(p.get("asset", "") for p in positions)),
             },
-            "ai_insights": ai_insights,
-            "ai_available": ai_available,
         }
 
-        return response
+        return result
     except Exception as e:
         logger.error(f"分析钱包风险时出错: {str(e)}")
+        # 如果出错且是演示模式，返回演示数据
+        if settings.DEMO_MODE:
+            logger.info(f"出错时使用演示数据: 钱包风险 {wallet_address}")
+            return demo_service.analyze_wallet_risk(wallet_address)
         raise HTTPException(status_code=500, detail=f"分析钱包风险失败: {str(e)}")
 
 
@@ -254,6 +236,7 @@ async def analyze_wallet_market_risk(
 async def get_wallet_alerts(
     wallet_address: str,
     blockchain_service: BlockchainService = Depends(get_blockchain_service),
+    demo_service: DemoDataService = Depends(get_demo_data_service),
 ):
     """
     获取钱包相关的市场警报
@@ -263,8 +246,16 @@ async def get_wallet_alerts(
     try:
         logger.info(f"收到钱包警报请求: {wallet_address}")
 
-        # 获取市场警报
-        alerts = await blockchain_service.get_market_alerts(wallet_address)
+        # 如果是演示模式，使用演示数据
+        if settings.DEMO_MODE:
+            logger.info(f"使用演示数据: 钱包警报 {wallet_address}")
+            return demo_service.get_wallet_alerts(wallet_address)
+
+        # 获取钱包头寸
+        positions = await blockchain_service.get_all_positions(wallet_address)
+
+        # 获取相关警报
+        alerts = await blockchain_service.get_wallet_alerts(wallet_address, positions)
 
         return {
             "wallet_address": wallet_address,
@@ -273,4 +264,8 @@ async def get_wallet_alerts(
         }
     except Exception as e:
         logger.error(f"获取钱包警报时出错: {str(e)}")
+        # 如果出错且是演示模式，返回演示数据
+        if settings.DEMO_MODE:
+            logger.info(f"出错时使用演示数据: 钱包警报 {wallet_address}")
+            return demo_service.get_wallet_alerts(wallet_address)
         raise HTTPException(status_code=500, detail=f"获取钱包警报失败: {str(e)}")

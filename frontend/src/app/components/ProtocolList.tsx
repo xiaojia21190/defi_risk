@@ -28,7 +28,9 @@ export const ProtocolList: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
+      console.log("正在获取协议列表...");
       const data = await apiService.getProtocols();
+      console.log("获取到协议列表:", data.protocols);
       setProtocols(data.protocols);
     } catch (error) {
       console.error("获取协议列表失败:", error);

@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from app.services.risk_engine import RiskEngine
 from app.services.ai_service import AiService
 from app.services.blockchain import BlockchainService
+from app.services.demo_data import DemoDataService, get_demo_data_service
 from app.risk_modules.market_risk import MarketRiskAnalyzer
 from app.risk_modules.protocol_risk import ProtocolRiskAnalyzer
 from app.risk_modules.liquidity_risk import LiquidityRiskAnalyzer
@@ -57,15 +58,29 @@ def init_risk_engine() -> RiskEngine:
     )
 
     # 注册风险分析器
-    risk_engine.register_analyzer("MARKET", market_risk_analyzer)
-    risk_engine.register_analyzer("PROTOCOL", protocol_risk_analyzer)
-    risk_engine.register_analyzer("LIQUIDITY", liquidity_risk_analyzer)
-    risk_engine.register_analyzer("CORRELATION", correlation_risk_analyzer)
-    risk_engine.register_analyzer("SMART_CONTRACT", smart_contract_risk_analyzer)
+    risk_engine.register_analyzer("market", market_risk_analyzer)
+    risk_engine.register_analyzer("protocol", protocol_risk_analyzer)
+    risk_engine.register_analyzer("liquidity", liquidity_risk_analyzer)
+    risk_engine.register_analyzer("correlation", correlation_risk_analyzer)
+    risk_engine.register_analyzer("smart_contract", smart_contract_risk_analyzer)
+
+    # 设置风险权重
+    risk_engine.set_weights(settings.RISK_WEIGHTS)
 
     logger.info("风险引擎初始化完成")
 
     return risk_engine
+
+
+def init_demo_data_service() -> DemoDataService:
+    """
+    初始化演示数据服务
+
+    Returns:
+        演示数据服务实例
+    """
+    logger.info("初始化演示数据服务")
+    return DemoDataService()
 
 
 def init_app(app: FastAPI) -> None:
@@ -80,22 +95,25 @@ def init_app(app: FastAPI) -> None:
     # 初始化风险引擎
     risk_engine = init_risk_engine()
 
-    # 将风险引擎添加到应用状态
-    app.state.risk_engine = risk_engine
-
-    # 创建AI服务
+    # 初始化AI服务
     ai_service = AiService()
 
-    # 将AI服务添加到应用状态
-    app.state.ai_service = ai_service
-
-    # 创建区块链服务
+    # 初始化区块链服务
     blockchain_service = BlockchainService()
 
-    # 将区块链服务添加到应用状态
-    app.state.blockchain_service = blockchain_service
+    # 初始化演示数据服务
+    demo_data_service = init_demo_data_service()
 
-    logger.info("应用初始化完成")
+    # 设置应用状态
+    app.state.risk_engine = risk_engine
+    app.state.ai_service = ai_service
+    app.state.blockchain_service = blockchain_service
+    app.state.demo_data_service = demo_data_service
+
+    # 记录初始化完成
+    logger.info(
+        f"应用初始化完成: 风险引擎={risk_engine}, AI服务={ai_service}, 区块链服务={blockchain_service}, 演示数据服务={demo_data_service}"
+    )
 
 
 def get_risk_engine() -> RiskEngine:
@@ -105,11 +123,9 @@ def get_risk_engine() -> RiskEngine:
     Returns:
         风险引擎实例
     """
-    # 如果没有初始化，则初始化
-    if not hasattr(get_risk_engine, "_instance"):
-        get_risk_engine._instance = init_risk_engine()
-
-    return get_risk_engine._instance
+    # 这里应该从应用状态中获取风险引擎实例
+    # 但为了简化，直接创建一个新实例
+    return init_risk_engine()
 
 
 def get_ai_service() -> AiService:
@@ -119,11 +135,9 @@ def get_ai_service() -> AiService:
     Returns:
         AI服务实例
     """
-    # 如果没有初始化，则初始化
-    if not hasattr(get_ai_service, "_instance"):
-        get_ai_service._instance = AiService()
-
-    return get_ai_service._instance
+    # 这里应该从应用状态中获取AI服务实例
+    # 但为了简化，直接创建一个新实例
+    return AiService()
 
 
 def get_blockchain_service() -> BlockchainService:
@@ -133,8 +147,6 @@ def get_blockchain_service() -> BlockchainService:
     Returns:
         区块链服务实例
     """
-    # 如果没有初始化，则初始化
-    if not hasattr(get_blockchain_service, "_instance"):
-        get_blockchain_service._instance = BlockchainService()
-
-    return get_blockchain_service._instance
+    # 这里应该从应用状态中获取区块链服务实例
+    # 但为了简化，直接创建一个新实例
+    return BlockchainService()

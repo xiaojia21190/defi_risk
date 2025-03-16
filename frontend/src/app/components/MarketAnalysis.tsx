@@ -2,336 +2,359 @@
 
 import React, { useState } from "react";
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
-import { Loader2, TrendingUp, TrendingDown, AlertTriangle, Info } from "lucide-react";
+import { Loader2, TrendingUp, TrendingDown, AlertTriangle, Info, ArrowUpDown } from "lucide-react";
 import type { MarketPrediction } from "../services/api";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
 
 interface MarketAnalysisProps {
-  asset: string;
-  prediction?: MarketPrediction;
-  marketAnalysis?: {
-    current_price: number;
-    volume_24h: number;
-    market_cap: number;
-    price_change_24h: number;
-    volatility_30d: number;
-  };
+  marketPredictions: { [key: string]: MarketPrediction };
+  selectedAsset: string;
+  onAssetChange: (asset: string) => void;
 }
 
-const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ asset, prediction, marketAnalysis }) => {
+const MarketAnalysis: React.FC<MarketAnalysisProps> = ({
+  marketPredictions,
+  selectedAsset,
+  onAssetChange
+}) => {
   const [timeFrame, setTimeFrame] = useState<"24h" | "7d">("24h");
 
-  if (!marketAnalysis || !prediction) {
-    return (
-      <div className="text-center py-8">
-        <div className="w-12 h-12 rounded-full bg-muted mx-auto mb-4 flex items-center justify-center">
-          <Loader2 className="h-6 w-6 animate-spin" />
-        </div>
-        <h3 className="text-lg font-medium mb-2">加载市场数据</h3>
-        <p className="text-muted">正在获取 {asset} 的市场分析数据</p>
-      </div>
-    );
-  }
+  const prediction = marketPredictions[selectedAsset];
+  const isLoading = !prediction;
 
   const getTrendColor = (trend: string) => {
-    switch (trend.toLowerCase()) {
+    switch (trend?.toLowerCase()) {
       case "bullish":
       case "看涨":
-        return "text-success";
+        return "success";
       case "bearish":
       case "看跌":
-        return "text-destructive";
+        return "destructive";
       case "neutral":
       case "中性":
-        return "text-amber-500";
+        return "warning";
       default:
-        return "text-muted";
+        return "default";
     }
   };
 
   const getTrendIcon = (trend: string) => {
-    switch (trend.toLowerCase()) {
+    switch (trend?.toLowerCase()) {
       case "bullish":
       case "看涨":
-        return <TrendingUp className="h-4 w-4 text-success" />;
+        return <TrendingUp className="h-4 w-4" />;
       case "bearish":
       case "看跌":
-        return <TrendingDown className="h-4 w-4 text-destructive" />;
+        return <TrendingDown className="h-4 w-4" />;
+      case "neutral":
+      case "中性":
+        return <ArrowUpDown className="h-4 w-4" />;
       default:
-        return <Info className="h-4 w-4 text-amber-500" />;
+        return <Info className="h-4 w-4" />;
     }
   };
 
   const getRiskColor = (risk: string) => {
-    switch (risk.toLowerCase()) {
-      case "low":
-      case "低":
-        return "bg-success/10 text-success";
-      case "medium":
-      case "中":
-        return "bg-amber-500/10 text-amber-500";
+    switch (risk?.toLowerCase()) {
       case "high":
       case "高":
-        return "bg-destructive/10 text-destructive";
+        return "destructive";
+      case "medium":
+      case "中":
+        return "warning";
+      case "low":
+      case "低":
+        return "success";
       default:
-        return "bg-muted text-muted-foreground";
+        return "default";
     }
   };
 
-  // 生成模拟价格图表数据
   const generateChartData = () => {
-    const currentPrice = marketAnalysis.current_price;
-    const predictedRange = prediction.predicted_price_range[timeFrame];
-    const midPoint = (predictedRange[0] + predictedRange[1]) / 2;
+    if (!prediction) return [];
 
-    // 生成7天或24小时的数据点
-    const points = timeFrame === "7d" ? 7 : 24;
+    // 生成模拟数据
     const data = [];
+    const points = timeFrame === "24h" ? 24 : 7;
+    const basePrice = 1000; // 默认基础价格
+    const volatility = 0.05; // 默认波动率
 
-    // 添加历史数据点
+    let lastPrice = basePrice;
+
     for (let i = 0; i < points; i++) {
-      const factor = Math.sin(i / (points / Math.PI)) * (marketAnalysis.volatility_30d / 100);
-      const historicalPrice = currentPrice * (1 - factor * Math.random());
-      data.push({
-        time: timeFrame === "7d" ? `Day ${i + 1}` : `Hour ${i + 1}`,
-        price: historicalPrice,
-        type: "历史",
-      });
-    }
+      const change = (Math.random() - 0.5) * volatility * basePrice;
+      lastPrice = Math.max(lastPrice + change, 0);
 
-    // 添加预测数据点
-    for (let i = 0; i < Math.floor(points / 3); i++) {
-      const factor = (i / (points / 3)) * ((midPoint - currentPrice) / currentPrice);
-      const predictedPrice = currentPrice * (1 + factor);
       data.push({
-        time: timeFrame === "7d" ? `Day ${points + i + 1}` : `Hour ${points + i + 1}`,
-        price: predictedPrice,
-        type: "预测",
+        time: timeFrame === "24h" ? `${i}:00` : `Day ${i+1}`,
+        price: lastPrice,
       });
     }
 
     return data;
   };
 
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('zh-CN', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(value);
+  };
+
+  const formatLargeNumber = (value: number) => {
+    if (value >= 1000000000) {
+      return `${(value / 1000000000).toFixed(2)}B`;
+    }
+    if (value >= 1000000) {
+      return `${(value / 1000000).toFixed(2)}M`;
+    }
+    if (value >= 1000) {
+      return `${(value / 1000).toFixed(2)}K`;
+    }
+    return value.toString();
+  };
+
   const chartData = generateChartData();
 
+  // 获取预测价格范围
+  const getPredictedPriceRange = () => {
+    if (!prediction || !prediction.predicted_price_range) {
+      return { min: 0, max: 0 };
+    }
+
+    const range = prediction.predicted_price_range[timeFrame as "24h" | "7d"];
+    return { min: range[0], max: range[1] };
+  };
+
+  const priceRange = getPredictedPriceRange();
+
   return (
-    <div className="space-y-8">
-      {/* 基本市场数据 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
-          <h4 className="text-sm font-medium text-muted mb-2">当前价格</h4>
-          <p className="text-2xl font-semibold">${marketAnalysis.current_price.toLocaleString()}</p>
-          <span className={`text-sm ${marketAnalysis.price_change_24h > 0 ? "text-success" : "text-destructive"} flex items-center gap-1`}>
-            {marketAnalysis.price_change_24h > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-            {marketAnalysis.price_change_24h > 0 ? "+" : ""}
-            {marketAnalysis.price_change_24h.toFixed(2)}%
-          </span>
-        </div>
-        <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
-          <h4 className="text-sm font-medium text-muted mb-2">24h成交量</h4>
-          <p className="text-2xl font-semibold">${(marketAnalysis.volume_24h / 1000000).toFixed(2)}M</p>
-        </div>
-        <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
-          <h4 className="text-sm font-medium text-muted mb-2">市值</h4>
-          <p className="text-2xl font-semibold">${(marketAnalysis.market_cap / 1000000000).toFixed(2)}B</p>
-        </div>
-        <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
-          <h4 className="text-sm font-medium text-muted mb-2">30天波动率</h4>
-          <p className="text-2xl font-semibold">{marketAnalysis.volatility_30d.toFixed(2)}%</p>
-          <span className={`text-xs px-2 py-0.5 rounded-full ${getRiskColor(prediction.risk_level)}`}>{prediction.risk_level}风险</span>
-        </div>
-      </div>
-
-      {/* 价格图表 */}
-      <div className="p-6 rounded-lg bg-card border border-border hover:shadow-md transition-all">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold">{asset} 价格走势</h3>
+    <Card>
+      <CardHeader>
+        <div className="flex justify-between items-center">
+          <div>
+            <CardTitle>市场分析</CardTitle>
+            <CardDescription>
+              {selectedAsset} 市场趋势和预测
+            </CardDescription>
+          </div>
           <div className="flex gap-2">
-            <button onClick={() => setTimeFrame("24h")} className={`px-3 py-1 text-sm rounded-lg transition-colors ${timeFrame === "24h" ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/80"}`}>
-              24小时
-            </button>
-            <button onClick={() => setTimeFrame("7d")} className={`px-3 py-1 text-sm rounded-lg transition-colors ${timeFrame === "7d" ? "bg-primary text-primary-foreground" : "bg-muted hover:bg-muted/80"}`}>
-              7天
-            </button>
+            <select
+              value={selectedAsset}
+              onChange={(e) => onAssetChange(e.target.value)}
+              className="px-3 py-1 rounded-md border border-input bg-background text-sm"
+            >
+              {Object.keys(marketPredictions).map((asset) => (
+                <option key={asset} value={asset}>
+                  {asset}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
-        <div className="h-[300px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#8884d8" stopOpacity={0.8} />
-                  <stop offset="95%" stopColor="#8884d8" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#333" opacity={0.1} />
-              <XAxis dataKey="time" />
-              <YAxis domain={["auto", "auto"]} />
-              <Tooltip contentStyle={{ backgroundColor: "rgba(0, 0, 0, 0.8)", border: "none", borderRadius: "8px" }} itemStyle={{ color: "#fff" }} formatter={(value: number) => [`$${value.toFixed(2)}`, "价格"]} labelFormatter={(label) => `${label}`} />
-              <Area type="monotone" dataKey="price" stroke="#8884d8" fillOpacity={1} fill="url(#colorPrice)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-        {prediction.key_levels && (
-          <div className="mt-4 space-y-3">
-            <div className="flex flex-wrap gap-3">
-              {prediction.key_levels.support.length > 0 && (
-                <div className="text-sm">
-                  <span className="text-muted mr-2">支撑位:</span>
-                  {prediction.key_levels.support.map((level: number, i: number) => (
-                    <span key={i} className="px-2 py-1 bg-success/10 text-success rounded-lg mr-2">
-                      ${level.toFixed(2)}
-                    </span>
-                  ))}
-                </div>
-              )}
-              {prediction.key_levels.resistance.length > 0 && (
-                <div className="text-sm">
-                  <span className="text-muted mr-2">阻力位:</span>
-                  {prediction.key_levels.resistance.map((level: number, i: number) => (
-                    <span key={i} className="px-2 py-1 bg-destructive/10 text-destructive rounded-lg mr-2">
-                      ${level.toFixed(2)}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-3">
-              {prediction.key_levels.stop_loss && (
-                <div className="text-sm">
-                  <span className="text-muted mr-2">建议止损:</span>
-                  <span className="px-2 py-1 bg-destructive/10 text-destructive rounded-lg">${prediction.key_levels.stop_loss.toFixed(2)}</span>
-                </div>
-              )}
-              {prediction.key_levels.take_profit && prediction.key_levels.take_profit.length > 0 && (
-                <div className="text-sm">
-                  <span className="text-muted mr-2">建议止盈:</span>
-                  {prediction.key_levels.take_profit.map((level: number, i: number) => (
-                    <span key={i} className="px-2 py-1 bg-success/10 text-success rounded-lg mr-2">
-                      ${level.toFixed(2)}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center py-12">
+            <Loader2 className="h-10 w-10 text-primary animate-spin mb-4" />
+            <p className="text-muted-foreground">加载市场数据中...</p>
           </div>
-        )}
-      </div>
+        ) : (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 rounded-lg border bg-card/50">
+                <div className="text-sm text-muted-foreground mb-1">预测趋势</div>
+                <div className="flex items-center">
+                  <Badge variant={getTrendColor(prediction.trend)}>
+                    <span className="flex items-center gap-1">
+                      {getTrendIcon(prediction.trend)}
+                      {prediction.trend}
+                    </span>
+                  </Badge>
+                </div>
+                <div className="text-xs text-muted-foreground mt-2">
+                  趋势强度: {prediction.trend_strength}
+                </div>
+              </div>
 
-      {/* AI预测分析 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div className="space-y-6">
-          <div>
-            <h3 className="text-lg font-semibold mb-4">AI市场预测</h3>
-            <div className="space-y-4">
-              <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
-                <div className="flex justify-between items-center mb-2">
-                  <h4 className="font-medium">市场趋势</h4>
-                  <span className={`px-2 py-1 text-sm rounded-full flex items-center gap-1 ${getTrendColor(prediction.trend)} bg-card`}>
-                    {getTrendIcon(prediction.trend)}
-                    {prediction.trend_strength} {prediction.trend}
-                  </span>
+              <div className="p-4 rounded-lg border bg-card/50">
+                <div className="text-sm text-muted-foreground mb-1">风险等级</div>
+                <div className="flex items-center">
+                  <Badge variant={getRiskColor(prediction.risk_level)}>
+                    {prediction.risk_level}
+                  </Badge>
                 </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted">24h预测区间</span>
-                    <div>
-                      <span className={`px-2 py-1 rounded-lg ${getTrendColor(prediction.trend)}`}>
-                        ${prediction.predicted_price_range["24h"][0].toFixed(2)} - ${prediction.predicted_price_range["24h"][1].toFixed(2)}
-                      </span>
-                      <span className="text-xs text-muted ml-2">({((prediction.predicted_price_range["24h"][1] / marketAnalysis.current_price - 1) * 100).toFixed(2)}%)</span>
-                    </div>
+                <div className="text-xs text-muted-foreground mt-2">
+                  技术分析: {prediction.technical_analysis?.ma_trend || "未知"}
+                </div>
+              </div>
+
+              <div className="p-4 rounded-lg border bg-card/50">
+                <div className="text-sm text-muted-foreground mb-1">预测价格区间</div>
+                <div className="text-sm font-medium">
+                  {formatCurrency(priceRange.min)} - {formatCurrency(priceRange.max)}
+                </div>
+                <div className="text-xs text-muted-foreground mt-2">
+                  时间范围: {timeFrame === "24h" ? "24小时" : "7天"}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-medium">价格走势</h3>
+                <div className="flex gap-2">
+                  <Button
+                    variant={timeFrame === "24h" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setTimeFrame("24h")}
+                  >
+                    24小时
+                  </Button>
+                  <Button
+                    variant={timeFrame === "7d" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setTimeFrame("7d")}
+                  >
+                    7天
+                  </Button>
+                </div>
+              </div>
+
+              <div className="h-[300px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart
+                    data={chartData}
+                    margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+                  >
+                    <defs>
+                      <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8} />
+                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis
+                      dataKey="time"
+                      tick={{ fontSize: 12 }}
+                      stroke="hsl(var(--muted-foreground))"
+                    />
+                    <YAxis
+                      tick={{ fontSize: 12 }}
+                      stroke="hsl(var(--muted-foreground))"
+                      domain={['auto', 'auto']}
+                      tickFormatter={(value) => `$${value.toFixed(0)}`}
+                    />
+                    <Tooltip
+                      formatter={(value: number) => [`$${value.toFixed(2)}`, '价格']}
+                      labelFormatter={(label) => `时间: ${label}`}
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--card))',
+                        borderColor: 'hsl(var(--border))',
+                        borderRadius: 'var(--radius)',
+                      }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="price"
+                      stroke="hsl(var(--primary))"
+                      fillOpacity={1}
+                      fill="url(#colorPrice)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <h3 className="text-lg font-medium mb-4">技术分析</h3>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">MA趋势</span>
+                    <span className="font-medium">{prediction.technical_analysis?.ma_trend || "未知"}</span>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted">7d预测区间</span>
-                    <div>
-                      <span className={`px-2 py-1 rounded-lg ${getTrendColor(prediction.trend)}`}>
-                        ${prediction.predicted_price_range["7d"][0].toFixed(2)} - ${prediction.predicted_price_range["7d"][1].toFixed(2)}
-                      </span>
-                      <span className="text-xs text-muted ml-2">({((prediction.predicted_price_range["7d"][1] / marketAnalysis.current_price - 1) * 100).toFixed(2)}%)</span>
-                    </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">MACD信号</span>
+                    <span className="font-medium">{prediction.technical_analysis?.macd_signal || "未知"}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">布林带信号</span>
+                    <span className="font-medium">{prediction.technical_analysis?.bollinger_signal || "未知"}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">成交量分析</span>
+                    <span className="font-medium">{prediction.technical_analysis?.volume_analysis || "未知"}</span>
                   </div>
                 </div>
               </div>
 
-              <div className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all">
-                <h4 className="font-medium mb-3">技术指标</h4>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted">MA趋势</span>
-                    <div className="flex items-center gap-2">
-                      <span className={getTrendColor(prediction.technical_analysis.ma_trend)}>{prediction.technical_analysis.ma_trend}</span>
-                      {getTrendIcon(prediction.technical_analysis.ma_trend)}
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted">MACD信号</span>
-                    <div className="flex items-center gap-2">
-                      <span className={getTrendColor(prediction.technical_analysis.macd_signal)}>{prediction.technical_analysis.macd_signal}</span>
-                      {getTrendIcon(prediction.technical_analysis.macd_signal)}
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted">布林带位置</span>
-                    <span className={`px-2 py-1 rounded-lg ${getRiskColor(prediction.risk_level)}`}>{prediction.technical_analysis.bollinger_signal}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-muted">成交量分析</span>
-                    <span className={`px-2 py-1 rounded-lg ${getTrendColor(prediction.technical_analysis.volume_analysis)}`}>{prediction.technical_analysis.volume_analysis}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <h4 className="font-medium mb-3">交易信号</h4>
-            <div className="space-y-2">
-              {prediction.trading_signals.map((signal: string, index: number) => (
-                <div key={index} className="p-3 rounded-lg bg-muted text-sm flex items-start gap-2">
-                  <div className="mt-0.5">
-                    {signal.toLowerCase().includes("买入") || signal.toLowerCase().includes("buy") ? (
-                      <TrendingUp className="h-4 w-4 text-success" />
-                    ) : signal.toLowerCase().includes("卖出") || signal.toLowerCase().includes("sell") ? (
-                      <TrendingDown className="h-4 w-4 text-destructive" />
+              <div>
+                <h3 className="text-lg font-medium mb-4">交易信号</h3>
+                <div className="p-4 rounded-lg border bg-card/50">
+                  <div className="space-y-2">
+                    {prediction.trading_signals && prediction.trading_signals.length > 0 ? (
+                      prediction.trading_signals.map((signal, index) => (
+                        <div key={index} className="flex items-start gap-2">
+                          <div className="min-w-4 mt-0.5">
+                            <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                          </div>
+                          <span className="text-sm">{signal}</span>
+                        </div>
+                      ))
                     ) : (
-                      <Info className="h-4 w-4 text-amber-500" />
+                      <p className="text-sm text-muted-foreground">暂无交易信号</p>
                     )}
                   </div>
-                  <span>{signal}</span>
                 </div>
-              ))}
-            </div>
-          </div>
-        </div>
 
-        <div>
-          <h3 className="text-lg font-semibold mb-4">投资建议</h3>
-          <div className="space-y-4">
-            {prediction.recommendations.map((recommendation: string, index: number) => (
-              <div key={index} className="p-4 rounded-lg bg-card border border-border hover:shadow-md transition-all flex items-start gap-3">
-                <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">{index + 1}</div>
-                <p className="text-sm">{recommendation}</p>
-              </div>
-            ))}
-          </div>
-
-          {prediction && prediction.alerts && prediction.alerts.length > 0 && (
-            <div className="mt-6">
-              <h4 className="font-medium mb-3">市场警报</h4>
-              <div className="space-y-3">
-                {prediction.alerts.map((alert: { message: string }, index: number) => (
-                  <div key={index} className="p-3 rounded-lg bg-destructive/10 text-sm flex items-start gap-2">
-                    <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
-                    <span>{alert.message}</span>
+                {prediction.key_levels && (
+                  <div className="mt-4 p-4 rounded-lg border bg-card/50">
+                    <h4 className="text-sm font-medium mb-2">关键价格水平</h4>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">支撑位: </span>
+                        {prediction.key_levels.support.map((level, i) => (
+                          <span key={i} className="font-medium">${level.toFixed(2)}{i < prediction.key_levels!.support.length - 1 ? ', ' : ''}</span>
+                        ))}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">阻力位: </span>
+                        {prediction.key_levels.resistance.map((level, i) => (
+                          <span key={i} className="font-medium">${level.toFixed(2)}{i < prediction.key_levels!.resistance.length - 1 ? ', ' : ''}</span>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                ))}
+                )}
               </div>
             </div>
-          )}
-        </div>
-      </div>
-    </div>
+
+            {prediction.recommendations && prediction.recommendations.length > 0 && (
+              <div>
+                <h3 className="text-lg font-medium mb-4">建议</h3>
+                <div className="p-4 rounded-lg border bg-card/50">
+                  <ul className="space-y-2">
+                    {prediction.recommendations.map((recommendation, index) => (
+                      <li key={index} className="flex items-start gap-2">
+                        <div className="min-w-4 mt-0.5">
+                          <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                        </div>
+                        <span className="text-sm">{recommendation}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 };
 

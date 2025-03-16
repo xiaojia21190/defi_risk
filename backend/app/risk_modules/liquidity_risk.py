@@ -6,10 +6,16 @@ from typing import Dict, List, Any, Optional
 import logging
 from app.models.domain.risk import RiskFactor, RiskType, RiskAnalysisResult
 from app.risk_modules.base import RiskAnalyzerBase
+from app.services.recommendation_service import RecommendationService
 
 
 class LiquidityRiskAnalyzer(RiskAnalyzerBase):
     """流动性风险分析器"""
+
+    def __init__(self, ai_service=None, ai_predictor=None, blockchain_service=None):
+        """初始化流动性风险分析器"""
+        super().__init__(ai_service, ai_predictor, blockchain_service)
+        self.recommendation_service = RecommendationService()
 
     async def analyze(self, data: Dict[str, Any]) -> RiskAnalysisResult:
         """
@@ -30,27 +36,12 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
             # 如果没有收集到任何风险因素，返回默认风险分析结果
             if not risk_factors:
                 self.logger.warning("未能收集到任何流动性风险因素")
-                return RiskAnalysisResult(
-                    risk_type=RiskType.LIQUIDITY.value,
-                    target="投资组合",
-                    score=50,  # 默认中等风险
-                    factors=[],
-                    recommendations=[],
-                    monitoring_points=[],
+                return self.create_default_risk_result(
+                    RiskType.LIQUIDITY.value, "投资组合"
                 )
 
             # 计算总体风险评分（加权平均）
-            total_weight = sum(factor.weight for factor in risk_factors)
-            if total_weight > 0:
-                weighted_score = (
-                    sum(factor.score * factor.weight for factor in risk_factors)
-                    / total_weight
-                )
-            else:
-                weighted_score = 50  # 默认中等风险
-
-            # 确保评分在0-100范围内
-            weighted_score = max(0, min(100, weighted_score))
+            weighted_score = self.calculate_weighted_score(risk_factors)
 
             # 生成建议和监控点
             recommendations = await self.get_recommendations(risk_factors)
@@ -72,19 +63,8 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
         except Exception as e:
             self.logger.error(f"分析流动性风险时出错: {str(e)}")
             # 返回默认风险分析结果
-            return RiskAnalysisResult(
-                risk_type=RiskType.LIQUIDITY.value,
-                target="投资组合",
-                score=50,  # 默认中等风险
-                factors=[],
-                recommendations=[
-                    "无法完成流动性风险分析，请检查输入数据是否正确",
-                    "确保区块链服务正常运行",
-                    "尝试稍后再次分析",
-                ],
-                monitoring_points=[
-                    "监控系统日志以排查风险分析失败的原因",
-                ],
+            return self.create_default_risk_result(
+                RiskType.LIQUIDITY.value, "投资组合", str(e)
             )
 
     async def get_risk_factors(self, data: Dict[str, Any]) -> List[RiskFactor]:
@@ -843,135 +823,10 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
         Returns:
             建议列表
         """
-        recommendations = []
-
-        # 根据风险因子生成建议
-        for factor in risk_factors:
-            if factor.factor_name == "资产流动性风险":
-                if factor.score > 70:
-                    recommendations.append(
-                        "投资组合中低流动性资产比例过高，建议大幅减少这些资产的配置"
-                    )
-                    recommendations.append(
-                        "考虑增加主流代币和稳定币等高流动性资产的比例"
-                    )
-                    recommendations.append("避免在小型交易所或低交易量市场进行交易")
-                elif factor.score > 50:
-                    recommendations.append(
-                        "投资组合中低流动性资产比例较高，建议适当减少这些资产的配置"
-                    )
-                    recommendations.append(
-                        "关注低流动性资产的市场深度变化，设置止损策略"
-                    )
-                else:
-                    recommendations.append(
-                        "投资组合资产流动性状况良好，继续保持当前的资产配置策略"
-                    )
-
-                # 检查是否有特别低流动性的资产
-                low_liquidity_assets = []
-                for data_point in factor.data_points:
-                    if data_point.get("liquidity_score", 0) > 70:
-                        low_liquidity_assets.append(data_point.get("asset", ""))
-
-                if low_liquidity_assets:
-                    assets_str = ", ".join(low_liquidity_assets[:3])
-                    if len(low_liquidity_assets) > 3:
-                        assets_str += f" 等{len(low_liquidity_assets)}个资产"
-                    recommendations.append(
-                        f"特别关注以下低流动性资产: {assets_str}，考虑减少其配置比例"
-                    )
-
-            elif factor.factor_name == "协议流动性风险":
-                if factor.score > 70:
-                    recommendations.append(
-                        "投资组合中使用的协议流动性风险较高，建议减少在这些协议中的投资"
-                    )
-                    recommendations.append("考虑将资金转移到TVL更高、更成熟的协议中")
-                    recommendations.append("密切关注小型协议的TVL变化和用户活跃度")
-                elif factor.score > 50:
-                    recommendations.append(
-                        "投资组合中使用的部分协议流动性风险中等，建议关注这些协议的发展"
-                    )
-                    recommendations.append("确保在高风险协议中的投资比例不要过高")
-                else:
-                    recommendations.append(
-                        "投资组合使用的协议流动性状况良好，继续关注这些协议的发展"
-                    )
-
-                # 检查是否有特别低流动性的协议
-                low_liquidity_protocols = []
-                for data_point in factor.data_points:
-                    if data_point.get("liquidity_score", 0) > 70:
-                        low_liquidity_protocols.append(data_point.get("protocol", ""))
-
-                if low_liquidity_protocols:
-                    protocols_str = ", ".join(low_liquidity_protocols[:3])
-                    if len(low_liquidity_protocols) > 3:
-                        protocols_str += f" 等{len(low_liquidity_protocols)}个协议"
-                    recommendations.append(
-                        f"特别关注以下低流动性协议: {protocols_str}，考虑减少在这些协议中的投资"
-                    )
-
-            elif factor.factor_name == "投资类型流动性风险":
-                if factor.score > 70:
-                    recommendations.append(
-                        "投资组合中低流动性投资类型比例过高，建议调整投资类型配置"
-                    )
-                    recommendations.append("增加高流动性投资类型的比例，如存币和借贷")
-                    recommendations.append(
-                        "减少锁仓期长的投资，如长期质押和某些挖矿项目"
-                    )
-                elif factor.score > 50:
-                    recommendations.append(
-                        "投资组合中低流动性投资类型比例较高，建议适当调整"
-                    )
-                    recommendations.append("关注不同投资类型的锁仓期和提取条件")
-                else:
-                    recommendations.append(
-                        "投资组合投资类型流动性状况良好，继续保持当前的配置策略"
-                    )
-
-            elif factor.factor_name == "流动性池风险":
-                if factor.score > 70:
-                    recommendations.append(
-                        "流动性池投资风险较高，建议降低流动性池投资的总体比例"
-                    )
-                    recommendations.append("特别是减少波动性大的代币对流动性池的投资")
-                    recommendations.append(
-                        "考虑增加稳定币对流动性池的比例，降低无常损失风险"
-                    )
-                elif factor.score > 50:
-                    recommendations.append("流动性池投资风险中等，建议关注无常损失情况")
-                    recommendations.append("选择交易量大、深度好的流动性池进行投资")
-                else:
-                    recommendations.append(
-                        "流动性池投资风险较低，继续关注市场波动对流动性池的影响"
-                    )
-
-                # 检查是否有高风险的流动性池
-                high_risk_pools = []
-                for data_point in factor.data_points:
-                    if data_point.get("risk", 0) > 70:
-                        high_risk_pools.append(data_point.get("asset", ""))
-
-                if high_risk_pools:
-                    pools_str = ", ".join(high_risk_pools[:3])
-                    if len(high_risk_pools) > 3:
-                        pools_str += f" 等{len(high_risk_pools)}个池子"
-                    recommendations.append(
-                        f"特别关注以下高风险流动性池: {pools_str}，考虑减少在这些池子中的投资"
-                    )
-
-        # 添加一般性建议
-        if not recommendations:
-            recommendations.append(
-                "定期评估投资组合的流动性状况，确保在需要时能够快速退出"
-            )
-            recommendations.append("关注市场整体流动性变化，特别是在市场波动时期")
-            recommendations.append("建立分层流动性策略，确保部分资产可以快速变现")
-
-        return recommendations
+        # 使用推荐服务生成建议
+        return self.recommendation_service.get_liquidity_risk_recommendations(
+            risk_factors
+        )
 
     async def get_monitoring_points(self, risk_factors: List[RiskFactor]) -> List[str]:
         """
@@ -983,96 +838,7 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
         Returns:
             监控点列表
         """
-        monitoring_points = []
-
-        # 根据风险因子生成监控点
-        for factor in risk_factors:
-            if factor.factor_name == "资产流动性风险":
-                if factor.score > 70:
-                    monitoring_points.append("密切监控低流动性资产的交易量和价格波动")
-                    monitoring_points.append(
-                        "设置流动性阈值警报，当资产流动性下降到特定水平时发出提醒"
-                    )
-                    monitoring_points.append("跟踪低流动性资产的市场深度变化")
-                elif factor.score > 50:
-                    monitoring_points.append("定期监控投资组合中资产的流动性变化")
-                    monitoring_points.append("关注市场波动对资产流动性的影响")
-                else:
-                    monitoring_points.append(
-                        "定期检查资产流动性状况，确保维持良好的流动性水平"
-                    )
-
-                # 检查是否有特别低流动性的资产
-                low_liquidity_assets = []
-                for data_point in factor.data_points:
-                    if data_point.get("liquidity_score", 0) > 70:
-                        low_liquidity_assets.append(data_point.get("asset", ""))
-
-                if low_liquidity_assets:
-                    assets_str = ", ".join(low_liquidity_assets[:3])
-                    if len(low_liquidity_assets) > 3:
-                        assets_str += f" 等{len(low_liquidity_assets)}个资产"
-                    monitoring_points.append(f"重点监控以下低流动性资产: {assets_str}")
-
-            elif factor.factor_name == "协议流动性风险":
-                if factor.score > 70:
-                    monitoring_points.append("密切关注高风险协议的TVL变化和用户活跃度")
-                    monitoring_points.append("监控协议的治理变更和重大更新")
-                    monitoring_points.append(
-                        "设置TVL变化警报，当协议TVL大幅下降时发出提醒"
-                    )
-                elif factor.score > 50:
-                    monitoring_points.append("定期关注协议的TVL和用户活跃度变化")
-                    monitoring_points.append("监控协议的重大更新和安全事件")
-                else:
-                    monitoring_points.append(
-                        "定期检查协议的TVL和用户活跃度，确保维持良好的流动性水平"
-                    )
-
-            elif factor.factor_name == "投资类型流动性风险":
-                if factor.score > 70:
-                    monitoring_points.append("密切跟踪各类投资的锁仓期和提取条件变化")
-                    monitoring_points.append("监控高风险投资类型的市场流动性变化")
-                    monitoring_points.append("关注可能影响投资类型流动性的协议变更")
-                elif factor.score > 50:
-                    monitoring_points.append("定期评估不同投资类型的流动性状况")
-                    monitoring_points.append("关注市场环境变化对投资类型流动性的影响")
-                else:
-                    monitoring_points.append(
-                        "定期检查投资类型的流动性状况，确保维持良好的流动性水平"
-                    )
-
-            elif factor.factor_name == "流动性池风险":
-                if factor.score > 70:
-                    monitoring_points.append(
-                        "密切监控高风险流动性池的深度和无常损失情况"
-                    )
-                    monitoring_points.append("跟踪流动性池中代币价格的相对变化")
-                    monitoring_points.append("关注可能影响流动性池的市场事件和协议更新")
-                elif factor.score > 50:
-                    monitoring_points.append("定期评估流动性池的深度和无常损失情况")
-                    monitoring_points.append("监控流动性池的交易量和费用收入变化")
-                else:
-                    monitoring_points.append(
-                        "定期检查流动性池的状况，确保维持良好的流动性水平"
-                    )
-
-                # 检查是否有高风险的流动性池
-                high_risk_pools = []
-                for data_point in factor.data_points:
-                    if data_point.get("risk", 0) > 70:
-                        high_risk_pools.append(data_point.get("asset", ""))
-
-                if high_risk_pools:
-                    pools_str = ", ".join(high_risk_pools[:3])
-                    if len(high_risk_pools) > 3:
-                        pools_str += f" 等{len(high_risk_pools)}个池子"
-                    monitoring_points.append(f"重点监控以下高风险流动性池: {pools_str}")
-
-        # 添加一般性监控点
-        if not monitoring_points:
-            monitoring_points.append("定期检查市场整体流动性状况和极端情况下的退出成本")
-            monitoring_points.append("关注宏观经济因素对DeFi市场流动性的影响")
-            monitoring_points.append("监控流动性危机的早期警示信号")
-
-        return monitoring_points
+        # 使用推荐服务生成监控点
+        return self.recommendation_service.get_monitoring_points(
+            "LIQUIDITY", risk_factors
+        )

@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from pydantic import Field
 
 
@@ -9,7 +9,24 @@ class Settings:
     # 应用设置
     APP_NAME: str = "DeFi风险分析API"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = os.getenv("DEBUG")
+    DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
+
+    # 演示模式设置
+    DEMO_MODE: bool = os.getenv("DEMO_MODE", "True").lower() == "true"
+    DEMO_ACCOUNTS: List[Dict[str, str]] = [
+        {
+            "address": "0xdemo1234567890abcdef1234567890abcdef123456",
+            "name": "演示账户1",
+            "type": "demo",
+            "description": "包含多种DeFi头寸的演示账户",
+        },
+        {
+            "address": "0xdemo2234567890abcdef1234567890abcdef123456",
+            "name": "演示账户2",
+            "type": "demo",
+            "description": "高风险DeFi投资组合演示账户",
+        },
+    ]
 
     # API设置
     API_PREFIX: str = "/api/v1"

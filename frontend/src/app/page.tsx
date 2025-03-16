@@ -1,6 +1,7 @@
 import { Dashboard } from "./components/Dashboard";
 import { ConnectButton } from "./components/ConnectButton";
 import ProtocolList from "./components/ProtocolList";
+import ApiTest from "./components/ApiTest";
 
 export default function Home() {
   return (
@@ -25,6 +26,7 @@ export default function Home() {
 
       <main className="flex-1 container mx-auto px-4 py-6">
         <div className="space-y-8">
+          <ApiTest />
           <Dashboard />
           <ProtocolList />
         </div>

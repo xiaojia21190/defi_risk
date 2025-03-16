@@ -7,11 +7,17 @@ import logging
 import asyncio
 from app.models.domain.risk import RiskFactor, RiskType, RiskAnalysisResult
 from app.risk_modules.base import RiskAnalyzerBase
+from app.services.recommendation_service import RecommendationService
 import numpy as np
 
 
 class MarketRiskAnalyzer(RiskAnalyzerBase):
     """市场风险分析器"""
+
+    def __init__(self, ai_service=None, ai_predictor=None, blockchain_service=None):
+        """初始化市场风险分析器"""
+        super().__init__(ai_service, ai_predictor, blockchain_service)
+        self.recommendation_service = RecommendationService()
 
     async def analyze(self, data: Dict[str, Any]) -> RiskAnalysisResult:
         """
@@ -35,27 +41,12 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
             # 如果没有收集到任何风险因素，返回默认风险分析结果
             if not risk_factors:
                 self.logger.warning("未能收集到任何市场风险因素")
-                return RiskAnalysisResult(
-                    risk_type=RiskType.MARKET.value,
-                    target="投资组合",
-                    score=50,  # 默认中等风险
-                    factors=[],
-                    recommendations=[],
-                    monitoring_points=[],
+                return self.create_default_risk_result(
+                    RiskType.MARKET.value, "投资组合"
                 )
 
             # 计算总体风险评分（加权平均）
-            total_weight = sum(factor.weight for factor in risk_factors)
-            if total_weight > 0:
-                weighted_score = (
-                    sum(factor.score * factor.weight for factor in risk_factors)
-                    / total_weight
-                )
-            else:
-                weighted_score = 50  # 默认中等风险
-
-            # 确保评分在0-100范围内
-            weighted_score = max(0, min(100, weighted_score))
+            weighted_score = self.calculate_weighted_score(risk_factors)
 
             # 生成建议和监控点
             recommendations = await self.get_recommendations(risk_factors)
@@ -77,19 +68,8 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
         except Exception as e:
             self.logger.error(f"分析市场风险时出错: {str(e)}")
             # 返回默认风险分析结果
-            return RiskAnalysisResult(
-                risk_type=RiskType.MARKET.value,
-                target="投资组合",
-                score=50,  # 默认中等风险
-                factors=[],
-                recommendations=[
-                    "无法完成市场风险分析，请检查输入数据是否正确",
-                    "确保区块链服务正常运行",
-                    "尝试稍后再次分析",
-                ],
-                monitoring_points=[
-                    "监控系统日志以排查风险分析失败的原因",
-                ],
+            return self.create_default_risk_result(
+                RiskType.MARKET.value, "投资组合", str(e)
             )
 
     async def _check_ai_services(self) -> None:
@@ -794,225 +774,23 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
         Returns:
             建议列表
         """
-        # 尝试使用AI服务生成个性化建议
-        ai_recommendations = await self._get_ai_recommendations(risk_factors)
-        if ai_recommendations:
-            return ai_recommendations
+        # 使用推荐服务生成建议
+        recommendations = self.recommendation_service.get_market_risk_recommendations(
+            risk_factors
+        )
 
-        recommendations = []
-
-        # 根据风险因子生成建议
-        for factor in risk_factors:
-            if factor.factor_name == "资产集中度风险":
-                if factor.score > 70:
-                    recommendations.append(
-                        "投资组合资产过于集中，建议大幅分散投资到更多不同的资产，降低单一资产风险"
-                    )
-                    recommendations.append(
-                        "考虑设置单一资产最大持仓比例限制，如不超过总资产的20%"
-                    )
-                    recommendations.append(
-                        "增加不同类别的资产，如稳定币、大型代币、中小型代币的组合配置"
-                    )
-                elif factor.score > 50:
-                    recommendations.append(
-                        "投资组合资产集中度较高，建议适当分散投资，降低主要资产的配置比例"
-                    )
-                    recommendations.append(
-                        "关注主要持仓资产的市场风险，考虑逐步调整资产配置"
-                    )
-                else:
-                    recommendations.append(
-                        "投资组合资产分散度良好，继续保持当前的多元化投资策略"
-                    )
-
-                # 检查是否有特别集中的资产
-                high_concentration_assets = []
-                for data_point in factor.data_points:
-                    if data_point.get("percentage", 0) > 0.3:  # 占比超过30%
-                        high_concentration_assets.append(data_point.get("asset", ""))
-
-                if high_concentration_assets:
-                    assets_str = ", ".join(high_concentration_assets[:3])
-                    if len(high_concentration_assets) > 3:
-                        assets_str += f" 等{len(high_concentration_assets)}个资产"
-                    recommendations.append(
-                        f"特别关注以下高集中度资产: {assets_str}，考虑降低其配置比例"
-                    )
-
-            elif factor.factor_name == "市场波动性风险":
-                if factor.score > 70:
-                    recommendations.append(
-                        "投资组合波动性风险较高，建议增加稳定币比例或使用对冲策略"
-                    )
-                    recommendations.append("考虑设置止损策略，限制单次下跌的最大损失")
-                    recommendations.append(
-                        "关注高波动性资产的市场动态，在极端波动时考虑减仓"
-                    )
-                elif factor.score > 50:
-                    recommendations.append(
-                        "投资组合波动性风险中等，建议关注市场波动指标，适时调整仓位"
-                    )
-                    recommendations.append(
-                        "考虑增加低波动性资产的比例，平衡投资组合风险"
-                    )
-                else:
-                    recommendations.append(
-                        "投资组合波动性风险较低，继续保持当前的风险管理策略"
-                    )
-
-                # 检查是否有特别波动的资产
-                high_volatility_assets = []
-                for data_point in factor.data_points:
-                    if data_point.get("value", 0) > 15:  # 波动率超过15%
-                        high_volatility_assets.append(data_point.get("name", ""))
-
-                if high_volatility_assets:
-                    assets_str = ", ".join(high_volatility_assets[:3])
-                    if len(high_volatility_assets) > 3:
-                        assets_str += f" 等{len(high_volatility_assets)}个资产"
-                    recommendations.append(
-                        f"特别关注以下高波动性资产: {assets_str}，考虑降低其配置比例或设置更严格的止损"
-                    )
-
-            elif factor.factor_name == "市场趋势":
-                if factor.score > 70:
-                    recommendations.append(
-                        "市场下跌趋势明显，建议减少风险敞口或设置止损"
-                    )
-                    recommendations.append("考虑增加稳定币比例，等待更好的入场时机")
-                    recommendations.append("关注市场反转信号，避免在下跌趋势中追加投资")
-                elif factor.score > 50:
-                    recommendations.append(
-                        "市场趋势偏弱，建议谨慎投资，关注技术指标变化"
-                    )
-                    recommendations.append("考虑分批建仓策略，避免一次性投入过多资金")
-                elif factor.score > 30:
-                    recommendations.append(
-                        "市场趋势偏强，可以考虑适度增加仓位，但仍需关注风险"
-                    )
-                    recommendations.append("设置止盈策略，锁定部分收益")
-                else:
-                    recommendations.append(
-                        "市场上涨趋势明显，可以考虑适度增加仓位，但注意设置止盈"
-                    )
-
-                # 检查是否有特别强的下跌趋势资产
-                bearish_assets = []
-                for data_point in factor.data_points:
-                    if (
-                        data_point.get("trend") == "bearish"
-                        and data_point.get("strength") == "strong"
-                    ):
-                        bearish_assets.append(data_point.get("asset", ""))
-
-                if bearish_assets:
-                    assets_str = ", ".join(bearish_assets[:3])
-                    if len(bearish_assets) > 3:
-                        assets_str += f" 等{len(bearish_assets)}个资产"
-                    recommendations.append(
-                        f"特别关注以下强下跌趋势资产: {assets_str}，考虑减仓或设置止损"
-                    )
-
-            elif factor.factor_name == "资产相关性风险":
-                if factor.score > 70:
-                    recommendations.append(
-                        "投资组合中资产高度相关，建议增加低相关性资产，如不同类别或不同链上的资产"
-                    )
-                    recommendations.append(
-                        "考虑引入对冲策略，降低整体投资组合的系统性风险"
-                    )
-                    recommendations.append("关注宏观经济因素对高相关性资产的共同影响")
-                elif factor.score > 50:
-                    recommendations.append(
-                        "投资组合中资产相关性较高，建议适当增加低相关性资产"
-                    )
-                    recommendations.append("关注市场波动对相关性高的资产组合的影响")
-                else:
-                    recommendations.append(
-                        "投资组合资产相关性适中或较低，继续保持当前的多元化策略"
-                    )
-
-                # 检查是否有高相关性对
-                high_correlation_pairs = []
-                for data_point in factor.data_points:
-                    if "asset_pair" in data_point and "correlation" in data_point:
-                        if abs(data_point.get("correlation", 0)) > 0.8:  # 相关性超过0.8
-                            high_correlation_pairs.append(
-                                data_point.get("asset_pair", "")
-                            )
-
-                if high_correlation_pairs:
-                    pairs_str = ", ".join(high_correlation_pairs[:3])
-                    if len(high_correlation_pairs) > 3:
-                        pairs_str += f" 等{len(high_correlation_pairs)}对资产"
-                    recommendations.append(
-                        f"特别关注以下高相关性资产对: {pairs_str}，考虑减少其中一个资产的配置"
-                    )
-
-        # 添加一般性建议
-        if not recommendations:
-            recommendations.append("定期检查市场状况，及时调整投资策略")
-            recommendations.append("关注宏观经济因素对加密货币市场的影响")
-            recommendations.append("建立系统性的风险管理策略，包括止损和止盈计划")
+        # 如果有AI服务，增加更多个性化建议
+        if self.ai_predictor and hasattr(
+            self.ai_predictor, "generate_market_risk_recommendations"
+        ):
+            try:
+                ai_recommendations = await self._get_ai_recommendations(risk_factors)
+                if ai_recommendations:
+                    recommendations.extend(ai_recommendations)
+            except Exception as e:
+                self.logger.error(f"获取AI市场风险建议时出错: {str(e)}")
 
         return recommendations
-
-    async def _get_ai_recommendations(
-        self, risk_factors: List[RiskFactor]
-    ) -> List[str]:
-        """
-        使用AI服务生成个性化建议
-
-        Args:
-            risk_factors: 风险因子列表
-
-        Returns:
-            AI生成的建议列表，如果AI服务不可用或失败则返回空列表
-        """
-        if not self.ai_service:
-            return []
-
-        try:
-            self.logger.info("尝试使用AI服务生成个性化市场风险建议")
-
-            # 准备输入数据
-            risk_data = {
-                "risk_factors": [
-                    {
-                        "factor_name": factor.factor_name,
-                        "score": factor.score,
-                        "description": factor.description,
-                        "trend": factor.trend,
-                        "data_points": factor.data_points,
-                    }
-                    for factor in risk_factors
-                ],
-                "analysis_type": "market_risk_recommendations",
-            }
-
-            # 调用AI服务
-            ai_result = await self.ai_service.analyze_with_predictor(
-                analysis_type="market_risk_recommendations", data=risk_data
-            )
-
-            # 提取建议
-            if ai_result and "recommendations" in ai_result:
-                recommendations = ai_result.get("recommendations", [])
-                if recommendations:
-                    self.logger.info(
-                        f"AI服务成功生成{len(recommendations)}条市场风险建议"
-                    )
-                    return recommendations
-                else:
-                    self.logger.warning("AI服务返回的建议列表为空")
-            else:
-                self.logger.warning("AI服务返回的结果不包含建议")
-
-            return []
-        except Exception as e:
-            self.logger.error(f"使用AI服务生成市场风险建议时出错: {str(e)}")
-            return []
 
     async def get_monitoring_points(self, risk_factors: List[RiskFactor]) -> List[str]:
         """
@@ -1024,108 +802,18 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
         Returns:
             监控点列表
         """
-        # 尝试使用AI服务生成个性化监控点
-        ai_monitoring_points = await self._get_ai_monitoring_points(risk_factors)
-        if ai_monitoring_points:
-            return ai_monitoring_points
+        # 使用推荐服务生成监控点
+        return self.recommendation_service.get_monitoring_points("MARKET", risk_factors)
 
-        monitoring_points = []
-
-        # 根据风险因子生成监控点
-        for factor in risk_factors:
-            if factor.factor_name == "资产集中度风险":
-                if factor.score > 70:
-                    monitoring_points.append(
-                        "密切监控主要资产的价格波动和市场消息，设置价格预警"
-                    )
-                    monitoring_points.append("定期评估资产集中度，确保不超过设定的阈值")
-                    monitoring_points.append(
-                        "关注主要资产的流动性变化，确保在需要时能够快速调整仓位"
-                    )
-                elif factor.score > 40:
-                    monitoring_points.append("定期监控主要资产的价格波动和市场消息")
-                    monitoring_points.append("关注资产集中度的变化趋势")
-                else:
-                    monitoring_points.append(
-                        "定期检查资产分布情况，确保维持良好的分散度"
-                    )
-
-            elif factor.factor_name == "市场波动性风险":
-                if factor.score > 70:
-                    monitoring_points.append(
-                        "密切关注市场波动指标，如VIX或加密货币恐惧与贪婪指数"
-                    )
-                    monitoring_points.append(
-                        "监控高波动性资产的价格变化，设置波动率预警"
-                    )
-                    monitoring_points.append("关注市场流动性变化，特别是在极端波动时期")
-                elif factor.score > 40:
-                    monitoring_points.append("定期关注市场波动指标和主要资产的波动率")
-                    monitoring_points.append("监控投资组合的整体波动性变化")
-                else:
-                    monitoring_points.append(
-                        "定期检查市场波动性状况，确保风险在可控范围内"
-                    )
-
-            elif factor.factor_name == "市场趋势":
-                if factor.score > 70:
-                    monitoring_points.append(
-                        "密切跟踪主要技术指标，如移动平均线和RSI，关注趋势反转信号"
-                    )
-                    monitoring_points.append("监控市场情绪指标，如交易量和持仓比例变化")
-                    monitoring_points.append("关注宏观经济事件对市场趋势的影响")
-                elif factor.score > 40:
-                    monitoring_points.append("定期跟踪主要技术指标和市场趋势变化")
-                    monitoring_points.append("关注重要支撑位和阻力位的突破情况")
-                else:
-                    monitoring_points.append(
-                        "定期检查市场趋势状况，关注潜在的趋势变化信号"
-                    )
-
-            elif factor.factor_name == "资产相关性风险":
-                if factor.score > 70:
-                    monitoring_points.append(
-                        "密切关注投资组合的相关性矩阵变化，特别是在市场波动时期"
-                    )
-                    monitoring_points.append(
-                        "监控高相关性资产对的价格变动，关注相关性突变"
-                    )
-                    monitoring_points.append("关注可能影响多个资产的系统性风险因素")
-                elif factor.score > 40:
-                    monitoring_points.append("定期评估投资组合的相关性矩阵")
-                    monitoring_points.append("关注市场环境变化对资产相关性的影响")
-                else:
-                    monitoring_points.append(
-                        "定期检查资产相关性状况，确保维持良好的多元化效果"
-                    )
-
-        # 添加一般性监控点
-        if not monitoring_points:
-            monitoring_points.append("定期检查市场整体状况和宏观经济指标")
-            monitoring_points.append("关注重要的市场事件和政策变化")
-            monitoring_points.append("定期评估投资组合的风险收益特征")
-
-        return monitoring_points
-
-    async def _get_ai_monitoring_points(
+    async def _get_ai_recommendations(
         self, risk_factors: List[RiskFactor]
     ) -> List[str]:
-        """
-        使用AI服务生成个性化监控点
-
-        Args:
-            risk_factors: 风险因子列表
-
-        Returns:
-            AI生成的监控点列表，如果AI服务不可用或失败则返回空列表
-        """
-        if not self.ai_service:
+        """获取AI生成的建议"""
+        if not self.ai_predictor:
             return []
 
         try:
-            self.logger.info("尝试使用AI服务生成个性化市场风险监控点")
-
-            # 准备输入数据
+            # 准备风险因子数据
             risk_data = {
                 "risk_factors": [
                     {
@@ -1137,28 +825,15 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                     }
                     for factor in risk_factors
                 ],
-                "analysis_type": "market_risk_monitoring_points",
             }
 
-            # 调用AI服务
-            ai_result = await self.ai_service.analyze_with_predictor(
-                analysis_type="market_risk_monitoring_points", data=risk_data
+            # 获取AI建议
+            result = await self.ai_predictor.generate_market_risk_recommendations(
+                risk_data
             )
-
-            # 提取监控点
-            if ai_result and "monitoring_points" in ai_result:
-                monitoring_points = ai_result.get("monitoring_points", [])
-                if monitoring_points:
-                    self.logger.info(
-                        f"AI服务成功生成{len(monitoring_points)}条市场风险监控点"
-                    )
-                    return monitoring_points
-                else:
-                    self.logger.warning("AI服务返回的监控点列表为空")
-            else:
-                self.logger.warning("AI服务返回的结果不包含监控点")
-
-            return []
+            if result and "recommendations" in result:
+                return result["recommendations"]
         except Exception as e:
-            self.logger.error(f"使用AI服务生成市场风险监控点时出错: {str(e)}")
-            return []
+            self.logger.error(f"获取AI市场风险建议时出错: {str(e)}")
+
+        return []
