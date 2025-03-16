@@ -12,7 +12,7 @@ logger = logging.getLogger("defi_risk.api.market")
 
 @router.get("/data/{asset}")
 async def get_market_data(
-    asset: str,
+    asset: Dict[str, str],
     blockchain_service: BlockchainService = Depends(get_blockchain_service),
 ):
     """
@@ -27,7 +27,9 @@ async def get_market_data(
         price = await blockchain_service.get_token_price(asset)
 
         # 获取资产历史数据
-        historical_data = await blockchain_service.get_asset_historical_data(asset)
+        historical_data = await blockchain_service.get_asset_historical_data(
+            asset["symbol"]
+        )
 
         # 计算24小时价格变化
         price_change_24h = 0
@@ -97,30 +99,9 @@ async def predict_market(
         raise HTTPException(status_code=500, detail=f"预测市场趋势失败: {str(e)}")
 
 
-@router.get("/alerts")
-async def get_market_alerts(
-    wallet_address: Optional[str] = None,
-    blockchain_service: BlockchainService = Depends(get_blockchain_service),
-):
-    """
-    获取市场警报
-
-    - **wallet_address**: 钱包地址（可选）
-    """
-    try:
-        logger.info(f"收到市场警报请求: {wallet_address or '无钱包地址'}")
-
-        # 获取市场警报
-        alerts = await blockchain_service.get_market_alerts(wallet_address)
-
-        return {
-            "wallet_address": wallet_address,
-            "alerts": alerts,
-            "alert_count": len(alerts),
-        }
-    except Exception as e:
-        logger.error(f"获取市场警报时出错: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"获取市场警报失败: {str(e)}")
+# 注意: 市场警报功能已移至钱包API
+# 要获取市场警报，请使用以下端点:
+# GET /api/wallet/{wallet_address}/alerts
 
 
 @router.get("/gas-price")

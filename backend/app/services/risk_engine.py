@@ -1,4 +1,4 @@
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 from app.models.domain.risk import RiskFactor, RiskAssessment, RiskLevel, RiskType
 import uuid
 from datetime import datetime
@@ -6,6 +6,27 @@ import logging
 import asyncio
 from app.core.config import settings
 from app.services.ai_predictor import AiPredictor
+from dataclasses import dataclass
+
+
+@dataclass
+class MarketRiskResult:
+    """市场风险分析结果"""
+
+    risk_type: str = "MARKET"
+    target: str = ""
+    score: float = 0.0
+    factors: List[RiskFactor] = None
+    recommendations: List[str] = None
+    monitoring_points: List[str] = None
+
+    def __post_init__(self):
+        if self.factors is None:
+            self.factors = []
+        if self.recommendations is None:
+            self.recommendations = []
+        if self.monitoring_points is None:
+            self.monitoring_points = []
 
 
 class RiskEngine:
@@ -665,3 +686,321 @@ class RiskEngine:
                 trend="稳定",
                 data_points=[{"protocol": protocol, "security_score": 70}],
             )
+
+    async def analyze_market_risk(self, positions: List[Dict]) -> MarketRiskResult:
+        """
+        分析市场风险
+
+        Args:
+            positions: 钱包头寸列表
+
+        Returns:
+            MarketRiskResult: 市场风险分析结果
+        """
+        self.logger.info(f"开始分析市场风险，头寸数量: {len(positions)}")
+
+        result = MarketRiskResult(
+            target="portfolio", recommendations=[], monitoring_points=[]
+        )
+
+        try:
+            # 如果没有头寸，返回低风险结果
+            if not positions:
+                self.logger.warning("没有头寸数据，无法分析市场风险")
+                result.score = 10.0
+                result.recommendations = ["添加资产以获取更准确的市场风险分析"]
+                return result
+
+            # 提取资产信息
+            assets = {}
+            total_value = 0.0
+
+            for position in positions:
+                asset_name = position.get("asset", "unknown")
+                asset_value = float(position.get("usd_value", 0))
+
+                if asset_name in assets:
+                    assets[asset_name] += asset_value
+                else:
+                    assets[asset_name] = asset_value
+
+                total_value += asset_value
+
+            # 计算资产集中度
+            concentration_data = {
+                "assets": [{"name": k, "value": v} for k, v in assets.items()],
+                "total_value": total_value,
+            }
+
+            # 使用AI预测器分析集中度风险
+            concentration_risk = None
+            correlation_risk = None
+
+            try:
+                if self.ai_predictor and hasattr(
+                    self.ai_predictor, "analyze_concentration_risk"
+                ):
+                    concentration_risk = (
+                        await self.ai_predictor.analyze_concentration_risk(
+                            concentration_data
+                        )
+                    )
+
+                    # 创建集中度风险因子
+                    if concentration_risk and "score" in concentration_risk:
+                        conc_factor = self.create_risk_factor(
+                            risk_type="MARKET",
+                            factor_name="资产集中度风险",
+                            score=float(concentration_risk.get("score", 50)),
+                            weight=0.4,
+                            description=concentration_risk.get(
+                                "description", "资产集中度分析"
+                            ),
+                            trend=concentration_risk.get("trend", "稳定"),
+                            data_points=concentration_risk.get("data_points", []),
+                        )
+                        result.factors.append(conc_factor)
+
+                        # 添加建议
+                        if "recommendations" in concentration_risk:
+                            result.recommendations.extend(
+                                concentration_risk["recommendations"]
+                            )
+
+                        # 添加监控点
+                        if "monitoring_points" in concentration_risk:
+                            result.monitoring_points.extend(
+                                concentration_risk["monitoring_points"]
+                            )
+            except Exception as e:
+                self.logger.error(f"分析集中度风险时出错: {str(e)}")
+                # 添加默认集中度风险因子
+                conc_factor = self.create_risk_factor(
+                    risk_type="MARKET",
+                    factor_name="资产集中度风险",
+                    score=60.0,
+                    weight=0.4,
+                    description="无法分析资产集中度风险",
+                    trend="稳定",
+                    data_points=[],
+                )
+                result.factors.append(conc_factor)
+
+            # 分析相关性风险
+            try:
+                if self.ai_predictor and hasattr(
+                    self.ai_predictor, "analyze_correlation_risk"
+                ):
+                    # 准备相关性分析数据
+                    correlation_data = {
+                        "assets": list(assets.keys()),
+                        "positions": positions,
+                    }
+
+                    correlation_risk = await self.ai_predictor.analyze_correlation_risk(
+                        correlation_data
+                    )
+
+                    # 创建相关性风险因子
+                    if correlation_risk and "score" in correlation_risk:
+                        corr_factor = self.create_risk_factor(
+                            risk_type="MARKET",
+                            factor_name="资产相关性风险",
+                            score=float(correlation_risk.get("score", 50)),
+                            weight=0.3,
+                            description=correlation_risk.get(
+                                "description", "资产相关性分析"
+                            ),
+                            trend=correlation_risk.get("trend", "稳定"),
+                            data_points=correlation_risk.get("data_points", []),
+                        )
+                        result.factors.append(corr_factor)
+
+                        # 添加建议
+                        if "recommendations" in correlation_risk:
+                            result.recommendations.extend(
+                                correlation_risk["recommendations"]
+                            )
+
+                        # 添加监控点
+                        if "monitoring_points" in correlation_risk:
+                            result.monitoring_points.extend(
+                                correlation_risk["monitoring_points"]
+                            )
+            except Exception as e:
+                self.logger.error(f"分析相关性风险时出错: {str(e)}")
+                # 添加默认相关性风险因子
+                corr_factor = self.create_risk_factor(
+                    risk_type="MARKET",
+                    factor_name="资产相关性风险",
+                    score=50.0,
+                    weight=0.3,
+                    description="无法分析资产相关性风险",
+                    trend="稳定",
+                    data_points=[],
+                )
+                result.factors.append(corr_factor)
+
+            # 添加市场波动风险因子
+            volatility_factor = self.create_risk_factor(
+                risk_type="MARKET",
+                factor_name="市场波动风险",
+                score=55.0,  # 默认中等风险
+                weight=0.3,
+                description="当前市场波动性处于中等水平",
+                trend="上升",
+                data_points=[{"volatility_index": 55}],
+            )
+            result.factors.append(volatility_factor)
+
+            # 计算总体市场风险评分
+            total_score = 0.0
+            total_weight = 0.0
+
+            for factor in result.factors:
+                total_score += factor.score * factor.weight
+                total_weight += factor.weight
+
+            if total_weight > 0:
+                result.score = total_score / total_weight
+            else:
+                result.score = 50.0  # 默认中等风险
+
+            # 生成市场风险建议
+            if (
+                not result.recommendations
+                and self.ai_predictor
+                and hasattr(self.ai_predictor, "generate_market_risk_recommendations")
+            ):
+                try:
+                    # 准备风险因子数据
+                    risk_data = {
+                        "risk_factors": [
+                            {
+                                "factor_name": factor.factor_name,
+                                "score": factor.score,
+                                "description": factor.description,
+                                "trend": factor.trend,
+                                "data_points": factor.data_points,
+                            }
+                            for factor in result.factors
+                        ],
+                    }
+
+                    # 获取AI建议
+                    recommendations = (
+                        await self.ai_predictor.generate_market_risk_recommendations(
+                            risk_data
+                        )
+                    )
+                    if recommendations and "recommendations" in recommendations:
+                        result.recommendations.extend(
+                            recommendations["recommendations"]
+                        )
+                except Exception as e:
+                    self.logger.error(f"生成市场风险建议时出错: {str(e)}")
+                    result.recommendations.append("无法生成市场风险建议")
+
+            # 生成市场风险监控点
+            if (
+                not result.monitoring_points
+                and self.ai_predictor
+                and hasattr(self.ai_predictor, "generate_market_risk_monitoring_points")
+            ):
+                try:
+                    # 准备风险因子数据
+                    risk_data = {
+                        "risk_factors": [
+                            {
+                                "factor_name": factor.factor_name,
+                                "score": factor.score,
+                                "description": factor.description,
+                                "trend": factor.trend,
+                                "data_points": factor.data_points,
+                            }
+                            for factor in result.factors
+                        ],
+                    }
+
+                    # 获取AI监控点
+                    monitoring_points = (
+                        await self.ai_predictor.generate_market_risk_monitoring_points(
+                            risk_data
+                        )
+                    )
+                    if monitoring_points and "monitoring_points" in monitoring_points:
+                        result.monitoring_points.extend(
+                            monitoring_points["monitoring_points"]
+                        )
+                except Exception as e:
+                    self.logger.error(f"生成市场风险监控点时出错: {str(e)}")
+                    result.monitoring_points.append("无法生成市场风险监控点")
+
+            # 如果没有建议，添加默认建议
+            if not result.recommendations:
+                if result.score > 70:
+                    result.recommendations = [
+                        "考虑分散投资组合，减少高风险资产敞口",
+                        "关注市场波动，设置止损点",
+                        "定期重新平衡投资组合",
+                    ]
+                elif result.score > 40:
+                    result.recommendations = [
+                        "保持投资组合多样化",
+                        "定期监控市场变化",
+                        "考虑增加稳定币比例",
+                    ]
+                else:
+                    result.recommendations = [
+                        "继续保持当前的多样化策略",
+                        "可以考虑适度增加收益型资产",
+                    ]
+
+            # 如果没有监控点，添加默认监控点
+            if not result.monitoring_points:
+                result.monitoring_points = [
+                    "关注主要资产价格波动",
+                    "监控DeFi协议TVL变化",
+                    "关注市场情绪指标",
+                ]
+
+            self.logger.info(f"市场风险分析完成，风险评分: {result.score:.1f}")
+            return result
+
+        except Exception as e:
+            self.logger.error(f"分析市场风险时出错: {str(e)}")
+            # 返回默认风险结果
+            result.score = 50.0
+            result.recommendations = ["无法完成市场风险分析，请稍后重试"]
+            result.monitoring_points = ["监控市场整体波动"]
+            return result
+
+    def create_risk_factor(
+        self,
+        risk_type: str,
+        factor_name: str,
+        score: float,
+        weight: float,
+        description: str,
+        trend: str = "稳定",
+        data_points: List[Dict] = None,
+        metadata: Dict = None,
+    ) -> RiskFactor:
+        """创建风险因子"""
+        if data_points is None:
+            data_points = []
+        if metadata is None:
+            metadata = {}
+
+        return RiskFactor(
+            id=str(uuid.uuid4()),
+            risk_type=risk_type,
+            name=factor_name,
+            factor_name=factor_name,
+            score=score,
+            weight=weight,
+            description=description,
+            trend=trend,
+            data_points=data_points,
+            metadata=metadata,
+        )

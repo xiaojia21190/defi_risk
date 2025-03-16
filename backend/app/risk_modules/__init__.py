@@ -8,6 +8,7 @@ from app.risk_modules.protocol_risk import ProtocolRiskAnalyzer
 from app.risk_modules.liquidity_risk import LiquidityRiskAnalyzer
 from app.risk_modules.correlation_risk import CorrelationRiskAnalyzer
 from app.risk_modules.smart_contract_risk import SmartContractRiskAnalyzer
+from app.services.blockchain import BlockchainService
 
 __all__ = [
     "RiskAnalyzerBase",
@@ -16,4 +17,61 @@ __all__ = [
     "LiquidityRiskAnalyzer",
     "CorrelationRiskAnalyzer",
     "SmartContractRiskAnalyzer",
+    "create_risk_analyzers",
 ]
+
+
+def create_risk_analyzers(blockchain_service=None, ai_service=None, ai_predictor=None):
+    """
+    创建所有风险分析器实例
+
+    Args:
+        blockchain_service: 区块链服务实例
+        ai_service: AI服务实例
+        ai_predictor: AI预测器实例
+
+    Returns:
+        Dict: 包含所有风险分析器实例的字典
+    """
+    # 如果没有提供区块链服务，创建一个
+    if blockchain_service is None:
+        blockchain_service = BlockchainService()
+
+    # 创建各风险分析器实例
+    market_risk = MarketRiskAnalyzer(
+        blockchain_service=blockchain_service,
+        ai_service=ai_service,
+        ai_predictor=ai_predictor,
+    )
+
+    protocol_risk = ProtocolRiskAnalyzer(
+        blockchain_service=blockchain_service,
+        ai_service=ai_service,
+        ai_predictor=ai_predictor,
+    )
+
+    liquidity_risk = LiquidityRiskAnalyzer(
+        blockchain_service=blockchain_service,
+        ai_service=ai_service,
+        ai_predictor=ai_predictor,
+    )
+
+    correlation_risk = CorrelationRiskAnalyzer(
+        blockchain_service=blockchain_service,
+        ai_service=ai_service,
+        ai_predictor=ai_predictor,
+    )
+
+    smart_contract_risk = SmartContractRiskAnalyzer(
+        blockchain_service=blockchain_service,
+        ai_service=ai_service,
+        ai_predictor=ai_predictor,
+    )
+
+    return {
+        "market_risk": market_risk,
+        "protocol_risk": protocol_risk,
+        "liquidity_risk": liquidity_risk,
+        "correlation_risk": correlation_risk,
+        "smart_contract_risk": smart_contract_risk,
+    }

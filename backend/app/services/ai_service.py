@@ -305,6 +305,172 @@ class AiService:
 }
 ```
             """,
+            "concentration_risk": """
+请分析以下资产集中度风险:
+
+上下文数据:
+{context}
+
+参数:
+{parameters}
+
+请提供以下格式的JSON响应:
+1. 风险评分（0-100分，越高风险越大）
+2. 风险描述
+3. 风险趋势（上升/稳定/下降）
+4. 数据点（资产分布情况）
+
+响应格式示例:
+```json
+{
+  "risk_score": 75,
+  "description": "投资组合过于集中在ETH，占比超过60%，存在较高的单一资产风险",
+  "trend": "上升",
+  "data_points": [
+    {
+      "asset": "ETH",
+      "percentage": 0.65,
+      "risk_contribution": 0.75
+    },
+    {
+      "asset": "BTC",
+      "percentage": 0.20,
+      "risk_contribution": 0.15
+    },
+    {
+      "asset": "USDC",
+      "percentage": 0.15,
+      "risk_contribution": 0.10
+    }
+  ],
+  "hhi_index": 4850,
+  "max_drawdown_estimate": 0.35
+}
+```
+            """,
+            "correlation_risk": """
+请分析以下资产相关性风险:
+
+上下文数据:
+{context}
+
+参数:
+{parameters}
+
+请提供以下格式的JSON响应:
+1. 风险评分（0-100分，越高风险越大）
+2. 风险描述
+3. 风险趋势（上升/稳定/下降）
+4. 数据点（资产相关性情况）
+
+响应格式示例:
+```json
+{
+  "risk_score": 65,
+  "description": "投资组合中的主要资产相关性较高，多样化效果有限",
+  "trend": "稳定",
+  "data_points": [
+    {
+      "asset_pair": "ETH-BTC",
+      "correlation": 0.85,
+      "weight": 0.6
+    },
+    {
+      "asset_pair": "ETH-SOL",
+      "correlation": 0.75,
+      "weight": 0.3
+    },
+    {
+      "asset_pair": "BTC-SOL",
+      "correlation": 0.70,
+      "weight": 0.1
+    }
+  ],
+  "avg_correlation": 0.78,
+  "diversification_score": 0.35
+}
+```
+            """,
+            "market_risk_recommendations": """
+请根据以下风险因子生成市场风险建议:
+
+上下文数据:
+{context}
+
+参数:
+{parameters}
+
+请提供以下格式的JSON响应:
+1. 建议列表（至少5条具体、可操作的建议）
+2. 优先级排序（高/中/低）
+
+响应格式示例:
+```json
+{
+  "recommendations": [
+    "将ETH持仓比例从当前的65%降低至40%以下，减少单一资产风险",
+    "增加稳定币比例至少20%，作为市场波动的缓冲",
+    "考虑在当前价格区间设置分批止盈点，锁定部分收益",
+    "对于高波动性资产如SOL，设置15%的止损位，控制下行风险",
+    "增加低相关性资产如LINK或DOT，提高投资组合的多样性",
+    "关注市场整体趋势变化，避免在下跌趋势中追加投资"
+  ],
+  "priority_recommendations": [
+    {
+      "recommendation": "将ETH持仓比例从当前的65%降低至40%以下，减少单一资产风险",
+      "priority": "高",
+      "rationale": "当前集中度风险评分为75，远高于安全阈值"
+    },
+    {
+      "recommendation": "增加稳定币比例至少20%，作为市场波动的缓冲",
+      "priority": "高",
+      "rationale": "当前波动性风险评分为68，市场波动加剧"
+    }
+  ]
+}
+```
+            """,
+            "market_risk_monitoring_points": """
+请根据以下风险因子生成市场风险监控点:
+
+上下文数据:
+{context}
+
+参数:
+{parameters}
+
+请提供以下格式的JSON响应:
+1. 监控点列表（至少5条具体、可量化的监控点）
+2. 优先级排序（高/中/低）
+
+响应格式示例:
+```json
+{
+  "monitoring_points": [
+    "每日监控ETH价格变动，如单日下跌超过10%，考虑减仓",
+    "关注投资组合中最大资产ETH的市值占比，保持在40%以下",
+    "监控市场恐惧与贪婪指数，当指数低于20或高于80时重新评估仓位",
+    "追踪主要资产间的相关性变化，特别是ETH-BTC对的相关系数",
+    "关注主要持仓资产的交易量变化，交易量突增可能预示价格波动",
+    "定期评估投资组合的整体波动率，与市场基准进行比较"
+  ],
+  "priority_monitoring_points": [
+    {
+      "point": "每日监控ETH价格变动，如单日下跌超过10%，考虑减仓",
+      "priority": "高",
+      "frequency": "每日",
+      "threshold": "10%下跌"
+    },
+    {
+      "point": "关注投资组合中最大资产ETH的市值占比，保持在40%以下",
+      "priority": "高",
+      "frequency": "每周",
+      "threshold": "40%占比"
+    }
+  ]
+}
+```
+            """,
             # 添加更多模板...
         }
 
@@ -341,6 +507,55 @@ class AiService:
 
         return await asyncio.gather(*tasks)
 
+    async def is_available(self) -> bool:
+        """
+        检查AI服务是否可用
+
+        Returns:
+            bool: 服务是否可用
+        """
+        logger.info("检查AI服务可用性")
+        try:
+            # 构建一个简单的请求来测试服务
+            test_request = {
+                "model": self.model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "你是一个专业的DeFi风险分析AI助手。",
+                    },
+                    {"role": "user", "content": "测试连接"},
+                ],
+                "max_tokens": 10,
+                "temperature": 0.7,
+            }
+
+            # 设置代理
+            proxy = self.proxy_url if self.proxy_url else None
+
+            # 设置超时时间
+            timeout = aiohttp.ClientTimeout(total=5)  # 5秒超时
+
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    f"{self.api_url}/chat/completions",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {self.api_key}",
+                    },
+                    json=test_request,
+                    proxy=proxy,
+                ) as response:
+                    if response.status == 200:
+                        logger.info("AI服务可用")
+                        return True
+                    else:
+                        logger.warning(f"AI服务不可用，状态码: {response.status}")
+                        return False
+        except Exception as e:
+            logger.error(f"检查AI服务可用性时出错: {str(e)}")
+            return False
+
     async def analyze_with_predictor(
         self,
         analysis_type: str,
@@ -351,7 +566,9 @@ class AiService:
         使用AI预测器进行分析
 
         Args:
-            analysis_type: 分析类型 (protocol_risk, market_trend, portfolio_risk)
+            analysis_type: 分析类型 (protocol_risk, market_trend, portfolio_risk,
+                          concentration_risk, correlation_risk, market_risk_recommendations,
+                          market_risk_monitoring_points)
             data: 分析数据
             parameters: 分析参数
 
@@ -376,26 +593,76 @@ class AiService:
                 result = predictor.analyze_market_trend(data)
             elif analysis_type == "portfolio_risk":
                 result = predictor.analyze_portfolio_risk(data)
+            elif analysis_type == "concentration_risk":
+                result = predictor.analyze_concentration_risk(data)
+            elif analysis_type == "correlation_risk":
+                result = predictor.analyze_correlation_risk(data)
+            elif analysis_type == "market_risk_recommendations":
+                result = predictor.generate_market_risk_recommendations(data)
+            elif analysis_type == "market_risk_monitoring_points":
+                result = predictor.generate_market_risk_monitoring_points(data)
+            # 添加对其他分析类型的支持，映射到现有方法
+            elif analysis_type == "asset_correlation":
+                result = predictor.analyze_correlation_risk(data)
+            elif analysis_type == "investment_type_correlation":
+                result = predictor.analyze_correlation_risk(data)
+            elif analysis_type == "protocol_correlation":
+                result = predictor.analyze_correlation_risk(data)
+            elif analysis_type == "protocol_history":
+                # 如果没有专门的方法，使用通用风险分析
+                if hasattr(predictor, "analyze_defi_protocol_risk"):
+                    result = predictor.analyze_defi_protocol_risk(data)
+                else:
+                    # 返回一个基本的风险分析结果
+                    result = {
+                        "risk_score": 50,
+                        "description": f"协议历史风险分析",
+                        "trend": "稳定",
+                        "data_points": [],
+                    }
             else:
-                raise ValueError(f"不支持的分析类型: {analysis_type}")
+                # 如果没有特定的分析方法，尝试使用通用分析
+                if hasattr(predictor, "analyze_generic") and callable(
+                    getattr(predictor, "analyze_generic")
+                ):
+                    result = predictor.analyze_generic(analysis_type, data)
+                else:
+                    # 如果没有通用分析方法，尝试使用OpenAI API
+                    return await self._analyze_with_openai(
+                        analysis_type, data, parameters
+                    )
 
             logger.info(f"AI预测器分析完成: {analysis_type}")
 
             # 将结果转换为AiAnalysis格式
             insights = []
             recommendations = []
+            monitoring_points = []
+            risk_score = None
+
+            # 提取风险评分
+            if "risk_score" in result:
+                risk_score = result["risk_score"]
 
             # 提取洞察
-            if "risk_metrics" in result:
+            if "insights" in result:
+                insights = result["insights"]
+            elif "risk_metrics" in result:
                 for key, value in result["risk_metrics"].items():
                     if isinstance(value, (int, float)):
                         insights.append(f"{key}: {value:.2f}")
                     else:
                         insights.append(f"{key}: {value}")
+            elif "description" in result:
+                insights.append(result["description"])
 
             # 提取建议
             if "recommendations" in result:
                 recommendations = result["recommendations"]
+
+            # 提取监控点
+            if "monitoring_points" in result:
+                monitoring_points = result["monitoring_points"]
 
             # 创建分析结果
             analysis = AiAnalysis(
@@ -406,20 +673,60 @@ class AiService:
                 predictions=[],
                 insights=insights,
                 recommendations=recommendations,
+                monitoring_points=monitoring_points,
                 supporting_data=result,
             )
 
             return analysis
         except Exception as e:
             logger.error(f"AI预测器分析失败: {str(e)}")
-            # 返回空分析结果
-            return AiAnalysis(
-                id=str(uuid.uuid4()),
-                analysis_type=analysis_type,
-                timestamp=datetime.utcnow(),
-                confidence=0.0,
-                predictions=[],
-                insights=[f"分析失败: {str(e)}"],
-                recommendations=[],
-                supporting_data={},
-            )
+            # 尝试使用OpenAI API作为备选
+            try:
+                logger.info(f"尝试使用OpenAI API进行分析: {analysis_type}")
+                return await self._analyze_with_openai(analysis_type, data, parameters)
+            except Exception as e2:
+                logger.error(f"OpenAI API分析也失败: {str(e2)}")
+                # 返回空分析结果
+                return AiAnalysis(
+                    id=str(uuid.uuid4()),
+                    analysis_type=analysis_type,
+                    timestamp=datetime.utcnow(),
+                    confidence=0.0,
+                    predictions=[],
+                    insights=[f"分析失败: {str(e)}"],
+                    recommendations=[],
+                    monitoring_points=[],
+                    supporting_data={},
+                )
+
+    async def _analyze_with_openai(
+        self,
+        analysis_type: str,
+        data: Dict[str, Any],
+        parameters: Dict[str, Any] = None,
+    ) -> AiAnalysis:
+        """
+        使用OpenAI API进行分析
+
+        Args:
+            analysis_type: 分析类型
+            data: 分析数据
+            parameters: 分析参数
+
+        Returns:
+            AiAnalysis: 分析结果
+        """
+        logger.info(f"使用OpenAI API进行分析: {analysis_type}")
+
+        # 构建请求
+        request_data = self._build_request(analysis_type, data, parameters)
+
+        # 调用AI API
+        response_data = await self._call_ai_api(request_data)
+
+        # 解析响应
+        analysis = self._parse_response(analysis_type, response_data)
+
+        logger.info(f"OpenAI API分析完成: {analysis_type}")
+
+        return analysis

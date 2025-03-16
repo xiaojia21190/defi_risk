@@ -47,6 +47,7 @@ class AiAnalysis:
     predictions: List[AiPrediction] = field(default_factory=list)  # 预测列表
     insights: List[str] = field(default_factory=list)  # 洞察列表
     recommendations: List[str] = field(default_factory=list)  # 建议列表
+    monitoring_points: List[str] = field(default_factory=list)  # 监控点列表
     supporting_data: Dict[str, Any] = field(default_factory=dict)  # 支持数据
     metadata: Dict[str, Any] = field(default_factory=dict)  # 元数据
 
