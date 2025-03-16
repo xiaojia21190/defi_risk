@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./ui/tabs";
 import { Badge } from "./ui/badge";
+import ProtocolList from "./ProtocolList";
 
 export const Dashboard: React.FC = () => {
   const { address, isConnected } = useAccount();
@@ -21,7 +22,7 @@ export const Dashboard: React.FC = () => {
   const [selectedAsset, setSelectedAsset] = useState<string>("ETH");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"overview" | "market">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "market" | "protocols">("overview");
   const [apiHealthy, setApiHealthy] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [gasPrice, setGasPrice] = useState<number | null>(null);
@@ -79,7 +80,13 @@ export const Dashboard: React.FC = () => {
 
       // 获取市场预测数据
       const assets = portfolioData.positions.length > 0
-        ? [...new Set(portfolioData.positions.map(p => p.asset.split('/')[0]))]
+        ? [...new Set(portfolioData.positions.map(p => {
+            // 从资产名称或tokenList中提取基础资产
+            if (p.tokenList && p.tokenList.length > 0) {
+              return p.tokenList[0].tokenSymbol.split('/')[0];
+            }
+            return p.asset.split('/')[0];
+          }))]
         : ["ETH", "BTC", "USDC"];
 
       console.log("正在获取资产预测数据:", assets);
@@ -168,68 +175,117 @@ export const Dashboard: React.FC = () => {
   }
 
   return (
-    <div className="w-full space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">DeFi 风险监控</h1>
-          <p className="text-muted-foreground">
-            监控您的 DeFi 投资组合风险和市场趋势
+    <div className="container mx-auto px-4 py-8">
+      {!apiHealthy ? (
+        <div className="text-center py-12">
+          <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
+          <h2 className="text-2xl font-bold mb-2">API服务不可用</h2>
+          <p className="text-muted-foreground mb-6">
+            无法连接到后端服务，请稍后再试
+          </p>
+          <Button onClick={checkApiHealth}>重试连接</Button>
+        </div>
+      ) : !isConnected ? (
+        <div className="text-center py-12">
+          <h2 className="text-2xl font-bold mb-4">连接钱包以查看您的DeFi仪表盘</h2>
+          <p className="text-muted-foreground mb-6">
+            连接您的钱包以查看您的投资组合、风险分析和市场预测
           </p>
         </div>
-        <div className="flex items-center gap-4">
-          {gasPrice && (
-            <div className="flex items-center text-sm">
-              <Fuel className="mr-1 h-4 w-4 text-muted-foreground" />
-              <span className="text-muted-foreground">Gas: </span>
-              <Badge variant="outline" className="ml-1">
-                {gasPrice.toFixed(2)} Gwei
-              </Badge>
-            </div>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="flex items-center"
-          >
-            <RefreshCw className={`mr-1 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-            刷新
-          </Button>
-        </div>
-      </div>
-
-      {error && (
-        <div className="bg-destructive/10 text-destructive p-3 rounded-md flex items-center">
-          <AlertTriangle className="h-5 w-5 mr-2" />
-          {error}
-        </div>
-      )}
-
-      <Tabs defaultValue="overview" className="w-full" onValueChange={(value: string) => setActiveTab(value as any)}>
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="overview">投资组合概览</TabsTrigger>
-          <TabsTrigger value="market">市场分析</TabsTrigger>
-        </TabsList>
-        <TabsContent value="overview" className="space-y-6 mt-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="md:col-span-2">
-              <PortfolioOverview portfolio={portfolio} />
-            </div>
+      ) : (
+        <>
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
             <div>
-              <RiskMonitor portfolio={portfolio} />
+              <h1 className="text-3xl font-bold">DeFi风险仪表盘</h1>
+              <p className="text-muted-foreground">
+                查看您的投资组合、风险分析和市场预测
+              </p>
+            </div>
+
+            <div className="flex items-center gap-4">
+              {gasPrice !== null && (
+                <div className="hidden md:flex items-center gap-2 bg-muted/50 px-3 py-1.5 rounded-lg text-sm">
+                  <Fuel className="h-4 w-4 text-yellow-500" />
+                  <span>Gas: {gasPrice.toFixed(0)} Gwei</span>
+                </div>
+              )}
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRefresh}
+                disabled={refreshing}
+                className="flex items-center gap-2"
+              >
+                {refreshing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                刷新数据
+              </Button>
             </div>
           </div>
-          <AlertsList address={address} />
-        </TabsContent>
-        <TabsContent value="market" className="mt-6">
-          <MarketAnalysis
-            marketPredictions={marketPredictions}
-            selectedAsset={selectedAsset}
-            onAssetChange={setSelectedAsset}
-          />
-        </TabsContent>
-      </Tabs>
+
+          <Tabs defaultValue={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
+            <TabsList className="mb-6">
+              <TabsTrigger value="overview">投资组合概览</TabsTrigger>
+              <TabsTrigger value="market">市场分析</TabsTrigger>
+              <TabsTrigger value="protocols">我的协议</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="overview" className="space-y-6">
+              {/* 现有的概览内容 */}
+              {loading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                </div>
+              ) : error ? (
+                <div className="text-center py-12">
+                  <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
+                  <h2 className="text-xl font-bold mb-2">获取数据出错</h2>
+                  <p className="text-muted-foreground mb-6">{error}</p>
+                  <Button onClick={() => fetchPortfolioData(address)}>重试</Button>
+                </div>
+              ) : (
+                <>
+                  {portfolio && (
+                    <>
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-2">
+                          <PortfolioOverview portfolio={portfolio} />
+                        </div>
+                        <div>
+                          <RiskMonitor portfolio={portfolio} />
+                        </div>
+                      </div>
+
+                      <AlertsList address={address} />
+                    </>
+                  )}
+                </>
+              )}
+            </TabsContent>
+
+            <TabsContent value="market">
+              {/* 现有的市场分析内容 */}
+              <MarketAnalysis
+                marketPredictions={marketPredictions}
+                selectedAsset={selectedAsset}
+                onAssetChange={setSelectedAsset}
+              />
+            </TabsContent>
+
+            <TabsContent value="protocols" className="space-y-6">
+              {/* 新增的协议列表内容 */}
+              <ProtocolList
+                walletAddress={address}
+                title="我的DeFi协议"
+              />
+            </TabsContent>
+          </Tabs>
+        </>
+      )}
     </div>
   );
 };

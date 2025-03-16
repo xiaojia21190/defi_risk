@@ -7,6 +7,7 @@ from app.models.schemas.portfolio import PortfolioAnalysisResponse
 from app.core.init_app import get_blockchain_service, get_ai_service, get_risk_engine
 from app.core.config import settings
 import logging
+from datetime import datetime
 
 from app.services.risk_engine import RiskEngine
 
@@ -37,15 +38,27 @@ async def get_wallet_positions(
         # 获取所有协议头寸
         positions = await blockchain_service.get_all_positions(wallet_address)
 
-        # 计算总价值
-        total_value = sum(position.get("usd_value", 0) for position in positions)
+        # 计算总价值 - 适配OKX数据结构
+        total_value = 0
+        for position in positions:
+            # OKX数据结构中使用total_assets字段
+            if "total_assets" in position:
+                total_value += position.get("total_assets", 0)
+            # 兼容其他数据结构
+            elif "amount" in position:
+                total_value += position.get("amount", 0)
 
-        return {
+        # 构建响应
+        response = {
             "wallet_address": wallet_address,
             "positions": positions,
             "total_value_usd": total_value,
             "position_count": len(positions),
+            "timestamp": datetime.now().isoformat(),
+            "is_demo_data": False,
         }
+
+        return response
     except Exception as e:
         logger.error(f"获取钱包头寸时出错: {str(e)}")
         # 如果出错且是演示模式，返回演示数据
@@ -257,11 +270,16 @@ async def get_wallet_alerts(
         # 获取相关警报
         alerts = await blockchain_service.get_wallet_alerts(wallet_address, positions)
 
-        return {
+        # 构建响应
+        response = {
             "wallet_address": wallet_address,
             "alerts": alerts,
             "alert_count": len(alerts),
+            "timestamp": datetime.now().isoformat(),
+            "is_demo_data": False,
         }
+
+        return response
     except Exception as e:
         logger.error(f"获取钱包警报时出错: {str(e)}")
         # 如果出错且是演示模式，返回演示数据

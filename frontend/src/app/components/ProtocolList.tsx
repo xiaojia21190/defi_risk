@@ -4,7 +4,15 @@ import React, { useState, useEffect } from "react";
 import { apiService, Protocol } from "../services/api";
 import { Loader2, ExternalLink, Search, Filter, ArrowUpDown } from "lucide-react";
 
-export const ProtocolList: React.FC = () => {
+interface ProtocolListProps {
+  walletAddress?: string;
+  title?: string;
+}
+
+export const ProtocolList: React.FC<ProtocolListProps> = ({
+  walletAddress,
+  title = "支持的DeFi协议"
+}) => {
   const [protocols, setProtocols] = useState<Protocol[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -16,20 +24,22 @@ export const ProtocolList: React.FC = () => {
   // 获取所有支持的资产
   const allAssets = Array.from(
     new Set(
-      protocols.flatMap((protocol) => protocol.supported_assets)
+      protocols.flatMap((protocol) => protocol.supported_assets || [])
     )
   ).sort();
 
   useEffect(() => {
     fetchProtocols();
-  }, []);
+  }, [walletAddress]);
 
   const fetchProtocols = async () => {
     try {
       setLoading(true);
       setError(null);
-      console.log("正在获取协议列表...");
-      const data = await apiService.getProtocols();
+      console.log(walletAddress
+        ? `正在获取钱包 ${walletAddress} 的协议列表...`
+        : "正在获取协议列表...");
+      const data = await apiService.getProtocols(walletAddress);
       console.log("获取到协议列表:", data.protocols);
       setProtocols(data.protocols);
     } catch (error) {
@@ -47,12 +57,12 @@ export const ProtocolList: React.FC = () => {
       const matchesSearch =
         searchTerm === "" ||
         protocol.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        protocol.description.toLowerCase().includes(searchTerm.toLowerCase());
+        (protocol.description?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false);
 
       // 资产过滤
       const matchesAsset =
         !filterAsset ||
-        protocol.supported_assets.includes(filterAsset);
+        (protocol.supported_assets?.includes(filterAsset) ?? false);
 
       return matchesSearch && matchesAsset;
     })
@@ -64,8 +74,8 @@ export const ProtocolList: React.FC = () => {
           : b.name.localeCompare(a.name);
       } else {
         return sortOrder === "asc"
-          ? a.supported_assets.length - b.supported_assets.length
-          : b.supported_assets.length - a.supported_assets.length;
+          ? (a.supported_assets?.length || 0) - (b.supported_assets?.length || 0)
+          : (b.supported_assets?.length || 0) - (a.supported_assets?.length || 0);
       }
     });
 
@@ -104,7 +114,7 @@ export const ProtocolList: React.FC = () => {
 
   return (
     <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
-      <h2 className="text-2xl font-bold mb-6">支持的DeFi协议</h2>
+      <h2 className="text-2xl font-bold mb-6">{title}</h2>
 
       <div className="flex flex-col md:flex-row gap-4 mb-6">
         <div className="relative flex-1">
@@ -156,7 +166,7 @@ export const ProtocolList: React.FC = () => {
                 <div className="flex justify-between items-start mb-3">
                   <h3 className="text-lg font-bold group-hover:text-primary transition-colors">{protocol.name}</h3>
                   <div className="bg-primary/10 text-primary px-2 py-1 rounded-full text-xs">
-                    {protocol.supported_assets.length} 资产
+                    {protocol.supported_assets?.length || 0} 资产
                   </div>
                 </div>
                 <p className="text-muted text-sm mb-4">{protocol.description}</p>
@@ -164,7 +174,7 @@ export const ProtocolList: React.FC = () => {
                 <div className="mb-4">
                   <h4 className="text-sm font-medium mb-2">支持资产</h4>
                   <div className="flex flex-wrap gap-2">
-                    {protocol.supported_assets.map((asset) => (
+                    {protocol.supported_assets?.map((asset) => (
                       <span
                         key={asset}
                         className="px-2 py-1 bg-muted rounded-full text-xs hover:bg-muted/80 transition-colors cursor-pointer"
@@ -172,18 +182,18 @@ export const ProtocolList: React.FC = () => {
                       >
                         {asset}
                       </span>
-                    ))}
+                    )) || <span className="text-xs text-muted">暂无数据</span>}
                   </div>
                 </div>
 
                 <div>
                   <h4 className="text-sm font-medium mb-2">功能</h4>
                   <div className="flex flex-wrap gap-2">
-                    {protocol.features.map((feature) => (
+                    {protocol.features?.map((feature) => (
                       <span key={feature} className="px-2 py-1 bg-background rounded-full text-xs">
                         {feature}
                       </span>
-                    ))}
+                    )) || <span className="text-xs text-muted">暂无数据</span>}
                   </div>
                 </div>
               </div>

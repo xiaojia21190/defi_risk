@@ -25,8 +25,22 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
 
   // 计算每个协议的总价值
   const protocolValues = portfolio.positions.reduce((acc, pos) => {
-    const marketAnalysis = portfolio.market_analysis[pos.asset.split("/")[0]];
-    const value = pos.amount * (marketAnalysis?.current_price || 0);
+    // 获取资产符号，优先使用tokenList
+    const assetSymbol = pos.tokenList && pos.tokenList.length > 0
+      ? pos.tokenList[0].tokenSymbol.split("/")[0]
+      : pos.asset.split("/")[0];
+
+    const marketAnalysis = portfolio.market_analysis[assetSymbol];
+
+    // 获取资产价值，优先使用amount，如果没有则尝试从tokenList获取
+    let value = 0;
+    if (pos.amount !== undefined) {
+      value = pos.amount * (marketAnalysis?.current_price || 0);
+    } else if (pos.tokenList && pos.tokenList.length > 0) {
+      // 使用currencyAmount作为美元价值
+      value = parseFloat(pos.tokenList[0].currencyAmount || "0");
+    }
+
     acc[pos.protocol] = (acc[pos.protocol] || 0) + value;
     return acc;
   }, {} as { [key: string]: number });
@@ -52,18 +66,45 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
 
   // 计算资产类型分布
   const assetTypeDistribution = portfolio.positions.reduce((acc, pos) => {
-    const asset = pos.asset.split("/")[0];
-    const marketAnalysis = portfolio.market_analysis[asset];
-    const value = pos.amount * (marketAnalysis?.current_price || 0);
+    // 获取资产符号，优先使用tokenList
+    const assetSymbol = pos.tokenList && pos.tokenList.length > 0
+      ? pos.tokenList[0].tokenSymbol.split("/")[0]
+      : pos.asset.split("/")[0];
 
-    // 简单分类资产类型
+    const marketAnalysis = portfolio.market_analysis[assetSymbol];
+
+    // 获取资产价值，优先使用amount，如果没有则尝试从tokenList获取
+    let value = 0;
+    if (pos.amount !== undefined) {
+      value = pos.amount * (marketAnalysis?.current_price || 0);
+    } else if (pos.tokenList && pos.tokenList.length > 0) {
+      // 使用currencyAmount作为美元价值
+      value = parseFloat(pos.tokenList[0].currencyAmount || "0");
+    }
+
+    // 根据invest_type分类资产类型
     let type = "其他";
-    if (asset === "ETH" || asset === "WETH" || asset === "BTC") {
-      type = "主流币";
-    } else if (asset === "USDC" || asset === "USDT" || asset === "DAI") {
-      type = "稳定币";
-    } else if (asset.includes("LP") || asset.includes("Pool")) {
-      type = "流动性代币";
+    if (pos.invest_type === 1) {
+      type = "存币";
+    } else if (pos.invest_type === 2) {
+      type = "流动性池";
+    } else if (pos.invest_type === 3) {
+      type = "挖矿";
+    } else if (pos.invest_type === 4) {
+      type = "机枪池";
+    } else if (pos.invest_type === 5) {
+      type = "质押";
+    } else if (pos.invest_type === 6) {
+      type = "借贷";
+    } else {
+      // 如果没有invest_type，使用旧的分类逻辑
+      if (assetSymbol === "ETH" || assetSymbol === "WETH" || assetSymbol === "BTC") {
+        type = "主流币";
+      } else if (assetSymbol === "USDC" || assetSymbol === "USDT" || assetSymbol === "DAI") {
+        type = "稳定币";
+      } else if (assetSymbol.includes("LP") || assetSymbol.includes("Pool")) {
+        type = "流动性代币";
+      }
     }
 
     acc[type] = (acc[type] || 0) + value;
@@ -215,6 +256,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
                 <tr className="border-b">
                   <th className="text-left py-2 font-medium">资产</th>
                   <th className="text-left py-2 font-medium">协议</th>
+                  <th className="text-left py-2 font-medium">类型</th>
                   <th className="text-right py-2 font-medium">数量</th>
                   <th className="text-right py-2 font-medium">价值</th>
                   <th className="text-right py-2 font-medium">收益率</th>
@@ -222,15 +264,46 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
               </thead>
               <tbody>
                 {portfolio.positions.map((position, index) => {
-                  const asset = position.asset.split("/")[0];
-                  const marketAnalysis = portfolio.market_analysis[asset];
-                  const value = position.amount * (marketAnalysis?.current_price || 0);
+                  // 获取资产符号，优先使用tokenList
+                  const assetSymbol = position.tokenList && position.tokenList.length > 0
+                    ? position.tokenList[0].tokenSymbol.split("/")[0]
+                    : position.asset.split("/")[0];
+
+                  const marketAnalysis = portfolio.market_analysis[assetSymbol];
+
+                  // 获取资产价值，优先使用amount，如果没有则尝试从tokenList获取
+                  let value = 0;
+                  let displayAmount = "0";
+
+                  if (position.amount !== undefined) {
+                    value = position.amount * (marketAnalysis?.current_price || 0);
+                    displayAmount = position.amount.toFixed(4);
+                  } else if (position.tokenList && position.tokenList.length > 0) {
+                    // 使用currencyAmount作为美元价值
+                    value = parseFloat(position.tokenList[0].currencyAmount || "0");
+                    displayAmount = position.tokenList[0].coinAmount || "0";
+                  }
+
+                  // 获取投资类型
+                  let investType = "未知";
+                  if (position.invest_type === 1) investType = "存币";
+                  else if (position.invest_type === 2) investType = "流动性池";
+                  else if (position.invest_type === 3) investType = "挖矿";
+                  else if (position.invest_type === 4) investType = "机枪池";
+                  else if (position.invest_type === 5) investType = "质押";
+                  else if (position.invest_type === 6) investType = "借贷";
+
+                  // 获取显示的资产名称
+                  const displayAsset = position.tokenList && position.tokenList.length > 0
+                    ? position.tokenList[0].tokenSymbol
+                    : position.asset;
 
                   return (
                     <tr key={index} className="border-b hover:bg-muted/20">
-                      <td className="py-2">{position.asset}</td>
+                      <td className="py-2">{displayAsset}</td>
                       <td className="py-2">{position.protocol}</td>
-                      <td className="py-2 text-right">{position.amount.toFixed(4)}</td>
+                      <td className="py-2">{investType}</td>
+                      <td className="py-2 text-right">{displayAmount}</td>
                       <td className="py-2 text-right">{formatCurrency(value)}</td>
                       <td className="py-2 text-right">
                         {position.apy ? (

@@ -10,9 +10,27 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/a
 export interface Position {
   protocol: string;
   asset: string;
-  amount: number;
+  amount?: number;
   leverage?: number;
   apy?: number;
+  invest_type?: number;
+  tokenList?: Array<{
+    tokenSymbol: string;
+    tokenLogo: string;
+    coinAmount: string;
+    currencyAmount: string;
+    tokenPrecision: string;
+    tokenAddress: string;
+    network: string;
+  }>;
+}
+
+export interface ProtocolPosition {
+  protocol: string;
+  total_assets: number;
+  total_debts: number;
+  leverage: number;
+  positions: Position[];
 }
 
 export interface Portfolio {
@@ -41,9 +59,11 @@ export interface MarketData {
 
 export interface Protocol {
   name: string;
-  description: string;
-  supported_assets: string[];
-  features: string[];
+  description?: string;
+  chain?: string;
+  tvl?: number;
+  supported_assets?: string[];
+  features?: string[];
 }
 
 export interface MarketPrediction {
@@ -290,17 +310,48 @@ class ApiService {
 
       // 转换头寸数据
       if (positionsResponse && positionsResponse.positions) {
-        portfolio.positions = positionsResponse.positions.map((pos: any) => ({
-          protocol: pos.protocol,
-          asset: pos.asset,
-          amount: pos.amount,
-          leverage: pos.leverage,
-          apy: pos.apy
-        }));
+        // 处理新的OKX数据结构
+        const positions: Position[] = [];
+
+        for (const protocolPosition of positionsResponse.positions) {
+          // 检查是否是新的OKX数据结构
+          if (protocolPosition.positions && Array.isArray(protocolPosition.positions)) {
+            // 新的OKX数据结构
+            for (const position of protocolPosition.positions) {
+              positions.push({
+                protocol: protocolPosition.protocol,
+                asset: position.asset,
+                amount: position.amount,
+                leverage: protocolPosition.leverage,
+                apy: position.apy,
+                invest_type: position.invest_type,
+                tokenList: position.tokenList
+              });
+            }
+          } else {
+            // 旧的数据结构
+            positions.push({
+              protocol: protocolPosition.protocol,
+              asset: protocolPosition.asset,
+              amount: protocolPosition.amount,
+              leverage: protocolPosition.leverage,
+              apy: protocolPosition.apy
+            });
+          }
+        }
+
+        portfolio.positions = positions;
       }
 
       // 获取市场分析数据
-      const assets = [...new Set(portfolio.positions.map(p => p.asset.split('/')[0]))];
+      const assets = [...new Set(portfolio.positions.map(p => {
+        // 从资产名称或tokenList中提取基础资产
+        if (p.tokenList && p.tokenList.length > 0) {
+          return p.tokenList[0].tokenSymbol.split('/')[0];
+        }
+        return p.asset.split('/')[0];
+      }))];
+
       for (const asset of assets) {
         try {
           const marketData = await this.getMarketData(asset);
@@ -605,10 +656,14 @@ class ApiService {
     }
   }
 
-  async getProtocols(): Promise<{ protocols: Protocol[] }> {
+  async getProtocols(walletAddress?: string): Promise<{ protocols: Protocol[] }> {
     try {
-      // 使用后端的协议列表API
-      const response = await this.fetchJson<any>('/protocol/list');
+      // 使用后端的协议列表API，如果提供了钱包地址，则添加到查询参数中
+      const endpoint = walletAddress
+        ? `/protocol/list?wallet_address=${walletAddress}`
+        : '/protocol/list';
+
+      const response = await this.fetchJson<any>(endpoint);
 
       // 将后端响应转换为前端期望的Protocol[]格式
       const protocols: Protocol[] = response.protocols.map((p: any) => ({

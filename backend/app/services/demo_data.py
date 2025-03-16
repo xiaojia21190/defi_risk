@@ -232,6 +232,10 @@ class DemoDataService:
         if cache_key in self._demo_data_cache:
             return self._demo_data_cache[cache_key]
 
+        # 获取协议信息，用于丰富头寸数据
+        protocols_data = self.get_protocols()
+        protocols_map = {p["name"]: p for p in protocols_data["protocols"]}
+
         # 为演示账户1生成特定的头寸数据
         if wallet_address == "0xdemo1234567890abcdef1234567890abcdef123456":
             positions = [
@@ -242,6 +246,7 @@ class DemoDataService:
                     "amount": 5.0,
                     "usd_value": 15000.0,
                     "apy": 2.5,
+                    "chain": "Ethereum",
                 },
                 {
                     "protocol": "Compound",
@@ -250,6 +255,7 @@ class DemoDataService:
                     "amount": 10000.0,
                     "usd_value": 10000.0,
                     "apy": 3.2,
+                    "chain": "Ethereum",
                 },
                 {
                     "protocol": "Uniswap",
@@ -258,6 +264,7 @@ class DemoDataService:
                     "amount": 2.0,
                     "usd_value": 8000.0,
                     "apy": 15.5,
+                    "chain": "Ethereum",
                 },
                 {
                     "protocol": "MakerDAO",
@@ -265,8 +272,8 @@ class DemoDataService:
                     "asset": "ETH",
                     "amount": 10.0,
                     "usd_value": 30000.0,
-                    "borrowed": 15000.0,
-                    "collateral_ratio": 200.0,
+                    "leverage": 2.0,
+                    "chain": "Ethereum",
                 },
             ]
         # 为演示账户2生成高风险头寸数据
@@ -279,6 +286,7 @@ class DemoDataService:
                     "amount": 10.0,
                     "usd_value": 30000.0,
                     "leverage": 5.0,
+                    "chain": "Ethereum",
                 },
                 {
                     "protocol": "Aave",
@@ -286,7 +294,8 @@ class DemoDataService:
                     "asset": "USDC",
                     "amount": 20000.0,
                     "usd_value": 20000.0,
-                    "interest_rate": 4.5,
+                    "apy": 4.5,
+                    "chain": "Ethereum",
                 },
                 {
                     "protocol": "SushiSwap",
@@ -295,6 +304,7 @@ class DemoDataService:
                     "amount": 5.0,
                     "usd_value": 15000.0,
                     "apy": 45.0,
+                    "chain": "Ethereum",
                 },
             ]
         # 为其他钱包生成随机头寸数据
@@ -307,6 +317,7 @@ class DemoDataService:
                     "amount": random.uniform(1, 10),
                     "usd_value": random.uniform(3000, 30000),
                     "apy": random.uniform(1, 5),
+                    "chain": "Ethereum",
                 },
                 {
                     "protocol": "Compound",
@@ -315,16 +326,67 @@ class DemoDataService:
                     "amount": random.uniform(1000, 20000),
                     "usd_value": random.uniform(1000, 20000),
                     "apy": random.uniform(2, 6),
+                    "chain": "Ethereum",
                 },
             ]
 
+        # 丰富头寸数据，添加协议详细信息
+        for position in positions:
+            protocol_name = position["protocol"]
+            if protocol_name in protocols_map:
+                protocol_info = protocols_map[protocol_name]
+                position["protocol_info"] = {
+                    "name": protocol_name,
+                    "chain": protocol_info.get("chain", "Ethereum"),
+                    "tvl": protocol_info.get("tvl", 0),
+                    "risk_score": protocol_info.get("risk_score", 80),
+                }
+            else:
+                # 如果找不到协议信息，提供默认值
+                position["protocol_info"] = {
+                    "name": protocol_name,
+                    "chain": position.get("chain", "Ethereum"),
+                    "tvl": 0,
+                    "risk_score": 80,
+                }
+
         total_value = sum(position.get("usd_value", 0) for position in positions)
+
+        # 提取协议列表，确保包含前端需要的字段
+        protocols_used = []
+        protocols_set = set()
+
+        for position in positions:
+            protocol_name = position.get("protocol", "")
+            if protocol_name and protocol_name not in protocols_set:
+                protocols_set.add(protocol_name)
+                # 获取协议详细信息
+                protocol_info = self.get_protocol_info(protocol_name)
+                protocols_used.append(
+                    {
+                        "name": protocol_name,
+                        "chain": protocol_info.get(
+                            "chain", position.get("chain", "Ethereum")
+                        ),
+                        "tvl": protocol_info.get("tvl", 0),
+                        "supported_assets": protocol_info.get(
+                            "supported_assets", ["ETH", "USDC"]
+                        ),
+                        "features": protocol_info.get(
+                            "features", ["借贷", "流动性挖矿"]
+                        ),
+                        "description": protocol_info.get(
+                            "description", f"{protocol_name}是一个DeFi协议"
+                        ),
+                    }
+                )
 
         data = {
             "wallet_address": wallet_address,
             "positions": positions,
             "total_value_usd": total_value,
             "position_count": len(positions),
+            "protocols": protocols_used,  # 添加协议列表
             "timestamp": datetime.now().isoformat(),
             "is_demo_data": True,
         }
@@ -536,19 +598,28 @@ class DemoDataService:
                     "protocol": "MakerDAO",
                     "asset": "ETH",
                     "message": "抵押率接近清算阈值，建议增加抵押或减少借贷",
-                    "current_value": "150%",
-                    "threshold": "130%",
                     "timestamp": (datetime.now() - timedelta(hours=2)).isoformat(),
+                    "details": {
+                        "value": 150.0,  # 数值类型而非字符串
+                        "threshold": 130.0,  # 数值类型而非字符串
+                        "leverage": 2.0,
+                        "recommendation": "建议增加抵押或减少借贷以降低清算风险",
+                    },
                 },
                 {
                     "id": "alert-002",
                     "type": "price_drop",
                     "severity": "info",
+                    "protocol": "",
                     "asset": "ETH",
                     "message": "ETH价格在过去24小时下跌了5%",
-                    "current_value": "$3000",
-                    "previous_value": "$3150",
                     "timestamp": (datetime.now() - timedelta(hours=12)).isoformat(),
+                    "details": {
+                        "current_price": 3000.0,  # 数值类型
+                        "previous_price": 3150.0,  # 数值类型
+                        "price_change_24h": -5.0,  # 负值表示下跌
+                        "volatility": 5.0,
+                    },
                 },
             ]
         # 为演示账户2生成高风险警报
@@ -561,9 +632,15 @@ class DemoDataService:
                     "protocol": "dYdX",
                     "asset": "ETH",
                     "message": "杠杆头寸接近清算价格，极高风险",
-                    "current_price": "$3000",
-                    "liquidation_price": "$2800",
                     "timestamp": (datetime.now() - timedelta(minutes=30)).isoformat(),
+                    "details": {
+                        "current_price": 3000.0,
+                        "liquidation_price": 2800.0,
+                        "leverage": 5.0,
+                        "safe_leverage": 3.0,
+                        "risk_ratio": 0.93,  # 当前价格与清算价格的比率
+                        "recommendation": "建议降低杠杆或增加抵押以避免清算",
+                    },
                 },
                 {
                     "id": "alert-004",
@@ -572,17 +649,27 @@ class DemoDataService:
                     "protocol": "Aave",
                     "asset": "USDC",
                     "message": "借贷资产利用率超过90%，利率可能上升",
-                    "current_value": "92%",
-                    "threshold": "90%",
                     "timestamp": (datetime.now() - timedelta(hours=6)).isoformat(),
+                    "details": {
+                        "value": 92.0,
+                        "threshold": 90.0,
+                        "current_apy": 4.5,
+                        "previous_apy": 3.8,
+                        "apy_change": 0.7,
+                    },
                 },
                 {
                     "id": "alert-005",
                     "type": "protocol_risk",
                     "severity": "warning",
                     "protocol": "SushiSwap",
+                    "asset": "",
                     "message": "协议最近发现安全漏洞，建议关注更新",
                     "timestamp": (datetime.now() - timedelta(days=1)).isoformat(),
+                    "details": {
+                        "recommendation": "建议减少在该协议的敞口，直到安全更新发布",
+                        "analysis": "该漏洞影响流动性池合约，但尚未被利用",
+                    },
                 },
             ]
         # 为其他钱包生成随机警报
@@ -604,6 +691,7 @@ class DemoDataService:
                 protocol = random.choice(protocols)
                 asset = random.choice(assets)
 
+                # 基本警报结构
                 alert = {
                     "id": f"alert-{random.randint(100, 999)}",
                     "type": alert_type,
@@ -614,7 +702,47 @@ class DemoDataService:
                     "timestamp": (
                         datetime.now() - timedelta(hours=random.randint(1, 24))
                     ).isoformat(),
+                    "details": {},
                 }
+
+                # 根据警报类型添加详细信息
+                if alert_type == "price_drop":
+                    price_change = random.uniform(-15, -2)
+                    current_price = random.uniform(100, 3000)
+                    previous_price = current_price * (1 - price_change / 100)
+                    alert["details"] = {
+                        "current_price": round(current_price, 2),
+                        "previous_price": round(previous_price, 2),
+                        "price_change_24h": round(price_change, 2),
+                        "volatility": round(abs(price_change), 2),
+                    }
+                elif alert_type == "collateral_ratio":
+                    value = random.uniform(130, 170)
+                    threshold = random.uniform(110, 130)
+                    alert["details"] = {
+                        "value": round(value, 2),
+                        "threshold": round(threshold, 2),
+                        "leverage": round(100 / value * 100, 2),
+                        "recommendation": "建议增加抵押或减少借贷",
+                    }
+                elif alert_type == "protocol_risk":
+                    alert["details"] = {
+                        "recommendation": "建议关注协议更新和安全公告",
+                        "analysis": "该协议最近出现了一些异常活动",
+                    }
+                elif alert_type == "high_utilization":
+                    value = random.uniform(85, 95)
+                    threshold = 80
+                    current_apy = random.uniform(3, 8)
+                    previous_apy = random.uniform(2, 5)
+                    alert["details"] = {
+                        "value": round(value, 2),
+                        "threshold": threshold,
+                        "current_apy": round(current_apy, 2),
+                        "previous_apy": round(previous_apy, 2),
+                        "apy_change": round(current_apy - previous_apy, 2),
+                    }
+
                 alerts.append(alert)
 
         data = {
