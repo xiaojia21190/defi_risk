@@ -1,11 +1,65 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { apiService } from "../services/api";
-import { AlertTriangle, BarChart3, Lightbulb, CheckCircle, Bell, Wallet, Target, ArrowUpDown, Loader2, Filter } from "lucide-react";
+import { AlertTriangle, BarChart3, Lightbulb, CheckCircle, Bell, Wallet, Target, ArrowUpDown, Loader2, Filter, RefreshCw, Clock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
+
+// 注意：由于缺少必要的UI组件库，我们将使用简化版的组件
+// 简化版Switch组件
+const Switch = ({ checked, onCheckedChange, size }: { checked: boolean; onCheckedChange: (checked: boolean) => void; size?: string }) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={checked}
+    className={`relative inline-flex h-${size === "sm" ? "4" : "6"} w-${size === "sm" ? "8" : "11"} flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${checked ? 'bg-primary' : 'bg-gray-200'}`}
+    onClick={() => onCheckedChange(!checked)}
+  >
+    <span
+      className={`pointer-events-none inline-block h-${size === "sm" ? "3" : "5"} w-${size === "sm" ? "3" : "5"} transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${checked ? `translate-x-${size === "sm" ? "4" : "5"}` : 'translate-x-0'}`}
+    />
+  </button>
+);
+
+// 简化版Select组件
+const Select = ({ value, onValueChange, children }: { value: string; onValueChange: (value: string) => void; children: React.ReactNode }) => (
+  <select
+    value={value}
+    onChange={(e) => onValueChange(e.target.value)}
+    className="h-7 w-[90px] rounded-md border border-input bg-background px-2 py-1 text-sm"
+  >
+    {children}
+  </select>
+);
+
+const SelectTrigger = ({ children, className }: { children: React.ReactNode; className?: string }) => (
+  <div className={`flex items-center gap-1 ${className || ''}`}>
+    {children}
+  </div>
+);
+
+const SelectValue = ({ placeholder }: { placeholder: string }) => <span>{placeholder}</span>;
+
+const SelectContent = ({ children }: { children: React.ReactNode }) => <>{children}</>;
+
+const SelectItem = ({ value, children }: { value: string; children: React.ReactNode }) => (
+  <option value={value}>{children}</option>
+);
+
+// 简化版Tooltip组件
+const TooltipProvider = ({ children }: { children: React.ReactNode }) => <>{children}</>;
+
+const Tooltip = ({ children }: { children: React.ReactNode }) => <>{children}</>;
+
+const TooltipTrigger = ({ asChild, children }: { asChild?: boolean; children: React.ReactNode }) => <>{children}</>;
+
+const TooltipContent = ({ children }: { children: React.ReactNode }) => (
+  <div className="absolute bottom-full mb-2 rounded-md bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md">
+    {children}
+  </div>
+);
 
 interface AlertsListProps {
   address?: string;
@@ -48,91 +102,72 @@ interface AlertStats {
 interface SeverityConfig {
   label: string;
   color: string;
-  variant: string;
-}
-
-interface AlertTypeConfig {
-  label: string;
   icon: React.ReactNode;
-  color: string;
-  variant: string;
 }
 
-interface SeverityConfigMap {
-  [key: string]: SeverityConfig;
-}
-
-interface AlertTypeConfigMap {
-  [key: string]: AlertTypeConfig;
-}
-
-const severityConfig: SeverityConfigMap = {
+const severityConfigs: Record<string, SeverityConfig> = {
   high: {
-    label: "高风险",
-    color: "text-destructive",
-    variant: "destructive",
+    label: "高",
+    color: "bg-destructive text-destructive-foreground",
+    icon: <AlertTriangle className="h-4 w-4" />,
   },
   medium: {
-    label: "中风险",
-    color: "text-warning",
-    variant: "warning",
+    label: "中",
+    color: "bg-amber-500 text-white",
+    icon: <Bell className="h-4 w-4" />,
   },
   low: {
-    label: "低风险",
-    color: "text-success",
-    variant: "success",
+    label: "低",
+    color: "bg-green-500 text-white",
+    icon: <CheckCircle className="h-4 w-4" />,
   },
 };
 
-const alertTypeConfig: AlertTypeConfigMap = {
+const typeConfigs: Record<string, { label: string; icon: React.ReactNode }> = {
   liquidation: {
     label: "清算风险",
-    icon: <AlertTriangle className="h-4 w-4" />,
-    color: "text-destructive",
-    variant: "destructive",
+    icon: <Target className="h-4 w-4" />,
   },
   marketVolatility: {
     label: "市场波动",
     icon: <BarChart3 className="h-4 w-4" />,
-    color: "text-warning",
-    variant: "warning",
   },
   technicalSignal: {
     label: "技术信号",
     icon: <ArrowUpDown className="h-4 w-4" />,
-    color: "text-primary",
-    variant: "default",
   },
   riskWarning: {
     label: "风险警告",
-    icon: <Target className="h-4 w-4" />,
-    color: "text-destructive",
-    variant: "destructive",
+    icon: <AlertTriangle className="h-4 w-4" />,
   },
   opportunityAlert: {
-    label: "机会提醒",
+    label: "机会提示",
     icon: <Lightbulb className="h-4 w-4" />,
-    color: "text-success",
-    variant: "success",
   },
 };
 
-const mapAlertType = (backendType: string): Alert["type"] => {
+// 映射后端警报类型到前端类型
+const mapAlertType = (type: string): Alert["type"] => {
   const typeMap: Record<string, Alert["type"]> = {
-    "liquidation_risk": "liquidation",
-    "market_volatility": "marketVolatility",
-    "technical_signal": "technicalSignal",
-    "risk_warning": "riskWarning",
-    "opportunity": "opportunityAlert",
+    liquidation_risk: "liquidation",
+    market_volatility: "marketVolatility",
+    technical_signal: "technicalSignal",
+    risk_warning: "riskWarning",
+    opportunity: "opportunityAlert",
   };
 
-  return typeMap[backendType] || "riskWarning";
+  return typeMap[type] || "riskWarning";
 };
 
-const mapSeverity = (backendSeverity: string): Alert["severity"] => {
-  if (backendSeverity === "high") return "high";
-  if (backendSeverity === "medium") return "medium";
-  return "low";
+// 映射后端严重性到前端严重性
+const mapSeverity = (severity: string): Alert["severity"] => {
+  const severityMap: Record<string, Alert["severity"]> = {
+    high: "high",
+    medium: "medium",
+    low: "low",
+  };
+
+  return severityMap[severity] || "medium";
 };
 
 const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
@@ -144,6 +179,11 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
     severity: null,
     type: null,
   });
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
+  const [refreshInterval, setRefreshInterval] = useState<number>(60); // 默认60秒
+  const refreshTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [lastRefreshTime, setLastRefreshTime] = useState<string>("");
 
   useEffect(() => {
     if (address) {
@@ -151,12 +191,39 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
     } else {
       setLoading(false);
     }
+
+    // 组件卸载时清除定时器
+    return () => {
+      if (refreshTimerRef.current) {
+        clearInterval(refreshTimerRef.current);
+      }
+    };
   }, [address]);
+
+  // 处理自动刷新
+  useEffect(() => {
+    if (refreshTimerRef.current) {
+      clearInterval(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+    }
+
+    if (autoRefresh && address) {
+      refreshTimerRef.current = setInterval(() => {
+        fetchAlerts();
+      }, refreshInterval * 1000);
+    }
+
+    return () => {
+      if (refreshTimerRef.current) {
+        clearInterval(refreshTimerRef.current);
+      }
+    };
+  }, [autoRefresh, refreshInterval, address]);
 
   const fetchAlerts = async () => {
     if (!address) return;
 
-    setLoading(true);
+    setRefreshing(true);
     setError(null);
 
     try {
@@ -175,6 +242,7 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
       }));
 
       setAlerts(formattedAlerts);
+      setLastRefreshTime(new Date().toLocaleTimeString());
 
       // 计算统计数据
       const newStats: AlertStats = {
@@ -194,245 +262,307 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
       console.error("获取警报失败:", err);
       setError("无法获取警报数据，请稍后重试");
     } finally {
+      setRefreshing(false);
       setLoading(false);
     }
   };
 
-  const formatDate = (timestamp: string | number) => {
-    const date = typeof timestamp === 'string' ? new Date(timestamp) : new Date(timestamp);
-    return new Intl.DateTimeFormat('zh-CN', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(date);
+  // 手动刷新警报
+  const handleRefresh = () => {
+    if (refreshing || !address) return;
+    fetchAlerts();
   };
 
+  // 切换自动刷新
+  const toggleAutoRefresh = () => {
+    setAutoRefresh(!autoRefresh);
+  };
+
+  // 更改刷新间隔
+  const handleIntervalChange = (value: string) => {
+    setRefreshInterval(parseInt(value));
+  };
+
+  // 过滤警报
   const filteredAlerts = alerts.filter(alert => {
-    if (filter.severity && alert.severity !== filter.severity) return false;
-    if (filter.type && alert.type !== filter.type) return false;
-    return true;
+    const matchesSeverity = !filter.severity || alert.severity === filter.severity;
+    const matchesType = !filter.type || alert.type === filter.type;
+    return matchesSeverity && matchesType;
   });
 
-  const clearFilter = () => {
-    setFilter({ severity: null, type: null });
+  // 格式化时间戳
+  const formatTimestamp = (timestamp: string) => {
+    try {
+      const date = new Date(timestamp);
+      return date.toLocaleString();
+    } catch (e) {
+      return timestamp;
+    }
   };
-
-  if (loading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>风险警报</CardTitle>
-          <CardDescription>加载中...</CardDescription>
-        </CardHeader>
-        <CardContent className="flex justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (error) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>风险警报</CardTitle>
-          <CardDescription className="text-destructive">{error}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button onClick={fetchAlerts} variant="outline">
-            重试
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!address) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>风险警报</CardTitle>
-          <CardDescription>请连接钱包以查看警报</CardDescription>
-        </CardHeader>
-      </Card>
-    );
-  }
-
-  if (alerts.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>风险警报</CardTitle>
-          <CardDescription>暂无警报</CardDescription>
-        </CardHeader>
-        <CardContent className="text-center py-8">
-          <CheckCircle className="h-12 w-12 text-success mx-auto mb-4" />
-          <p className="text-muted-foreground">您的投资组合目前没有风险警报</p>
-        </CardContent>
-      </Card>
-    );
-  }
 
   return (
     <Card>
       <CardHeader>
-        <div className="flex justify-between items-center">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
-            <CardTitle>风险警报</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              风险警报
+              {stats.total > 0 && (
+                <Badge className="ml-2 bg-amber-500">
+                  {stats.total}
+                </Badge>
+              )}
+            </CardTitle>
             <CardDescription>
-              共 {stats.total} 条警报
-              {filter.severity || filter.type ? " (已筛选)" : ""}
+              监控您的DeFi投资风险和市场变化
             </CardDescription>
           </div>
-          <div className="flex gap-2">
-            {(filter.severity || filter.type) && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={clearFilter}
-                className="flex items-center gap-1"
-              >
-                <Filter className="h-3 w-3" />
-                清除筛选
-              </Button>
+
+          <div className="flex items-center gap-2">
+            {lastRefreshTime && (
+              <span className="text-xs text-muted-foreground hidden sm:inline-block">
+                上次更新: {lastRefreshTime}
+              </span>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={fetchAlerts}
-              className="flex items-center gap-1"
-            >
-              <Bell className="h-3 w-3" />
-              刷新
-            </Button>
+
+            <div className="flex items-center gap-2">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      className="gap-1"
+                      onClick={handleRefresh}
+                      disabled={refreshing || loading}
+                    >
+                      {refreshing ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )}
+                      <span className="hidden sm:inline-block">刷新</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>手动刷新警报</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              <div className="flex items-center gap-2 bg-secondary/50 px-2 py-1 rounded-md">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="flex items-center gap-1.5">
+                        <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                        <Switch
+                          checked={autoRefresh}
+                          onCheckedChange={toggleAutoRefresh}
+                          size="sm"
+                        />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>自动刷新警报</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+
+                {autoRefresh && (
+                  <Select
+                    value={refreshInterval.toString()}
+                    onValueChange={handleIntervalChange}
+                  >
+                    <SelectTrigger className="h-7 w-[90px]">
+                      <SelectValue placeholder="刷新间隔" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="30">30秒</SelectItem>
+                      <SelectItem value="60">1分钟</SelectItem>
+                      <SelectItem value="300">5分钟</SelectItem>
+                      <SelectItem value="600">10分钟</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </CardHeader>
+
       <CardContent>
-        <div className="mb-6 flex flex-wrap gap-2">
-          <Badge
-            variant={filter.severity === null ? "default" : "outline"}
-            className="cursor-pointer"
-            onClick={() => setFilter({ ...filter, severity: null })}
-          >
-            全部 ({stats.total})
-          </Badge>
-          <Badge
-            variant={filter.severity === "high" ? "destructive" : "outline"}
-            className="cursor-pointer"
-            onClick={() => setFilter({ ...filter, severity: "high" })}
-          >
-            高风险 ({stats.high})
-          </Badge>
-          <Badge
-            variant={filter.severity === "medium" ? "warning" : "outline"}
-            className="cursor-pointer"
-            onClick={() => setFilter({ ...filter, severity: "medium" })}
-          >
-            中风险 ({stats.medium})
-          </Badge>
-          <Badge
-            variant={filter.severity === "low" ? "success" : "outline"}
-            className="cursor-pointer"
-            onClick={() => setFilter({ ...filter, severity: "low" })}
-          >
-            低风险 ({stats.low})
-          </Badge>
-        </div>
-
-        <div className="space-y-4">
-          {filteredAlerts.map((alert) => {
-            const typeInfo = alertTypeConfig[alert.type];
-            const severityInfo = severityConfig[alert.severity];
-
-            return (
-              <div
-                key={alert.id}
-                className="p-4 rounded-lg border bg-card/50 hover:bg-card/80 transition-colors"
+        {/* 过滤器 */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          <div>
+            <span className="text-xs text-muted-foreground mr-2">严重性:</span>
+            <div className="flex gap-1 mt-1">
+              <Badge
+                className={`cursor-pointer ${!filter.severity ? "bg-primary" : "bg-secondary"}`}
+                onClick={() => setFilter({ ...filter, severity: null })}
               >
-                <div className="flex justify-between items-start mb-2">
-                  <div className="flex items-center gap-2">
-                    <div className={`p-1.5 rounded-full bg-${typeInfo.variant}/10 ${typeInfo.color}`}>
-                      {typeInfo.icon}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{typeInfo.label}</span>
-                        <Badge variant={severityInfo.variant as any}>
-                          {severityInfo.label}
-                        </Badge>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {alert.protocol} · {alert.asset} · {formatDate(alert.timestamp)}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                全部
+              </Badge>
+              {Object.entries(severityConfigs).map(([key, config]) => (
+                <Badge
+                  key={key}
+                  className={`cursor-pointer ${filter.severity === key ? config.color : "bg-secondary"}`}
+                  onClick={() => setFilter({ ...filter, severity: key as Alert["severity"] })}
+                >
+                  {config.label}
+                </Badge>
+              ))}
+            </div>
+          </div>
 
-                <p className="text-sm mb-3">{alert.message}</p>
-
-                {alert.details && alert.details.recommendation && (
-                  <div className="text-xs bg-muted/20 p-2 rounded-md">
-                    <span className="font-medium">建议: </span>
-                    {alert.details.recommendation}
-                  </div>
-                )}
-
-                {alert.details && (
-                  <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                    {alert.details.value !== undefined && (
-                      <div className="p-1.5 rounded bg-muted/10">
-                        <span className="text-muted-foreground">当前值: </span>
-                        <span className="font-medium">{alert.details.value.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {alert.details.threshold !== undefined && (
-                      <div className="p-1.5 rounded bg-muted/10">
-                        <span className="text-muted-foreground">阈值: </span>
-                        <span className="font-medium">{alert.details.threshold.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {alert.details.leverage !== undefined && (
-                      <div className="p-1.5 rounded bg-muted/10">
-                        <span className="text-muted-foreground">杠杆: </span>
-                        <span className="font-medium">{alert.details.leverage.toFixed(2)}x</span>
-                      </div>
-                    )}
-                    {alert.details.volatility !== undefined && (
-                      <div className="p-1.5 rounded bg-muted/10">
-                        <span className="text-muted-foreground">波动率: </span>
-                        <span className="font-medium">{alert.details.volatility.toFixed(2)}%</span>
-                      </div>
-                    )}
-                    {alert.details.price_change_24h !== undefined && (
-                      <div className="p-1.5 rounded bg-muted/10">
-                        <span className="text-muted-foreground">24h变化: </span>
-                        <span className={`font-medium ${alert.details.price_change_24h >= 0 ? 'text-success' : 'text-destructive'}`}>
-                          {alert.details.price_change_24h >= 0 ? '+' : ''}
-                          {alert.details.price_change_24h.toFixed(2)}%
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          <div className="ml-auto">
+            <span className="text-xs text-muted-foreground mr-2">类型:</span>
+            <div className="flex flex-wrap gap-1 mt-1">
+              <Badge
+                className={`cursor-pointer ${!filter.type ? "bg-primary" : "bg-secondary"}`}
+                onClick={() => setFilter({ ...filter, type: null })}
+              >
+                全部
+              </Badge>
+              {Object.entries(typeConfigs).map(([key, config]) => (
+                <Badge
+                  key={key}
+                  className={`cursor-pointer ${filter.type === key ? "bg-primary" : "bg-secondary"}`}
+                  onClick={() => setFilter({ ...filter, type: key as Alert["type"] })}
+                >
+                  {config.label}
+                </Badge>
+              ))}
+            </div>
+          </div>
         </div>
 
-        {filteredAlerts.length === 0 && (
+        {/* 警报统计 */}
+        {stats.total > 0 && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <Card className="bg-secondary/30">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">总警报</p>
+                    <p className="text-2xl font-bold">{stats.total}</p>
+                  </div>
+                  <Bell className="h-8 w-8 text-primary opacity-80" />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className={`${stats.high > 0 ? "bg-destructive/10" : "bg-secondary/30"}`}>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">高风险</p>
+                    <p className={`text-2xl font-bold ${stats.high > 0 ? "text-destructive" : ""}`}>{stats.high}</p>
+                  </div>
+                  <AlertTriangle className={`h-8 w-8 opacity-80 ${stats.high > 0 ? "text-destructive" : "text-muted-foreground"}`} />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className={`${stats.medium > 0 ? "bg-amber-500/10" : "bg-secondary/30"}`}>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">中风险</p>
+                    <p className={`text-2xl font-bold ${stats.medium > 0 ? "text-amber-500" : ""}`}>{stats.medium}</p>
+                  </div>
+                  <Bell className={`h-8 w-8 opacity-80 ${stats.medium > 0 ? "text-amber-500" : "text-muted-foreground"}`} />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className={`${stats.low > 0 ? "bg-green-500/10" : "bg-secondary/30"}`}>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">低风险</p>
+                    <p className={`text-2xl font-bold ${stats.low > 0 ? "text-green-500" : ""}`}>{stats.low}</p>
+                  </div>
+                  <CheckCircle className={`h-8 w-8 opacity-80 ${stats.low > 0 ? "text-green-500" : "text-muted-foreground"}`} />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* 警报列表 */}
+        {loading ? (
+          <div className="flex justify-center items-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        ) : error ? (
           <div className="text-center py-8">
-            <p className="text-muted-foreground">没有符合筛选条件的警报</p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={clearFilter}
-              className="mt-2"
-            >
-              清除筛选
+            <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-2" />
+            <p className="text-muted-foreground">{error}</p>
+            <Button className="mt-4" onClick={handleRefresh}>
+              重试
             </Button>
+          </div>
+        ) : filteredAlerts.length === 0 ? (
+          <div className="text-center py-12">
+            <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4 opacity-80" />
+            <h3 className="text-lg font-medium mb-2">暂无警报</h3>
+            <p className="text-muted-foreground">
+              {stats.total > 0
+                ? "没有符合当前筛选条件的警报"
+                : "您的投资组合目前没有任何风险警报"}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {filteredAlerts.map((alert) => {
+              const severityConfig = severityConfigs[alert.severity];
+              const typeConfig = typeConfigs[alert.type];
+
+              return (
+                <Card key={alert.id} className="overflow-hidden">
+                  <div className={`h-1 ${severityConfig.color}`} />
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Badge className={severityConfig.color}>
+                            <div className="flex items-center gap-1">
+                              {severityConfig.icon}
+                              <span>{severityConfig.label}</span>
+                            </div>
+                          </Badge>
+                          <Badge className="flex items-center gap-1 bg-secondary">
+                            {typeConfig.icon}
+                            <span>{typeConfig.label}</span>
+                          </Badge>
+                          <span className="text-xs text-muted-foreground ml-auto">
+                            {formatTimestamp(alert.timestamp)}
+                          </span>
+                        </div>
+
+                        <h4 className="font-medium mb-1">{alert.message}</h4>
+
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          <Badge className="text-xs bg-secondary">
+                            协议: {alert.protocol}
+                          </Badge>
+                          <Badge className="text-xs bg-secondary">
+                            资产: {alert.asset}
+                          </Badge>
+                        </div>
+
+                        {alert.details && alert.details.recommendation && (
+                          <div className="mt-3 text-sm text-muted-foreground">
+                            <span className="font-medium">建议: </span>
+                            {alert.details.recommendation}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         )}
       </CardContent>

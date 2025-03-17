@@ -8,7 +8,7 @@ import AlertsList from "./AlertsList";
 import MarketAnalysis from "./MarketAnalysis";
 import { apiService } from "../services/api";
 import type { Portfolio, MarketPrediction } from "../services/api";
-import { Loader2, RefreshCw, AlertTriangle, Fuel } from "lucide-react";
+import { Loader2, RefreshCw, AlertTriangle, Fuel, Shield, BarChart3 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./ui/tabs";
@@ -22,10 +22,12 @@ export const Dashboard: React.FC = () => {
   const [selectedAsset, setSelectedAsset] = useState<string>("ETH");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"overview" | "market" | "protocols">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "market" | "protocols" | "alerts">("overview");
   const [apiHealthy, setApiHealthy] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [gasPrice, setGasPrice] = useState<number | null>(null);
+  const [analyzingRisk, setAnalyzingRisk] = useState<boolean>(false);
+  const [riskAnalysisCompleted, setRiskAnalysisCompleted] = useState<boolean>(false);
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -48,7 +50,17 @@ export const Dashboard: React.FC = () => {
     };
 
     init();
-  }, [address, isConnected]);
+  }, [isConnected, address]);
+
+  // 当钱包地址变化时重新获取数据
+  useEffect(() => {
+    if (isConnected && address) {
+      fetchPortfolioData(address);
+    } else {
+      setPortfolio(null);
+      setRiskAnalysisCompleted(false);
+    }
+  }, [isConnected, address]);
 
   const checkApiHealth = async () => {
     const isHealthy = await apiService.checkApiHealth();
@@ -66,82 +78,96 @@ export const Dashboard: React.FC = () => {
   };
 
   const fetchPortfolioData = async (walletAddress?: string) => {
-    if (!walletAddress && !address) return;
-
-    setLoading(true);
-    setError(null);
+    if (!walletAddress) return;
 
     try {
+      setLoading(true);
+      setError(null);
+
       // 获取投资组合数据
-      console.log(`正在获取钱包地址 ${walletAddress || address!} 的投资组合数据...`);
-      const portfolioData = await apiService.getPortfolio(walletAddress || address!);
-      console.log("获取到投资组合数据:", portfolioData);
+      const portfolioData = await apiService.getPortfolio(walletAddress);
       setPortfolio(portfolioData);
 
       // 获取市场预测数据
-      const assets = portfolioData.positions.length > 0
-        ? [...new Set(portfolioData.positions.map(p => {
-            // 从资产名称或tokenList中提取基础资产
-            if (p.tokenList && p.tokenList.length > 0) {
-              return p.tokenList[0].tokenSymbol.split('/')[0];
-            }
-            return p.asset.split('/')[0];
-          }))]
-        : ["ETH", "BTC", "USDC"];
+      const assets = Array.from(
+        new Set(portfolioData.positions.map((pos) => pos.asset.split("/")[0]))
+      );
 
-      console.log("正在获取资产预测数据:", assets);
       const predictions: { [key: string]: MarketPrediction } = {};
-
       for (const asset of assets) {
         try {
           const prediction = await apiService.predictMarket(asset);
           predictions[asset] = prediction;
-        } catch (err) {
-          console.error(`获取${asset}市场预测失败:`, err);
+        } catch (error) {
+          console.error(`获取${asset}市场预测失败:`, error);
         }
       }
 
       setMarketPredictions(predictions);
-    } catch (err) {
-      console.error("获取投资组合数据失败:", err);
-      setError("获取数据失败，请稍后重试");
+    } catch (error) {
+      console.error("获取投资组合数据失败:", error);
+      setError("无法加载投资组合数据");
     } finally {
       setLoading(false);
     }
   };
 
+  // 分析钱包风险
+  const analyzeWalletRisk = async () => {
+    if (!address) return;
+
+    try {
+      setAnalyzingRisk(true);
+      setError(null);
+
+      // 调用风险分析API
+      const riskAnalysis = await apiService.analyzeWalletRisk(address);
+
+      // 更新投资组合数据，包含风险分析结果
+      if (portfolio) {
+        setPortfolio({
+          ...portfolio,
+          risk_level: riskAnalysis.risk_level,
+          recommendations: riskAnalysis.recommendations || []
+        });
+      }
+
+      setRiskAnalysisCompleted(true);
+    } catch (error) {
+      console.error("分析钱包风险失败:", error);
+      setError("无法完成风险分析");
+    } finally {
+      setAnalyzingRisk(false);
+    }
+  };
+
   const handleRefresh = () => {
-    if (refreshing) return;
+    if (refreshing || !address) return;
 
     setRefreshing(true);
-    fetchPortfolioData()
-      .then(() => {
-        fetchGasPrice();
-      })
+    fetchPortfolioData(address)
+      .then(() => fetchGasPrice())
       .finally(() => {
-        setTimeout(() => {
-          setRefreshing(false);
-        }, 1000);
+        setRefreshing(false);
       });
   };
 
   if (!apiHealthy) {
     return (
-      <Card className="w-full">
+      <Card className="border-destructive">
         <CardHeader>
-          <CardTitle className="flex items-center text-destructive">
-            <AlertTriangle className="mr-2 h-5 w-5" />
-            API 服务不可用
+          <CardTitle className="flex items-center gap-2 text-destructive">
+            <AlertTriangle className="h-5 w-5" />
+            API服务不可用
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-muted-foreground">
-            无法连接到后端服务，请检查服务是否正常运行，或稍后再试。
+            无法连接到后端API服务。请检查服务器状态或稍后再试。
           </p>
           <Button
-            variant="outline"
             className="mt-4"
-            onClick={() => checkApiHealth()}
+            onClick={checkApiHealth}
           >
             重试连接
           </Button>
@@ -152,123 +178,147 @@ export const Dashboard: React.FC = () => {
 
   if (!isConnected) {
     return (
-      <Card className="w-full">
+      <Card>
         <CardHeader>
-          <CardTitle>欢迎使用 DeFi 风险监控</CardTitle>
+          <CardTitle>连接钱包</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-muted-foreground mb-4">
-            请连接您的钱包以查看您的 DeFi 投资组合和风险分析。
+            请连接您的钱包以查看DeFi投资组合和风险分析。
           </p>
         </CardContent>
       </Card>
     );
   }
 
-  if (loading && !portfolio) {
-    return (
-      <div className="flex flex-col items-center justify-center w-full h-64">
-        <Loader2 className="h-10 w-10 text-primary animate-spin mb-4" />
-        <p className="text-muted-foreground">正在加载数据...</p>
-      </div>
-    );
-  }
-
   return (
-    <div className="container mx-auto px-4 py-8">
-      {!apiHealthy ? (
-        <div className="text-center py-12">
-          <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
-          <h2 className="text-2xl font-bold mb-2">API服务不可用</h2>
-          <p className="text-muted-foreground mb-6">
-            无法连接到后端服务，请稍后再试
-          </p>
-          <Button onClick={checkApiHealth}>重试连接</Button>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold">DeFi投资组合</h2>
+        <div className="flex items-center gap-2">
+          {gasPrice !== null && (
+            <div className="flex items-center gap-1 text-sm text-muted-foreground bg-background/50 px-3 py-1 rounded-full border border-border">
+              <Fuel className="h-3.5 w-3.5" />
+              <span>Gas: {gasPrice.toFixed(0)} Gwei</span>
+            </div>
+          )}
+          <Button
+            onClick={handleRefresh}
+            disabled={refreshing || loading}
+          >
+            {refreshing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            <span className="ml-2">刷新数据</span>
+          </Button>
         </div>
-      ) : !isConnected ? (
-        <div className="text-center py-12">
-          <h2 className="text-2xl font-bold mb-4">连接钱包以查看您的DeFi仪表盘</h2>
-          <p className="text-muted-foreground mb-6">
-            连接您的钱包以查看您的投资组合、风险分析和市场预测
-          </p>
-        </div>
+      </div>
+
+      {loading ? (
+        <Card>
+          <CardContent className="flex items-center justify-center py-8">
+            <div className="flex flex-col items-center gap-2">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-muted-foreground">正在加载投资组合数据...</p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : error ? (
+        <Card className="border-destructive">
+          <CardContent className="py-6">
+            <div className="flex items-center gap-2 text-destructive mb-2">
+              <AlertTriangle className="h-5 w-5" />
+              <p className="font-medium">加载失败</p>
+            </div>
+            <p className="text-muted-foreground">{error}</p>
+            <Button
+              className="mt-4"
+              onClick={() => fetchPortfolioData(address)}
+            >
+              重试
+            </Button>
+          </CardContent>
+        </Card>
       ) : (
         <>
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-            <div>
-              <h1 className="text-3xl font-bold">DeFi风险仪表盘</h1>
-              <p className="text-muted-foreground">
-                查看您的投资组合、风险分析和市场预测
-              </p>
-            </div>
+          {/* 投资组合概览 */}
+          <PortfolioOverview portfolio={portfolio} />
 
-            <div className="flex items-center gap-4">
-              {gasPrice !== null && (
-                <div className="hidden md:flex items-center gap-2 bg-muted/50 px-3 py-1.5 rounded-lg text-sm">
-                  <Fuel className="h-4 w-4 text-yellow-500" />
-                  <span>Gas: {gasPrice.toFixed(0)} Gwei</span>
-                </div>
+          {/* 风险分析按钮 */}
+          <div className="flex justify-center mt-6">
+            <Button
+              className="gap-2"
+              onClick={analyzeWalletRisk}
+              disabled={analyzingRisk || !portfolio}
+            >
+              {analyzingRisk ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <Shield className="h-5 w-5" />
               )}
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRefresh}
-                disabled={refreshing}
-                className="flex items-center gap-2"
-              >
-                {refreshing ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" />
-                )}
-                刷新数据
-              </Button>
-            </div>
+              {analyzingRisk ? "正在分析风险..." : riskAnalysisCompleted ? "更新风险分析" : "开始风险分析"}
+            </Button>
           </div>
 
-          <Tabs defaultValue={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
-            <TabsList className="mb-6">
-              <TabsTrigger value="overview">投资组合概览</TabsTrigger>
-              <TabsTrigger value="market">市场分析</TabsTrigger>
-              <TabsTrigger value="protocols">我的协议</TabsTrigger>
+          {/* 风险分析结果 */}
+          {riskAnalysisCompleted && portfolio && (
+            <Card className="mt-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Shield className="h-5 w-5" />
+                  风险分析结果
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">风险等级:</span>
+                    <Badge className={
+                      portfolio.risk_level === "高" ? "bg-destructive" :
+                      portfolio.risk_level === "中等" ? "bg-amber-500" : "bg-green-500"
+                    }>
+                      {portfolio.risk_level}
+                    </Badge>
+                  </div>
+
+                  {portfolio.recommendations && portfolio.recommendations.length > 0 && (
+                    <div>
+                      <h4 className="font-medium mb-2">建议:</h4>
+                      <ul className="space-y-1 text-sm text-muted-foreground">
+                        {portfolio.recommendations.map((rec, index) => (
+                          <li key={index} className="flex items-start gap-2">
+                            <span className="text-primary">•</span>
+                            <span>{rec}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* 标签页 */}
+          <Tabs defaultValue={activeTab} onValueChange={(value) => setActiveTab(value as any)} className="mt-6">
+            <TabsList className="grid grid-cols-3 mb-4">
+              <TabsTrigger value="overview" className="flex items-center gap-1">
+                <BarChart3 className="h-4 w-4" />
+                <span>市场分析</span>
+              </TabsTrigger>
+              <TabsTrigger value="protocols" className="flex items-center gap-1">
+                <Shield className="h-4 w-4" />
+                <span>协议列表</span>
+              </TabsTrigger>
+              <TabsTrigger value="alerts" className="flex items-center gap-1">
+                <AlertTriangle className="h-4 w-4" />
+                <span>警报</span>
+              </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="overview" className="space-y-6">
-              {/* 现有的概览内容 */}
-              {loading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                </div>
-              ) : error ? (
-                <div className="text-center py-12">
-                  <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
-                  <h2 className="text-xl font-bold mb-2">获取数据出错</h2>
-                  <p className="text-muted-foreground mb-6">{error}</p>
-                  <Button onClick={() => fetchPortfolioData(address)}>重试</Button>
-                </div>
-              ) : (
-                <>
-                  {portfolio && (
-                    <>
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-2">
-                          <PortfolioOverview portfolio={portfolio} />
-                        </div>
-                        <div>
-                          <RiskMonitor portfolio={portfolio} />
-                        </div>
-                      </div>
-
-                      <AlertsList address={address} />
-                    </>
-                  )}
-                </>
-              )}
-            </TabsContent>
-
-            <TabsContent value="market">
-              {/* 现有的市场分析内容 */}
+            <TabsContent value="overview" className="space-y-4">
               <MarketAnalysis
                 marketPredictions={marketPredictions}
                 selectedAsset={selectedAsset}
@@ -276,12 +326,12 @@ export const Dashboard: React.FC = () => {
               />
             </TabsContent>
 
-            <TabsContent value="protocols" className="space-y-6">
-              {/* 新增的协议列表内容 */}
-              <ProtocolList
-                walletAddress={address}
-                title="我的DeFi协议"
-              />
+            <TabsContent value="protocols" className="space-y-4">
+              <ProtocolList walletAddress={address} title="您使用的DeFi协议" />
+            </TabsContent>
+
+            <TabsContent value="alerts" className="space-y-4">
+              <AlertsList address={address} />
             </TabsContent>
           </Tabs>
         </>

@@ -26,7 +26,6 @@ export default function Home() {
 
       <main className="flex-1 container mx-auto px-4 py-6">
         <div className="space-y-8">
-          <ApiTest />
           <Dashboard />
           <ProtocolList />
         </div>

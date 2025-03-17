@@ -439,14 +439,31 @@ class ApiService {
 
   async getAlerts(address: string): Promise<Alert[]> {
     try {
-      // 使用后端的警报API
-      const response = await this.fetchJson<any>(`/wallet/${address}/alerts`);
-
-      // 将后端响应转换为前端期望的Alert[]格式
-      return response.alerts || [];
+      const data = await this.fetchJson<Alert[]>(`/wallet/${address}/alerts`);
+      return data;
     } catch (error) {
-      console.error('获取警报失败:', error);
+      console.error('Error fetching alerts:', error);
       return [];
+    }
+  }
+
+  async analyzeWalletRisk(address: string): Promise<any> {
+    try {
+      const data = await this.fetchJson<any>(`/wallet/${address}/risk`);
+      return data;
+    } catch (error) {
+      console.error('Error analyzing wallet risk:', error);
+      throw error;
+    }
+  }
+
+  async analyzeProtocolRisk(protocolName: string): Promise<any> {
+    try {
+      const data = await this.fetchJson<any>(`/protocol/risk/${protocolName}`);
+      return data;
+    } catch (error) {
+      console.error('Error analyzing protocol risk:', error);
+      throw error;
     }
   }
 
