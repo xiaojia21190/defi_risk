@@ -890,74 +890,87 @@ class BlockchainService:
         Returns:
             Optional[Dict]: 包含24小时行情数据的字典，如果获取失败则返回None
         """
+
+        # 在_get_24h_data方法中添加
         try:
-            # 使用historical_data_cache而不是未定义的cache
-            cache_key = f"24h_data_{asset}"
-            cache_interval = "1m"  # 1分钟缓存
-            cached_data = self.historical_data_cache.get(cache_key, cache_interval)
-
-            if cached_data is not None:
-                self.logger.info(f"从缓存获取{asset}的24小时数据")
-                return cached_data
-
-            url = "https://api.binance.com/api/v3/ticker/24hr"
-
-            # 标准化资产符号
-            symbol = self._normalize_asset_symbol(asset)
-
-            # 设置请求参数
-            params = {
-                "symbol": symbol,
-            }
-
-            self.logger.info(f"从Binance获取{symbol}的24小时数据")
-            response = requests.get(url, params=params, proxies=proxies)
-
-            if response.status_code == 200:
-                data = response.json()
-
-                if not data:
-                    self.logger.warning(f"Binance返回的{symbol}数据为空")
-                    return None
-
-                # 格式化数据，提取关键指标
-                formatted_data = {
-                    "symbol": data.get("symbol", ""),
-                    "price": float(data.get("lastPrice", 0)),
-                    "price_change": float(data.get("priceChange", 0)),
-                    "price_change_percent": float(data.get("priceChangePercent", 0)),
-                    "high_price": float(data.get("highPrice", 0)),
-                    "low_price": float(data.get("lowPrice", 0)),
-                    "volume": float(data.get("volume", 0)),
-                    "quote_volume": float(data.get("quoteVolume", 0)),
-                    "weighted_avg_price": float(data.get("weightedAvgPrice", 0)),
-                    "open_time": datetime.fromtimestamp(data.get("openTime", 0) / 1000),
-                    "close_time": datetime.fromtimestamp(
-                        data.get("closeTime", 0) / 1000
-                    ),
-                    "volatility": (
-                        float(data.get("highPrice", 0)) - float(data.get("lowPrice", 0))
-                    )
-                    / float(data.get("lastPrice", 1))
-                    * 100,  # 计算波动率
-                    "raw_data": data,  # 保留原始数据以备需要
-                }
-
-                # 将结果存入缓存
-                self.historical_data_cache.set(
-                    cache_key, formatted_data, cache_interval
-                )
-
-                self.logger.info(f"成功获取{symbol}的24小时数据")
-                return formatted_data
-            else:
-                self.logger.error(
-                    f"Binance API返回错误: {response.status_code}, 响应: {response.text}"
-                )
-                return None
+            # 尝试从CoinGecko获取数据
+            coingecko_data = await self._get_coingecko_24h_data(asset)
+            if coingecko_data is not None:
+                self.logger.info(f"使用CoinGecko获取{asset}的24小时数据")
+                return coingecko_data
         except Exception as e:
-            self.logger.error(f"从Binance获取{asset}的24小时数据失败: {e}")
-            return None
+            self.logger.warning(
+                f"从CoinGecko获取{asset}的24小时数据失败: {e}，尝试使用Binance数据"
+            )
+
+        # try:
+        #     # 使用historical_data_cache而不是未定义的cache
+        #     cache_key = f"24h_data_{asset}"
+        #     cache_interval = "1m"  # 1分钟缓存
+        #     cached_data = self.historical_data_cache.get(cache_key, cache_interval)
+
+        #     if cached_data is not None:
+        #         self.logger.info(f"从缓存获取{asset}的24小时数据")
+        #         return cached_data
+
+        #     url = "https://api.binance.com/api/v3/ticker/24hr"
+
+        #     # 标准化资产符号
+        #     symbol = self._normalize_asset_symbol(asset)
+
+        #     # 设置请求参数
+        #     params = {
+        #         "symbol": symbol,
+        #     }
+
+        #     self.logger.info(f"从Binance获取{symbol}的24小时数据")
+        #     response = requests.get(url, params=params, proxies=proxies)
+
+        #     if response.status_code == 200:
+        #         data = response.json()
+
+        #         if not data:
+        #             self.logger.warning(f"Binance返回的{symbol}数据为空")
+        #             return None
+
+        #         # 格式化数据，提取关键指标
+        #         formatted_data = {
+        #             "symbol": data.get("symbol", ""),
+        #             "price": float(data.get("lastPrice", 0)),
+        #             "price_change": float(data.get("priceChange", 0)),
+        #             "price_change_percent": float(data.get("priceChangePercent", 0)),
+        #             "high_price": float(data.get("highPrice", 0)),
+        #             "low_price": float(data.get("lowPrice", 0)),
+        #             "volume": float(data.get("volume", 0)),
+        #             "quote_volume": float(data.get("quoteVolume", 0)),
+        #             "weighted_avg_price": float(data.get("weightedAvgPrice", 0)),
+        #             "open_time": datetime.fromtimestamp(data.get("openTime", 0) / 1000),
+        #             "close_time": datetime.fromtimestamp(
+        #                 data.get("closeTime", 0) / 1000
+        #             ),
+        #             "volatility": (
+        #                 float(data.get("highPrice", 0)) - float(data.get("lowPrice", 0))
+        #             )
+        #             / float(data.get("lastPrice", 1))
+        #             * 100,  # 计算波动率
+        #             "raw_data": data,  # 保留原始数据以备需要
+        #         }
+
+        #         # 将结果存入缓存
+        #         self.historical_data_cache.set(
+        #             cache_key, formatted_data, cache_interval
+        #         )
+
+        #         self.logger.info(f"成功获取{symbol}的24小时数据")
+        #         return formatted_data
+        #     else:
+        #         self.logger.error(
+        #             f"Binance API返回错误: {response.status_code}, 响应: {response.text}"
+        #         )
+        #         return None
+        # except Exception as e:
+        #     self.logger.error(f"从Binance获取{asset}的24小时数据失败: {e}")
+        #     return None
 
     def _normalize_asset_symbol(self, asset: str) -> str:
         """
@@ -1084,96 +1097,107 @@ class BlockchainService:
         Returns:
             历史数据
         """
+        # 在get_asset_historical_data方法中添加
         try:
-            # 检查缓存
-            cache_key = f"historical_data_{asset}"
-            cache_interval = "1h"
-            cached_data = self.historical_data_cache.get(cache_key, cache_interval)
-
-            if cached_data is not None:
-                self.logger.info(f"从缓存获取{asset}的历史数据")
-                return cached_data
-
-            asset = self._normalize_asset_symbol(asset)
-
-            """从Binance API获取历史数据"""
-            url = "https://api.binance.com/api/v3/klines"
-            # 计算时间范围（过去30天）
-            end_time = int(datetime.now().timestamp() * 1000)
-            start_time = end_time - (30 * 24 * 60 * 60 * 1000)  # 30天的毫秒数
-
-            # 设置请求参数
-            params = {
-                "symbol": asset,
-                "interval": "1d",  # 1天的K线
-                "startTime": start_time,
-                "endTime": end_time,
-                "limit": 30,  # 最多30个数据点
-            }
-
-            try:
-                response = requests.get(url, params=params, proxies=proxies)
-                if response.status_code == 200:
-                    data = response.json()
-
-                    if not data:
-                        logger.warning(f"Binance返回的{asset}数据为空")
-                        return None
-
-                    # 创建DataFrame
-                    # Binance K线数据格式:
-                    # [
-                    #   [
-                    #     开盘时间,
-                    #     开盘价,
-                    #     最高价,
-                    #     最低价,
-                    #     收盘价,
-                    #     成交量,
-                    #     收盘时间,
-                    #     成交额,
-                    #     成交笔数,
-                    #     主动买入成交量,
-                    #     主动买入成交额,
-                    #     忽略
-                    #   ]
-                    # ]
-                    df = pd.DataFrame(
-                        {
-                            "timestamp": [
-                                datetime.fromtimestamp(k[0] / 1000) for k in data
-                            ],
-                            "price": [float(k[4]) for k in data],  # 使用收盘价
-                            "volume": [float(k[5]) for k in data],
-                            "market_cap": [None] * len(data),  # Binance不提供市值数据
-                        }
-                    )
-                    df["source"] = "binance"
-                    # 存入缓存
-                    self.historical_data_cache.set(cache_key, df, cache_interval)
-                    return df
-                else:
-                    logger.error(f"Binance API返回错误: {response.status}")
-                    # 返回默认数据
-                    df = pd.DataFrame(
-                        {
-                            "timestamp": [],
-                            "price": [],
-                            "volume": [],
-                            "market_cap": [],
-                            "source": [],
-                        }
-                    )
-                    return df
-
-            except Exception as e:
-                logger.error(f"获取{asset}历史数据失败: {str(e)}")
-                return None
-
-            return data
+            # 尝试从CoinGecko获取数据
+            coingecko_data = await self.get_coingecko_historical_data(asset)
+            if coingecko_data is not None and not coingecko_data.empty:
+                self.logger.info(f"使用CoinGecko获取{asset}的历史数据")
+                return coingecko_data
         except Exception as e:
-            self.logger.error(f"获取资产历史数据失败: {str(e)}")
-            return {}
+            self.logger.warning(
+                f"从CoinGecko获取{asset}的历史数据失败: {e}，尝试使用Binance数据"
+            )
+        # try:
+        #     # 检查缓存
+        #     cache_key = f"historical_data_{asset}"
+        #     cache_interval = "1h"
+        #     cached_data = self.historical_data_cache.get(cache_key, cache_interval)
+
+        #     if cached_data is not None:
+        #         self.logger.info(f"从缓存获取{asset}的历史数据")
+        #         return cached_data
+
+        #     asset = self._normalize_asset_symbol(asset)
+
+        #     """从Binance API获取历史数据"""
+        #     url = "https://api.binance.com/api/v3/klines"
+        #     # 计算时间范围（过去30天）
+        #     end_time = int(datetime.now().timestamp() * 1000)
+        #     start_time = end_time - (30 * 24 * 60 * 60 * 1000)  # 30天的毫秒数
+
+        #     # 设置请求参数
+        #     params = {
+        #         "symbol": asset,
+        #         "interval": "1d",  # 1天的K线
+        #         "startTime": start_time,
+        #         "endTime": end_time,
+        #         "limit": 30,  # 最多30个数据点
+        #     }
+
+        #     try:
+        #         response = requests.get(url, params=params, proxies=proxies)
+        #         if response.status_code == 200:
+        #             data = response.json()
+
+        #             if not data:
+        #                 logger.warning(f"Binance返回的{asset}数据为空")
+        #                 return None
+
+        #             # 创建DataFrame
+        #             # Binance K线数据格式:
+        #             # [
+        #             #   [
+        #             #     开盘时间,
+        #             #     开盘价,
+        #             #     最高价,
+        #             #     最低价,
+        #             #     收盘价,
+        #             #     成交量,
+        #             #     收盘时间,
+        #             #     成交额,
+        #             #     成交笔数,
+        #             #     主动买入成交量,
+        #             #     主动买入成交额,
+        #             #     忽略
+        #             #   ]
+        #             # ]
+        #             df = pd.DataFrame(
+        #                 {
+        #                     "timestamp": [
+        #                         datetime.fromtimestamp(k[0] / 1000) for k in data
+        #                     ],
+        #                     "price": [float(k[4]) for k in data],  # 使用收盘价
+        #                     "volume": [float(k[5]) for k in data],
+        #                     "market_cap": [None] * len(data),  # Binance不提供市值数据
+        #                 }
+        #             )
+        #             df["source"] = "binance"
+        #             # 存入缓存
+        #             self.historical_data_cache.set(cache_key, df, cache_interval)
+        #             return df
+        #         else:
+        #             logger.error(f"Binance API返回错误: {response.status}")
+        #             # 返回默认数据
+        #             df = pd.DataFrame(
+        #                 {
+        #                     "timestamp": [],
+        #                     "price": [],
+        #                     "volume": [],
+        #                     "market_cap": [],
+        #                     "source": [],
+        #                 }
+        #             )
+        #             return df
+
+        #     except Exception as e:
+        #         logger.error(f"获取{asset}历史数据失败: {str(e)}")
+        #         return None
+
+        #     return data
+        # except Exception as e:
+        #     self.logger.error(f"获取资产历史数据失败: {str(e)}")
+        #     return {}
 
     # 获取 get_protocol 作缓存
     async def get_protocol(self, protocol: str) -> float:
@@ -1660,14 +1684,7 @@ class BlockchainService:
         self, wallet_address: str, positions: List[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """
-        获取钱包相关的警报
-
-        Args:
-            wallet_address: 钱包地址
-            positions: 可选的头寸列表，如果提供则不再重新获取
-
-        Returns:
-            警报列表
+        获取钱包相关的警报，使用CoinGecko数据增强风险分析
         """
         try:
             self.logger.info(f"获取钱包 {wallet_address} 的警报")
@@ -1867,6 +1884,55 @@ class BlockchainService:
                         }
                     )
 
+            # 添加新的风险检查
+
+            # 5. 检查市值风险
+            for asset in assets:
+                try:
+                    asset_risk = await self.analyze_asset_risk(asset)
+                    if asset_risk.get("risk_level") in ["高风险", "中高风险"]:
+                        alerts.append(
+                            {
+                                "id": f"market_cap-{asset}-{int(datetime.now().timestamp())}",
+                                "type": "market_cap_risk",
+                                "severity": "warning",
+                                "protocol": "",
+                                "asset": asset,
+                                "message": f"{asset}市值风险较高: {asset_risk['analysis']['market_cap_analysis']}",
+                                "timestamp": datetime.now().isoformat(),
+                                "details": asset_risk,
+                            }
+                        )
+                except Exception as e:
+                    self.logger.error(f"分析{asset}市值风险失败: {str(e)}")
+
+            # 6. 检查流动性风险
+            for asset in assets:
+                try:
+                    data_24h = await self._get_coingecko_24h_data(asset)
+                    if data_24h:
+                        volume_to_mcap = data_24h.get("volume", 0) / data_24h.get(
+                            "market_cap", 1
+                        )
+                        if volume_to_mcap < 0.01:  # 日交易量不到市值的1%
+                            alerts.append(
+                                {
+                                    "id": f"liquidity-{asset}-{int(datetime.now().timestamp())}",
+                                    "type": "liquidity_risk",
+                                    "severity": "warning",
+                                    "protocol": "",
+                                    "asset": asset,
+                                    "message": f"{asset}流动性风险较高，日交易量/市值比率{volume_to_mcap:.2%}",
+                                    "timestamp": datetime.now().isoformat(),
+                                    "details": {
+                                        "volume_to_mcap": volume_to_mcap,
+                                        "recommendation": "建议关注流动性风险，可能需要调整仓位",
+                                    },
+                                }
+                            )
+                except Exception as e:
+                    self.logger.error(f"分析{asset}流动性风险失败: {str(e)}")
+
             # 如果没有生成任何警报，添加一个默认的"无警报"消息
             if not alerts:
                 alerts.append(
@@ -1893,19 +1959,391 @@ class BlockchainService:
 
         except Exception as e:
             self.logger.error(f"获取钱包警报失败: {str(e)}")
-            # 返回一个错误警报
-            return [
-                {
-                    "id": f"error-{int(datetime.now().timestamp())}",
-                    "type": "system_error",
-                    "severity": "warning",
-                    "protocol": "",
-                    "asset": "",
-                    "message": f"获取警报时出错: {str(e)}",
-                    "timestamp": datetime.now().isoformat(),
-                    "details": {
-                        "error": str(e),
-                        "recommendation": "请稍后重试或联系支持团队",
-                    },
+            return [{"error": f"获取警报时出错: {str(e)}"}]
+
+    async def get_coingecko_historical_data(
+        self, asset: str, days: int = 30
+    ) -> Optional[pd.DataFrame]:
+        """
+        从CoinGecko API获取资产的历史数据
+
+        Args:
+            asset: 资产ID或符号
+            days: 获取多少天的数据
+
+        Returns:
+            DataFrame: 包含历史数据的DataFrame
+        """
+        try:
+            # 检查缓存
+            cache_key = f"coingecko_historical_data_{asset}"
+            cache_interval = "1h"
+            cached_data = self.historical_data_cache.get(cache_key, cache_interval)
+
+            if cached_data is not None:
+                self.logger.info(f"从缓存获取{asset}的CoinGecko历史数据")
+                return cached_data
+
+            # 将通用符号转换为CoinGecko的ID
+            coingecko_id = self._convert_to_coingecko_id(asset)
+            if not coingecko_id:
+                self.logger.warning(f"无法将{asset}转换为CoinGecko ID")
+                return None
+
+            # 构建API URL
+            url = f"https://api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart"
+            params = {"vs_currency": "usd", "days": days, "interval": "daily"}
+
+            # 发送请求
+            response = requests.get(url, params=params, proxies=proxies)
+
+            if response.status_code == 200:
+                data = response.json()
+
+                # 提取数据
+                prices = data.get("prices", [])
+                market_caps = data.get("market_caps", [])
+                volumes = data.get("total_volumes", [])
+
+                # 创建时间戳列表
+                timestamps = [datetime.fromtimestamp(p[0] / 1000) for p in prices]
+
+                # 创建DataFrame
+                df = pd.DataFrame(
+                    {
+                        "timestamp": timestamps,
+                        "price": [p[1] for p in prices],
+                        "volume": [v[1] for v in volumes],
+                        "market_cap": [m[1] for m in market_caps],
+                    }
+                )
+
+                df["source"] = "coingecko"
+
+                # 存入缓存
+                self.historical_data_cache.set(cache_key, df, cache_interval)
+
+                return df
+            else:
+                self.logger.error(f"CoinGecko API返回错误: {response.status_code}")
+                return None
+
+        except Exception as e:
+            self.logger.error(f"从CoinGecko获取{asset}历史数据失败: {str(e)}")
+            return None
+
+    def _convert_to_coingecko_id(self, asset: str) -> str:
+        """将通用资产符号转换为CoinGecko ID，使用完整的代币列表"""
+        # 检查缓存中是否有完整代币列表
+        coins_list = self.historical_data_cache.get("coingecko_coins_list", "1d")
+
+        if coins_list is None:
+            # 如果缓存中没有，则获取完整列表
+            try:
+                url = "https://api.coingecko.com/api/v3/coins/list"
+                response = requests.get(url, proxies=proxies)
+
+                if response.status_code == 200:
+                    coins_list = response.json()
+                    # 缓存一天，避免频繁请求
+                    self.historical_data_cache.set(
+                        "coingecko_coins_list", coins_list, "1d"
+                    )
+                    self.logger.info(
+                        f"成功获取CoinGecko完整代币列表，共{len(coins_list)}个代币"
+                    )
+                else:
+                    self.logger.error(
+                        f"获取CoinGecko代币列表失败: {response.status_code}"
+                    )
+                    coins_list = []
+            except Exception as e:
+                self.logger.error(f"获取CoinGecko代币列表失败: {str(e)}")
+                coins_list = []
+
+        # 标准化输入
+        asset_normalized = asset.strip().lower()
+
+        # 首先检查完全匹配的id
+        for coin in coins_list:
+            if coin.get("id") == asset_normalized:
+                return coin.get("id")
+
+        # 然后检查symbol的完全匹配
+        exact_matches = [
+            coin
+            for coin in coins_list
+            if coin.get("symbol").lower() == asset_normalized
+        ]
+        if exact_matches:
+            # 如果有多个匹配，优先选择市值较高的主流代币
+            if len(exact_matches) > 1:
+                # 常见主流代币优先级
+                priority_ids = [
+                    "bitcoin",
+                    "ethereum",
+                    "tether",
+                    "usd-coin",
+                    "binancecoin",
+                    "ripple",
+                    "cardano",
+                    "solana",
+                    "dogecoin",
+                    "polkadot",
+                ]
+                for priority_id in priority_ids:
+                    for coin in exact_matches:
+                        if coin.get("id") == priority_id:
+                            return priority_id
+
+                # 如果没有匹配到优先级列表，返回第一个匹配
+                return exact_matches[0].get("id")
+            else:
+                return exact_matches[0].get("id")
+
+        # 如果没有完全匹配，使用硬编码的映射作为后备
+        fallback_mapping = {
+            "btc": "bitcoin",
+            "eth": "ethereum",
+            "usdt": "tether",
+            "usdc": "usd-coin",
+            "bnb": "binancecoin",
+            "xrp": "ripple",
+            "ada": "cardano",
+            "sol": "solana",
+            "doge": "dogecoin",
+            "dot": "polkadot",
+        }
+
+        if asset_normalized in fallback_mapping:
+            return fallback_mapping[asset_normalized]
+
+        # 作为最后的尝试，查找部分匹配
+        partial_matches = [
+            coin
+            for coin in coins_list
+            if asset_normalized in coin.get("symbol").lower()
+        ]
+        if partial_matches:
+            return partial_matches[0].get("id")
+
+        # 如果所有尝试都失败，返回原始输入（可能导致API错误）
+        self.logger.warning(f"无法将{asset}映射到CoinGecko ID，使用原始输入")
+        return asset_normalized
+
+    async def _get_coingecko_24h_data(self, asset: str) -> Optional[Dict]:
+        """
+        从CoinGecko API获取24小时行情数据
+
+        Args:
+            asset: 资产ID或符号
+
+        Returns:
+            Dict: 包含24小时行情数据的字典
+        """
+        try:
+            # 检查缓存
+            cache_key = f"coingecko_24h_data_{asset}"
+            cache_interval = "5m"  # 5分钟缓存
+            cached_data = self.historical_data_cache.get(cache_key, cache_interval)
+
+            if cached_data is not None:
+                self.logger.info(f"从缓存获取{asset}的CoinGecko 24小时数据")
+                return cached_data
+
+            # 将通用符号转换为CoinGecko的ID
+            coingecko_id = self._convert_to_coingecko_id(asset)
+            if not coingecko_id:
+                self.logger.warning(f"无法将{asset}转换为CoinGecko ID")
+                return None
+
+            # 获取当前币种信息
+            url = f"https://api.coingecko.com/api/v3/coins/{coingecko_id}"
+            params = {
+                "localization": "false",
+                "tickers": "false",
+                "community_data": "false",
+                "developer_data": "false",
+            }
+
+            response = requests.get(url, params=params, proxies=proxies)
+
+            if response.status_code == 200:
+                data = response.json()
+
+                # 提取市场数据
+                market_data = data.get("market_data", {})
+
+                # 格式化数据
+                formatted_data = {
+                    "symbol": data.get("symbol", "").upper(),
+                    "price": market_data.get("current_price", {}).get("usd", 0),
+                    "price_change": market_data.get("price_change_24h", 0),
+                    "price_change_percent": market_data.get(
+                        "price_change_percentage_24h", 0
+                    ),
+                    "high_price": market_data.get("high_24h", {}).get("usd", 0),
+                    "low_price": market_data.get("low_24h", {}).get("usd", 0),
+                    "volume": market_data.get("total_volume", {}).get("usd", 0),
+                    "market_cap": market_data.get("market_cap", {}).get("usd", 0),
+                    "volatility": abs(
+                        market_data.get("price_change_percentage_24h", 0)
+                    ),
+                    "last_updated": data.get("last_updated", ""),
                 }
-            ]
+
+                # 将结果存入缓存
+                self.historical_data_cache.set(
+                    cache_key, formatted_data, cache_interval
+                )
+
+                return formatted_data
+            else:
+                self.logger.error(f"CoinGecko API返回错误: {response.status_code}")
+                return None
+
+        except Exception as e:
+            self.logger.error(f"从CoinGecko获取{asset}的24小时数据失败: {str(e)}")
+            return None
+
+    async def analyze_asset_risk(self, asset: str) -> Dict[str, Any]:
+        """
+        分析资产的风险指标，使用CoinGecko数据
+
+        Args:
+            asset: 资产符号或ID
+
+        Returns:
+            Dict: 资产风险分析结果
+        """
+        try:
+            # 获取24小时数据
+            data_24h = await self._get_coingecko_24h_data(asset)
+            if not data_24h:
+                return {"error": f"无法获取{asset}的市场数据"}
+
+            # 获取历史数据
+            historical_data = await self.get_coingecko_historical_data(asset)
+            if historical_data is None or historical_data.empty:
+                return {"error": f"无法获取{asset}的历史数据"}
+
+            # 1. 价格波动性分析
+            price_volatility = historical_data["price"].pct_change().std() * 100
+
+            # 2. 市值分析
+            market_cap = data_24h.get("market_cap", 0)
+            market_cap_rank = data_24h.get("market_cap_rank", 0)
+
+            # 3. 流动性分析
+            volume = data_24h.get("volume", 0)
+            volume_to_mcap_ratio = volume / market_cap if market_cap > 0 else 0
+
+            # 4. 价格趋势分析
+            current_price = historical_data["price"].iloc[-1]
+            price_ma7 = historical_data["price"].rolling(window=7).mean().iloc[-1]
+            price_ma30 = historical_data["price"].rolling(window=30).mean().iloc[-1]
+
+            # 5. 计算风险评分
+            risk_score = 0
+            max_score = 100
+
+            # 市值风险 (30分)
+            if market_cap > 10000000000:  # > 100亿
+                risk_score += 30
+            elif market_cap > 1000000000:  # > 10亿
+                risk_score += 20
+            elif market_cap > 100000000:  # > 1亿
+                risk_score += 10
+
+            # 流动性风险 (20分)
+            if volume_to_mcap_ratio > 0.1:  # 日交易量超过市值的10%
+                risk_score += 20
+            elif volume_to_mcap_ratio > 0.05:  # 日交易量超过市值的5%
+                risk_score += 10
+
+            # 波动性风险 (20分)
+            if price_volatility < 5:  # 波动率小于5%
+                risk_score += 20
+            elif price_volatility < 10:  # 波动率小于10%
+                risk_score += 10
+
+            # 趋势风险 (30分)
+            if current_price > price_ma7 > price_ma30:  # 上升趋势
+                risk_score += 30
+            elif current_price > price_ma7:  # 短期上升
+                risk_score += 20
+            elif current_price > price_ma30:  # 长期上升
+                risk_score += 10
+
+            # 确定风险等级
+            risk_level = "高风险"
+            if risk_score >= 80:
+                risk_level = "低风险"
+            elif risk_score >= 60:
+                risk_level = "中低风险"
+            elif risk_score >= 40:
+                risk_level = "中等风险"
+            elif risk_score >= 20:
+                risk_level = "中高风险"
+
+            metrics = {
+                "price_volatility": round(price_volatility, 2),
+                "market_cap": market_cap,
+                "market_cap_rank": market_cap_rank,
+                "volume_to_mcap_ratio": round(volume_to_mcap_ratio, 4),
+                "price_trend": {
+                    "current": current_price,
+                    "ma7": price_ma7,
+                    "ma30": price_ma30,
+                },
+            }
+
+            return {
+                "asset": asset,
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "metrics": metrics,
+                "analysis": {
+                    "market_cap_analysis": f"市值{market_cap:,.0f}美元，排名第{market_cap_rank}位",
+                    "liquidity_analysis": f"日交易量/市值比率{volume_to_mcap_ratio:.2%}",
+                    "volatility_analysis": f"价格波动率{price_volatility:.2f}%",
+                    "trend_analysis": (
+                        "上升趋势" if current_price > price_ma7 else "下降趋势"
+                    ),
+                },
+                "recommendations": self._generate_risk_recommendations(
+                    risk_score, metrics
+                ),
+            }
+
+        except Exception as e:
+            self.logger.error(f"分析资产{asset}风险时出错: {str(e)}")
+            return {"error": f"风险分析失败: {str(e)}"}
+
+    def _generate_risk_recommendations(
+        self, risk_score: int, metrics: Dict[str, Any]
+    ) -> List[str]:
+        """
+        根据风险评分和指标生成建议
+        """
+        recommendations = []
+
+        # 基于市值
+        if metrics.get("market_cap", 0) < 100000000:  # < 1亿
+            recommendations.append("市值较小，建议控制仓位")
+
+        # 基于流动性
+        if metrics.get("volume_to_mcap_ratio", 0) < 0.01:
+            recommendations.append("流动性较低，建议关注交易风险")
+
+        # 基于波动性
+        if metrics.get("price_volatility", 0) > 10:
+            recommendations.append("价格波动较大，建议设置止损")
+
+        # 基于趋势
+        if metrics.get("price_trend", {}).get("current", 0) < metrics.get(
+            "price_trend", {}
+        ).get("ma30", 0):
+            recommendations.append("处于下降趋势，建议谨慎操作")
+
+        return recommendations
