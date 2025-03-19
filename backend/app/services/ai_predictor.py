@@ -1309,19 +1309,6 @@ class AiPredictor:
 
         return [round(level, 2) for level in resistance_levels]
 
-    def analyze_portfolio_risk(self, portfolio_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        分析投资组合风险
-
-        Args:
-            portfolio_data: 投资组合数据
-
-        Returns:
-            Dict: 风险分析结果
-        """
-        # 实现投资组合风险分析逻辑
-        pass
-
     async def is_available(self) -> bool:
         """
         检查AI预测器是否可用

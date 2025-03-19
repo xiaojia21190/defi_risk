@@ -3,7 +3,6 @@
 DeFi风险分析API启动脚本
 """
 import os
-import sys
 import argparse
 import uvicorn
 from dotenv import load_dotenv
@@ -15,7 +14,7 @@ load_dotenv()
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(description="DeFi风险分析API服务")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="服务主机地址")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="服务主机地址")
     parser.add_argument("--port", type=int, default=8000, help="服务端口")
     parser.add_argument("--reload", action="store_true", help="启用热重载（开发模式）")
     parser.add_argument("--debug", action="store_true", help="启用调试模式")

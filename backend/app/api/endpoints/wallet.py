@@ -92,7 +92,7 @@ async def analyze_wallet_risk(
         # 获取钱包头寸
         positions = await blockchain_service.get_all_positions(wallet_address)
 
-        # 分析风险
+        # 使用风险引擎分析投资组合风险
         risk_analysis = await risk_engine.analyze_portfolio_risk(positions)
 
         # 获取AI洞察
@@ -100,13 +100,20 @@ async def analyze_wallet_risk(
             wallet_address, positions, risk_analysis
         )
 
-        # 合并结果
+        # 构建响应
         result = {
             "wallet_address": wallet_address,
             "risk_score": risk_analysis.get("risk_score", 0),
             "risk_level": risk_analysis.get("risk_level", "未知"),
             "risk_factors": risk_analysis.get("risk_factors", []),
-            "recommendations": ai_insights.get("recommendations", []),
+            "risk_metrics": risk_analysis.get("risk_metrics", {}),
+            "recommendations": ai_insights.get("recommendations", [])
+            or risk_analysis.get("recommendations", []),
+            "warnings": risk_analysis.get("warnings", []),
+            "monitoring_points": risk_analysis.get("monitoring_points", []),
+            "analysis_timestamp": risk_analysis.get(
+                "analysis_timestamp", datetime.now().isoformat()
+            ),
             "positions_summary": {
                 "total_value": sum(
                     position.get("usd_value", 0) for position in positions
@@ -115,6 +122,7 @@ async def analyze_wallet_risk(
                 "protocols": list(set(p.get("protocol", "") for p in positions)),
                 "assets": list(set(p.get("asset", "") for p in positions)),
             },
+            "ai_enhanced": ai_insights.get("recommendations", []) != [],
         }
 
         return result
@@ -252,7 +260,7 @@ async def get_wallet_alerts(
     demo_service: DemoDataService = Depends(get_demo_data_service),
 ):
     """
-    获取钱包相关的市场警报
+    获取钱包的风险警报
 
     - **wallet_address**: 钱包地址
     """
@@ -264,11 +272,8 @@ async def get_wallet_alerts(
             logger.info(f"使用演示数据: 钱包警报 {wallet_address}")
             return demo_service.get_wallet_alerts(wallet_address)
 
-        # 获取钱包头寸
-        positions = await blockchain_service.get_all_positions(wallet_address)
-
-        # 获取相关警报
-        alerts = await blockchain_service.get_wallet_alerts(wallet_address, positions)
+        # 获取钱包警报
+        alerts = await blockchain_service.get_wallet_alerts(wallet_address)
 
         # 构建响应
         response = {
@@ -282,8 +287,54 @@ async def get_wallet_alerts(
         return response
     except Exception as e:
         logger.error(f"获取钱包警报时出错: {str(e)}")
-        # 如果出错且是演示模式，返回演示数据
+        return {"error": f"获取钱包警报失败: {str(e)}"}
+
+
+@router.get("/{wallet_address}/scenario-simulation")
+async def simulate_market_scenario(
+    wallet_address: str,
+    scenario: str = "market_crash",
+    blockchain_service: BlockchainService = Depends(get_blockchain_service),
+    demo_service: DemoDataService = Depends(get_demo_data_service),
+    risk_engine: RiskEngine = Depends(get_risk_engine),
+):
+    """
+    模拟极端市场情景下的投资组合表现
+
+    - **wallet_address**: 钱包地址
+    - **scenario**: 市场情景类型
+      - market_crash: 市场崩盘
+      - bull_run: 牛市
+      - defi_hack: DeFi黑客事件
+      - regulatory_crackdown: 监管打击
+    """
+    try:
+        logger.info(f"收到市场情景模拟请求: {wallet_address}, 情景: {scenario}")
+
+        # 验证情景类型
+        valid_scenarios = [
+            "market_crash",
+            "bull_run",
+            "defi_hack",
+            "regulatory_crackdown",
+        ]
+        if scenario not in valid_scenarios:
+            logger.warning(f"无效的情景类型: {scenario}, 使用默认值: market_crash")
+            scenario = "market_crash"
+
+        # 如果是演示模式，使用演示数据
         if settings.DEMO_MODE:
-            logger.info(f"出错时使用演示数据: 钱包警报 {wallet_address}")
-            return demo_service.get_wallet_alerts(wallet_address)
-        raise HTTPException(status_code=500, detail=f"获取钱包警报失败: {str(e)}")
+            logger.info(
+                f"使用演示数据: 市场情景模拟 {wallet_address}, 情景: {scenario}"
+            )
+            return demo_service.get_market_scenario_simulation(wallet_address, scenario)
+
+        # 模拟市场情景
+        simulation_result = await risk_engine.simulate_market_scenario(
+            wallet_address, scenario, blockchain_service
+        )
+
+        return simulation_result
+    except Exception as e:
+        logger.error(f"模拟市场情景时出错: {str(e)}")
+        return {"error": f"模拟市场情景失败: {str(e)}"}

@@ -9,10 +9,16 @@ from app.risk_modules.base import RiskAnalyzerBase
 import time
 import numpy as np
 from datetime import datetime
+from app.services.recommendation_service import RecommendationService
 
 
 class ProtocolRiskAnalyzer(RiskAnalyzerBase):
     """协议风险分析器"""
+
+    def __init__(self, ai_service=None, ai_predictor=None, blockchain_service=None):
+        """初始化协议风险分析器"""
+        super().__init__(ai_service, ai_predictor, blockchain_service)
+        self.recommendation_service = RecommendationService()
 
     async def analyze(self, protocol: str) -> RiskAnalysisResult:
         """分析协议风险"""
@@ -67,12 +73,8 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
                     self.logger.error(f"获取协议名称时出错: {str(e)}")
 
             # 生成建议和监控点
-            recommendations = await self.get_recommendations(
-                risk_factors, protocol_name
-            )
-            monitoring_points = await self.get_monitoring_points(
-                risk_factors, protocol_name
-            )
+            recommendations = await self.get_recommendations(risk_factors)
+            monitoring_points = await self.get_monitoring_points(risk_factors)
 
             # 创建风险分析结果
             result = RiskAnalysisResult(
@@ -1026,19 +1028,21 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
             self.logger.error(f"基于规则分析协议复杂性风险时出错: {str(e)}")
             return None
 
-    async def get_recommendations(
-        self, risk_factors: List[RiskFactor], protocol_name: str
-    ) -> List[str]:
+    async def get_recommendations(self, risk_factors: List[RiskFactor]) -> List[str]:
         """
         获取协议风险建议
 
         Args:
             risk_factors: 风险因子列表
-            protocol_name: 协议名称
 
         Returns:
             建议列表
         """
+        # 从风险因子中提取协议名称，如果不存在则使用通用名称
+        protocol_name = "未知协议"
+        if risk_factors and risk_factors[0].metadata:
+            protocol_name = risk_factors[0].metadata.get("protocol_name", "未知协议")
+
         recommendations = []
 
         # 根据风险因子生成建议
@@ -1076,263 +1080,47 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
                             f"查阅{protocol_name}的审计报告，了解潜在风险点"
                         )
 
-                if not audit_info:
-                    recommendations.append(
-                        f"由于{protocol_name}缺乏充分的安全审计，建议限制投资金额"
-                    )
+        # 返回去重后的建议
+        return list(set(recommendations))
 
-            # 协议治理风险建议
-            elif factor.factor_name == "协议治理风险":
-                if factor.score > 70:
-                    recommendations.append(
-                        f"{protocol_name}的治理高度中心化，建议密切关注治理决策"
-                    )
-                    recommendations.append(
-                        f"考虑分散投资，避免过度暴露于{protocol_name}的治理风险"
-                    )
-                elif factor.score > 50:
-                    recommendations.append(f"关注{protocol_name}的治理提案和决策过程")
-                    recommendations.append(f"了解{protocol_name}的治理代币分布情况")
-                else:
-                    recommendations.append(
-                        f"{protocol_name}的治理结构相对去中心化，可以适当参与治理投票"
-                    )
-
-                # 检查是否有治理代币
-                has_token = False
-                for data_point in factor.data_points:
-                    if (
-                        data_point.get("name") == "治理代币"
-                        and data_point.get("value") != "无"
-                    ):
-                        has_token = True
-                        token_symbol = data_point.get("value")
-                        recommendations.append(
-                            f"考虑持有少量{token_symbol}代币以参与{protocol_name}的治理"
-                        )
-
-                if not has_token:
-                    recommendations.append(
-                        f"由于{protocol_name}缺乏明确的治理机制，建议关注其决策透明度"
-                    )
-
-            # 协议历史风险建议
-            elif factor.factor_name == "协议历史风险":
-                if factor.score > 70:
-                    recommendations.append(
-                        f"由于{protocol_name}历史风险较高，建议谨慎投资并设置止损"
-                    )
-                    recommendations.append(f"密切关注{protocol_name}的TVL变化趋势")
-                elif factor.score > 50:
-                    recommendations.append(f"关注{protocol_name}的历史表现和市场波动")
-                    recommendations.append(f"定期评估{protocol_name}的风险暴露")
-                else:
-                    recommendations.append(
-                        f"{protocol_name}历史表现相对稳定，可以考虑长期持有"
-                    )
-
-                # 检查协议年龄
-                protocol_age = 0
-                for data_point in factor.data_points:
-                    if data_point.get("name") == "协议年龄(天)":
-                        protocol_age = data_point.get("value", 0)
-
-                if protocol_age < 180:  # 小于6个月
-                    recommendations.append(
-                        f"由于{protocol_name}是较新的协议，建议限制投资金额并密切关注其发展"
-                    )
-                elif protocol_age > 730:  # 大于2年
-                    recommendations.append(
-                        f"{protocol_name}是成熟的协议，具有较长的运行历史，相对风险较低"
-                    )
-
-            # 协议复杂性风险建议
-            elif factor.factor_name == "协议复杂性风险":
-                if factor.score > 70:
-                    recommendations.append(
-                        f"{protocol_name}协议结构非常复杂，建议深入了解其机制后再投资"
-                    )
-                    recommendations.append(
-                        f"考虑通过专业投资工具或基金接触{protocol_name}"
-                    )
-                elif factor.score > 50:
-                    recommendations.append(
-                        f"在投资{protocol_name}前，建议了解其基本运作机制"
-                    )
-                    recommendations.append(f"关注{protocol_name}的技术文档和白皮书")
-                else:
-                    recommendations.append(
-                        f"{protocol_name}协议结构相对简单，适合大多数投资者理解和使用"
-                    )
-
-                # 检查多链部署
-                chain_count = 0
-                for data_point in factor.data_points:
-                    if data_point.get("name") == "支持的区块链数量":
-                        chain_count = data_point.get("value", 0)
-
-                if chain_count > 3:
-                    recommendations.append(
-                        f"由于{protocol_name}支持多链操作，使用时需注意不同链上的风险差异"
-                    )
-
-        # 添加通用建议
-        if not recommendations:
-            recommendations.append(f"定期关注{protocol_name}的最新动态和公告")
-            recommendations.append(f"分散投资，避免将资金过度集中在{protocol_name}上")
-            recommendations.append(f"了解{protocol_name}的基本运作机制和风险特点")
-
-        return recommendations
-
-    async def get_monitoring_points(
-        self, risk_factors: List[RiskFactor], protocol_name: str
-    ) -> List[str]:
+    async def get_monitoring_points(self, risk_factors: List[RiskFactor]) -> List[str]:
         """
         获取协议风险监控点
 
         Args:
             risk_factors: 风险因子列表
-            protocol_name: 协议名称
 
         Returns:
             监控点列表
         """
+        # 从风险因子中提取协议名称，如果不存在则使用通用名称
+        protocol_name = "未知协议"
+        if risk_factors and risk_factors[0].metadata:
+            protocol_name = risk_factors[0].metadata.get("protocol_name", "未知协议")
+
         monitoring_points = []
 
         # 根据风险因子生成监控点
         for factor in risk_factors:
-            # 协议安全风险监控点
-            if factor.factor_name == "协议安全风险":
-                if factor.score > 70:
-                    monitoring_points.append(
-                        f"密切监控{protocol_name}的安全事件和漏洞报告"
-                    )
-                    monitoring_points.append(
-                        f"关注安全审计机构对{protocol_name}的最新评估"
-                    )
-                elif factor.score > 50:
-                    monitoring_points.append(
-                        f"定期检查{protocol_name}的安全状态和审计报告"
-                    )
-                    monitoring_points.append(f"关注社区对{protocol_name}安全性的讨论")
-                else:
-                    monitoring_points.append(f"关注{protocol_name}的安全更新和升级")
+            if factor.factor_name == "协议安全风险" and factor.score > 40:
+                monitoring_points.append(f"关注{protocol_name}的安全审计状态和更新")
+                monitoring_points.append(f"监控{protocol_name}的安全事件和漏洞报告")
 
-                # 检查是否开源
-                is_open_source = False
-                for data_point in factor.data_points:
-                    if (
-                        data_point.get("name") == "开源状态"
-                        and data_point.get("value") == "是"
-                    ):
-                        is_open_source = True
-                        monitoring_points.append(
-                            f"关注{protocol_name}的GitHub仓库活动和代码更新"
-                        )
+            if factor.factor_name == "协议治理风险" and factor.score > 40:
+                monitoring_points.append(f"关注{protocol_name}的治理提案和投票情况")
+                monitoring_points.append(f"监控{protocol_name}的治理结构变化")
 
-                if not is_open_source:
-                    monitoring_points.append(
-                        f"由于{protocol_name}不是开源的，需特别关注其透明度和安全声明"
-                    )
+            if factor.factor_name == "协议历史风险" and factor.score > 40:
+                monitoring_points.append(f"跟踪{protocol_name}的TVL变化趋势")
+                monitoring_points.append(f"监控{protocol_name}的用户增长情况")
 
-            # 协议治理风险监控点
-            elif factor.factor_name == "协议治理风险":
-                if factor.score > 70:
-                    monitoring_points.append(f"密切监控{protocol_name}的治理提案和决策")
-                    monitoring_points.append(
-                        f"关注{protocol_name}的治理代币持有分布变化"
-                    )
-                elif factor.score > 50:
-                    monitoring_points.append(
-                        f"定期关注{protocol_name}的治理论坛和社区讨论"
-                    )
-                    monitoring_points.append(f"监控重要治理提案的投票结果")
-                else:
-                    monitoring_points.append(
-                        f"关注{protocol_name}的治理参与度和社区活跃度"
-                    )
+            if factor.factor_name == "协议复杂性风险" and factor.score > 40:
+                monitoring_points.append(f"关注{protocol_name}的合约升级和功能变更")
+                monitoring_points.append(f"监控{protocol_name}的技术架构变化")
 
-                # 检查社交媒体
-                has_twitter = False
-                for data_point in factor.data_points:
-                    if (
-                        data_point.get("name") == "Twitter"
-                        and data_point.get("value") != "无"
-                    ):
-                        has_twitter = True
-                        monitoring_points.append(
-                            f"关注{protocol_name}的Twitter账号获取最新动态"
-                        )
-
-                if not has_twitter:
-                    monitoring_points.append(
-                        f"由于{protocol_name}缺乏活跃的社交媒体，建议寻找其他信息渠道"
-                    )
-
-            # 协议历史风险监控点
-            elif factor.factor_name == "协议历史风险":
-                if factor.score > 70:
-                    monitoring_points.append(f"每日监控{protocol_name}的TVL变化")
-                    monitoring_points.append(
-                        f"设置{protocol_name}价格和TVL的异常波动提醒"
-                    )
-                elif factor.score > 50:
-                    monitoring_points.append(f"定期监控{protocol_name}的TVL趋势")
-                    monitoring_points.append(f"关注{protocol_name}在市场波动期间的表现")
-                else:
-                    monitoring_points.append(f"关注{protocol_name}的长期发展趋势")
-
-                # 检查TVL趋势
-                tvl_trend = "稳定"
-                for data_point in factor.data_points:
-                    if data_point.get("name") == "TVL趋势":
-                        tvl_trend = data_point.get("value", "稳定")
-
-                if tvl_trend == "下降":
-                    monitoring_points.append(
-                        f"特别关注{protocol_name}的TVL持续下降趋势，可能预示风险增加"
-                    )
-                elif tvl_trend == "上升":
-                    monitoring_points.append(
-                        f"关注{protocol_name}的快速增长是否可持续，防止过热风险"
-                    )
-
-            # 协议复杂性风险监控点
-            elif factor.factor_name == "协议复杂性风险":
-                if factor.score > 70:
-                    monitoring_points.append(
-                        f"密切关注{protocol_name}的技术更新和架构变化"
-                    )
-                    monitoring_points.append(f"监控{protocol_name}在不同链上的表现差异")
-                elif factor.score > 50:
-                    monitoring_points.append(f"关注{protocol_name}的功能更新和产品迭代")
-                    monitoring_points.append(f"监控{protocol_name}的用户体验反馈")
-                else:
-                    monitoring_points.append(
-                        f"关注{protocol_name}的竞争对手和市场定位变化"
-                    )
-
-                # 检查GitHub仓库
-                has_github = False
-                for data_point in factor.data_points:
-                    if (
-                        data_point.get("name") == "GitHub仓库数"
-                        and data_point.get("value", 0) > 0
-                    ):
-                        has_github = True
-                        monitoring_points.append(
-                            f"关注{protocol_name}的GitHub代码提交频率和质量"
-                        )
-
-                if not has_github:
-                    monitoring_points.append(
-                        f"由于{protocol_name}缺乏公开代码仓库，需特别关注其技术透明度"
-                    )
-
-        # 添加通用监控点
+        # 如果没有生成监控点，添加通用监控点
         if not monitoring_points:
-            monitoring_points.append(f"监控{protocol_name}的TVL和用户数变化")
-            monitoring_points.append(f"关注{protocol_name}的社区活跃度和开发进度")
-            monitoring_points.append(f"定期检查{protocol_name}的安全状态和更新")
+            monitoring_points.append(f"定期检查{protocol_name}的运行状态和性能指标")
+            monitoring_points.append(f"关注{protocol_name}的官方公告和社区动态")
 
         return monitoring_points

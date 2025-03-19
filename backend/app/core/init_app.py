@@ -53,16 +53,16 @@ def init_risk_engine() -> RiskEngine:
     correlation_risk_analyzer = CorrelationRiskAnalyzer(
         ai_predictor=ai_service, blockchain_service=blockchain_service
     )
-    smart_contract_risk_analyzer = SmartContractRiskAnalyzer(
-        ai_predictor=ai_service, blockchain_service=blockchain_service
-    )
+    # smart_contract_risk_analyzer = SmartContractRiskAnalyzer(
+    #     ai_predictor=ai_service, blockchain_service=blockchain_service
+    # )
 
     # 注册风险分析器
     risk_engine.register_analyzer("market", market_risk_analyzer)
     risk_engine.register_analyzer("protocol", protocol_risk_analyzer)
     risk_engine.register_analyzer("liquidity", liquidity_risk_analyzer)
     risk_engine.register_analyzer("correlation", correlation_risk_analyzer)
-    risk_engine.register_analyzer("smart_contract", smart_contract_risk_analyzer)
+    # risk_engine.register_analyzer("smart_contract", smart_contract_risk_analyzer)
 
     # 设置风险权重
     risk_engine.set_weights(settings.RISK_WEIGHTS)

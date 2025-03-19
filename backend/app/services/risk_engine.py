@@ -63,7 +63,7 @@ class RiskEngine:
 
     async def analyze_wallet_risk(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """
-        分析钱包风险 - 处理来自ai_service.analyze("wallet_risk", context)的请求
+        分析钱包风险
 
         Args:
             context: 包含钱包地址和头寸的上下文
@@ -1004,3 +1004,398 @@ class RiskEngine:
             data_points=data_points,
             metadata=metadata,
         )
+
+    async def analyze_portfolio_risk(
+        self, positions: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        分析投资组合风险（包装器方法）
+
+        Args:
+            positions: 投资组合头寸列表
+
+        Returns:
+            Dict: 风险分析结果，格式与AI预测器兼容
+        """
+        self.logger.info(f"开始分析投资组合风险，头寸数量: {len(positions)}")
+
+        try:
+            # 如果没有头寸，返回低风险结果
+            if not positions:
+                self.logger.warning("没有投资组合头寸，返回空结果")
+                return {
+                    "risk_score": 0,
+                    "risk_level": "低",
+                    "description": "投资组合为空，无风险",
+                    "risk_metrics": {},
+                    "risk_factors": [],
+                    "recommendations": [
+                        "开始投资以获取收益",
+                        "从小额投资开始，逐步了解DeFi生态",
+                    ],
+                    "analysis_timestamp": datetime.utcnow().isoformat(),
+                }
+
+            # 准备投资组合数据
+            portfolio_data = {
+                "positions": positions,
+                "wallet_address": "unknown",  # 可以从positions中提取如果有的话
+            }
+
+            # 使用核心方法进行分析
+            assessment = await self.analyze_portfolio(portfolio_data)
+
+            # 提取风险因子信息
+            risk_factors = []
+            for factor in assessment.risk_factors.values():
+                risk_factors.append(
+                    {
+                        "name": factor.name,
+                        "score": factor.score,
+                        "weight": factor.weight,
+                        "description": factor.description,
+                        "trend": factor.trend,
+                    }
+                )
+
+            # 转换为AI预测器格式的结果
+            result = {
+                "risk_score": assessment.total_score,
+                "risk_level": assessment.risk_level.value,
+                "description": f"投资组合风险分析完成，当前风险等级为{assessment.risk_level.value}",
+                "risk_metrics": {
+                    "market_risk": self._get_risk_type_score(assessment, "MARKET"),
+                    "protocol_risk": self._get_risk_type_score(assessment, "PROTOCOL"),
+                    "liquidity_risk": self._get_risk_type_score(
+                        assessment, "LIQUIDITY"
+                    ),
+                    "smart_contract_risk": self._get_risk_type_score(
+                        assessment, "SMART_CONTRACT"
+                    ),
+                    "correlation_risk": self._get_risk_type_score(
+                        assessment, "CORRELATION"
+                    ),
+                },
+                "risk_factors": risk_factors,
+                "recommendations": assessment.recommendations,
+                "warnings": assessment.warnings,
+                "monitoring_points": assessment.monitoring_points,
+                "analysis_timestamp": assessment.timestamp.isoformat(),
+            }
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"分析投资组合风险时出错: {str(e)}")
+            return {
+                "risk_score": 50,
+                "risk_level": "中",
+                "description": f"分析过程中出错: {str(e)}",
+                "risk_metrics": {},
+                "risk_factors": [],
+                "recommendations": ["建议重新分析或联系技术支持"],
+                "analysis_timestamp": datetime.utcnow().isoformat(),
+            }
+
+    def set_weights(self, weights: Dict[str, float]) -> None:
+        """
+        设置风险权重
+
+        Args:
+            weights: 风险权重字典，键为风险类型，值为权重
+        """
+        self.logger.info(f"设置风险权重: {weights}")
+        self.risk_weights = weights
+
+    async def simulate_market_scenario(
+        self, wallet_address: str, scenario: str, blockchain_service=None
+    ) -> Dict[str, Any]:
+        """
+        模拟极端市场情景下的投资组合表现
+
+        Args:
+            wallet_address: 钱包地址
+            scenario: 市场情景类型，支持 market_crash(市场崩盘)、bull_run(牛市)、
+                     defi_hack(DeFi黑客事件)、regulatory_crackdown(监管打击)
+            blockchain_service: 区块链服务实例，用于获取钱包头寸
+
+        Returns:
+            模拟情景分析结果
+        """
+        self.logger.info(f"开始模拟市场情景: {wallet_address}, 情景: {scenario}")
+
+        try:
+            # 验证情景类型
+            valid_scenarios = [
+                "market_crash",
+                "bull_run",
+                "defi_hack",
+                "regulatory_crackdown",
+            ]
+            if scenario not in valid_scenarios:
+                self.logger.warning(
+                    f"无效的情景类型: {scenario}, 使用默认值: market_crash"
+                )
+                scenario = "market_crash"
+
+            # 获取钱包头寸
+            positions = []
+            if blockchain_service:
+                positions = await blockchain_service.get_all_positions(wallet_address)
+
+            if not positions:
+                self.logger.warning(f"钱包 {wallet_address} 没有检测到头寸，返回空结果")
+                return {
+                    "wallet_address": wallet_address,
+                    "scenario": scenario,
+                    "error": "未检测到投资组合头寸，无法模拟市场情景",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+
+            # 计算当前总价值
+            current_total = sum(position.get("usd_value", 0) for position in positions)
+
+            # 设置不同情景的参数
+            if scenario == "market_crash":
+                title = "市场崩盘情景模拟"
+                description = (
+                    "模拟加密市场急剧下跌30-50%的情景下，您的投资组合可能受到的影响"
+                )
+                asset_changes = {
+                    "ETH": -0.45,  # ETH下跌45%
+                    "BTC": -0.40,  # BTC下跌40%
+                    "USDC": -0.02,  # USDC轻微下跌(脱锚风险)
+                    "USDT": -0.05,  # USDT轻微下跌
+                    "DAI": -0.08,  # DAI下跌
+                    "OTHER": -0.50,  # 其他代币下跌50%
+                }
+                liquidation_risk = "高"
+                impermanent_loss = "极高"
+
+            elif scenario == "bull_run":
+                title = "牛市情景模拟"
+                description = (
+                    "模拟加密市场强势上涨50-100%的情景下，您的投资组合可能获得的收益"
+                )
+                asset_changes = {
+                    "ETH": 0.80,  # ETH上涨80%
+                    "BTC": 0.60,  # BTC上涨60%
+                    "USDC": 0.0,  # 稳定币保持不变
+                    "USDT": 0.0,  # 稳定币保持不变
+                    "DAI": 0.0,  # 稳定币保持不变
+                    "OTHER": 1.20,  # 其他代币上涨120%
+                }
+                liquidation_risk = "极低"
+                impermanent_loss = "中等"
+
+            elif scenario == "defi_hack":
+                title = "DeFi协议黑客攻击情景模拟"
+                description = (
+                    "模拟主要DeFi协议遭受黑客攻击的情景下，您的投资组合可能面临的风险"
+                )
+                asset_changes = {
+                    "ETH": -0.15,  # ETH下跌15%
+                    "BTC": -0.10,  # BTC下跌10%
+                    "USDC": -0.01,  # USDC几乎不变
+                    "USDT": -0.01,  # USDT几乎不变
+                    "DAI": -0.03,  # DAI轻微下跌
+                    "OTHER": -0.25,  # 其他代币下跌25%
+                }
+                liquidation_risk = "中等"
+                impermanent_loss = "高"
+
+            else:  # regulatory_crackdown
+                title = "监管打击情景模拟"
+                description = "模拟全球监管机构对加密货币实施严厉监管的情景下，您的投资组合可能面临的影响"
+                asset_changes = {
+                    "ETH": -0.30,  # ETH下跌30%
+                    "BTC": -0.25,  # BTC下跌25%
+                    "USDC": -0.15,  # USDC下跌15%
+                    "USDT": -0.20,  # USDT下跌20%
+                    "DAI": -0.10,  # DAI下跌10%
+                    "OTHER": -0.40,  # 其他代币下跌40%
+                }
+                liquidation_risk = "高"
+                impermanent_loss = "高"
+
+            # 计算情景下的资产价值变化
+            simulated_positions = []
+            simulated_total = 0
+            liquidations = []
+
+            for position in positions:
+                asset = position.get("asset", "OTHER").upper()
+                if "/" in asset:
+                    asset = asset.split("/")[0]  # 处理类似 "ETH/USDC" 格式的资产名称
+
+                current_value = position.get("usd_value", 0)
+
+                # 获取资产价格变化率
+                change_rate = asset_changes.get(asset, asset_changes.get("OTHER", -0.3))
+
+                # 如果是借贷头寸，检查是否会被清算
+                is_borrowing = position.get("type", "") == "borrowing"
+                health_factor = position.get("health_factor", 2.0)
+
+                new_value = current_value * (1 + change_rate)
+                simulated_total += new_value
+
+                # 检查是否会被清算
+                will_liquidate = False
+                if is_borrowing and health_factor < 1.2 and change_rate < 0:
+                    # 简化模型：如果健康因子低，且市场下跌，则可能被清算
+                    liquidation_chance = min(
+                        0.9, 1.0 - health_factor + abs(change_rate)
+                    )
+                    import random
+
+                    will_liquidate = random.random() < liquidation_chance
+
+                if will_liquidate:
+                    liquidations.append(
+                        {
+                            "asset": position.get("asset", ""),
+                            "protocol": position.get("protocol", ""),
+                            "value_usd": current_value,
+                            "health_factor": health_factor,
+                        }
+                    )
+
+                simulated_positions.append(
+                    {
+                        "asset": position.get("asset", ""),
+                        "protocol": position.get("protocol", ""),
+                        "type": position.get("type", ""),
+                        "current_value_usd": current_value,
+                        "simulated_value_usd": new_value,
+                        "change_usd": new_value - current_value,
+                        "change_percent": change_rate * 100,
+                        "liquidated": will_liquidate,
+                    }
+                )
+
+            # 使用AI预测器生成风险缓解建议
+            risk_mitigation = []
+            if self.ai_predictor:
+                try:
+                    # 准备AI分析上下文
+                    analysis_context = {
+                        "scenario": scenario,
+                        "positions": simulated_positions,
+                        "liquidations": liquidations,
+                        "value_change_percent": (
+                            (simulated_total - current_total) / current_total * 100
+                            if current_total > 0
+                            else 0
+                        ),
+                    }
+
+                    # 调用AI预测器的analyze_generic方法
+                    ai_result = self.ai_predictor.analyze_generic(
+                        "market_scenario", analysis_context
+                    )
+
+                    if isinstance(ai_result, dict) and "recommendations" in ai_result:
+                        risk_mitigation = ai_result.get("recommendations", [])
+                except Exception as e:
+                    self.logger.error(f"生成AI风险缓解建议时出错: {str(e)}")
+
+            # 如果AI未能生成建议，使用默认建议
+            if not risk_mitigation:
+                if scenario == "market_crash":
+                    risk_mitigation = [
+                        "减少借贷头寸，降低杠杆率",
+                        "增加稳定币储备，准备在市场低点买入",
+                        "设置止损点，防止进一步下跌",
+                        "增加抵押品，防止清算",
+                    ]
+                elif scenario == "bull_run":
+                    risk_mitigation = [
+                        "定期获利了结，锁定部分盈利",
+                        "调整资产配置，防止过度集中",
+                        "关注市场情绪指标，警惕市场过热",
+                        "考虑对冲策略，防范突然回调",
+                    ]
+                elif scenario == "defi_hack":
+                    risk_mitigation = [
+                        "分散资产到多个协议，降低单一协议风险",
+                        "优先使用经过多次审计的成熟协议",
+                        "关注协议安全更新和公告",
+                        "考虑使用去中心化保险产品",
+                    ]
+                else:  # regulatory_crackdown
+                    risk_mitigation = [
+                        "关注各国监管动态，适时调整投资策略",
+                        "增加合规性高的资产比例",
+                        "考虑分散到不同司法管辖区的协议",
+                        "准备应急撤离计划，确保资金安全",
+                    ]
+
+            # 组装结果
+            result = {
+                "wallet_address": wallet_address,
+                "scenario": scenario,
+                "title": title,
+                "description": description,
+                "current_portfolio_value": current_total,
+                "simulated_portfolio_value": simulated_total,
+                "value_change_usd": simulated_total - current_total,
+                "value_change_percent": (
+                    (simulated_total - current_total) / current_total * 100
+                    if current_total > 0
+                    else 0
+                ),
+                "positions": simulated_positions,
+                "liquidations": liquidations,
+                "risk_factors": {
+                    "liquidation_risk": liquidation_risk,
+                    "impermanent_loss": impermanent_loss,
+                    "market_correlation": (
+                        "高" if scenario in ["market_crash", "bull_run"] else "中"
+                    ),
+                    "protocol_risk": "高" if scenario == "defi_hack" else "中",
+                    "regulatory_risk": (
+                        "高" if scenario == "regulatory_crackdown" else "中"
+                    ),
+                },
+                "risk_mitigation": risk_mitigation,
+                "simulation_metrics": {
+                    "max_drawdown": (
+                        max(
+                            abs(
+                                (simulated_total - current_total) / current_total * 100
+                            ),
+                            0,
+                        )
+                        if current_total > 0
+                        else 0
+                    ),
+                    "risk_level": (
+                        "高"
+                        if simulated_total < current_total * 0.7
+                        else "中" if simulated_total < current_total else "低"
+                    ),
+                    "affected_protocols": len(
+                        set(
+                            p.get("protocol", "")
+                            for p in simulated_positions
+                            if p.get("change_percent", 0) < -20
+                        )
+                    ),
+                    "liquidation_count": len(liquidations),
+                },
+                "timestamp": datetime.utcnow().isoformat(),
+                "is_ai_enhanced": self.ai_predictor is not None,
+            }
+
+            self.logger.info(f"市场情景模拟完成: {wallet_address}, 情景: {scenario}")
+            return result
+
+        except Exception as e:
+            self.logger.error(f"模拟市场情景时出错: {str(e)}")
+            return {
+                "wallet_address": wallet_address,
+                "scenario": scenario,
+                "error": f"模拟市场情景失败: {str(e)}",
+                "timestamp": datetime.utcnow().isoformat(),
+            }
