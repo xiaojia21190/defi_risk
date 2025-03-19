@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 import logging
 import math
 
+from backend.app.core.config import Settings
+
 logger = logging.getLogger("defi_risk.services.demo_data")
 
 
@@ -784,25 +786,27 @@ class DemoDataService:
 
         # 生成历史数据点
         for i in range(days):
-            date = (datetime.now() - timedelta(days=days-i-1))
+            date = datetime.now() - timedelta(days=days - i - 1)
             # 创建市场趋势模式，而不是纯随机
-            trend_factor = 0.7 * math.sin(i/10) + 0.3 * random.uniform(-1, 1)
+            trend_factor = 0.7 * math.sin(i / 10) + 0.3 * random.uniform(-1, 1)
             change = trend_factor * volatility
             price = base_price * (1 + change)
             base_price = price  # 让下一个价格基于当前价格
 
-            price_series.append({
-                "date": date.isoformat(),
-                "price": round(price, 2),
-                "volume": round(random.uniform(500000000, 2000000000), 2)
-            })
+            price_series.append(
+                {
+                    "date": date.isoformat(),
+                    "price": round(price, 2),
+                    "volume": round(random.uniform(500000000, 2000000000), 2),
+                }
+            )
 
         data = {
             "asset": asset,
             "days": days,
             "data_points": price_series,
             "is_demo_data": True,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
 
         self._demo_data_cache[cache_key] = data
@@ -823,7 +827,7 @@ class DemoDataService:
 
         # 提取钱包地址对应的演示账户类型
         risk_level = "medium"  # 默认风险级别
-        for account in settings.DEMO_ACCOUNTS:
+        for account in Settings.DEMO_ACCOUNTS:
             if account["address"] == wallet_address:
                 risk_level = account.get("risk_level", "medium")
                 break
@@ -861,7 +865,7 @@ class DemoDataService:
         risk_history = []
         base_risk = risk_score
         for i in range(30):
-            date = (datetime.now() - timedelta(days=30-i-1))
+            date = datetime.now() - timedelta(days=30 - i - 1)
             if risk_level == "low":
                 change = random.uniform(-2, 2)
             elif risk_level == "medium":
@@ -872,10 +876,7 @@ class DemoDataService:
                 change = random.uniform(-5, 8)
 
             day_risk = max(min(base_risk + change, 100), 0)
-            risk_history.append({
-                "date": date.isoformat(),
-                "score": round(day_risk, 1)
-            })
+            risk_history.append({"date": date.isoformat(), "score": round(day_risk, 1)})
             # 逐渐恢复到目标风险值，模拟风险的自然变化
             base_risk = 0.9 * base_risk + 0.1 * risk_score
 
@@ -897,12 +898,18 @@ class DemoDataService:
             "security_analysis": {
                 "smart_contract_security": {
                     "score": security_score,
-                    "audit_status": "大部分已审计" if security_score > 70 else "部分未审计",
+                    "audit_status": (
+                        "大部分已审计" if security_score > 70 else "部分未审计"
+                    ),
                     "vulnerabilities": {
                         "high": random.randint(0, 3) if security_score < 70 else 0,
-                        "medium": random.randint(0, 5) if security_score < 85 else random.randint(0, 2),
-                        "low": random.randint(1, 10)
-                    }
+                        "medium": (
+                            random.randint(0, 5)
+                            if security_score < 85
+                            else random.randint(0, 2)
+                        ),
+                        "low": random.randint(1, 10),
+                    },
                 },
                 "historical_incidents": self._generate_security_incidents(risk_level),
             },
@@ -910,11 +917,11 @@ class DemoDataService:
                 "current_market": "牛市" if random.random() > 0.5 else "熊市",
                 "volatility": "高" if risk_level in ["high", "medium-high"] else "中",
                 "liquidity": "中等",
-                "correlation_risk": "高" if risk_level == "high" else "中"
+                "correlation_risk": "高" if risk_level == "high" else "中",
             },
             "ai_insights": self._generate_ai_insights(wallet_address, risk_level),
             "timestamp": datetime.now().isoformat(),
-            "is_demo_data": True
+            "is_demo_data": True,
         }
 
         self._demo_data_cache[cache_key] = report
@@ -934,8 +941,24 @@ class DemoDataService:
         else:  # high
             incident_count = random.randint(2, 5)
 
-        incident_types = ["闪电贷攻击", "重入攻击", "预言机操纵", "治理攻击", "前端劫持", "私钥泄露"]
-        protocols = ["Uniswap", "Aave", "Compound", "Curve", "MakerDAO", "dYdX", "Yearn", "SushiSwap"]
+        incident_types = [
+            "闪电贷攻击",
+            "重入攻击",
+            "预言机操纵",
+            "治理攻击",
+            "前端劫持",
+            "私钥泄露",
+        ]
+        protocols = [
+            "Uniswap",
+            "Aave",
+            "Compound",
+            "Curve",
+            "MakerDAO",
+            "dYdX",
+            "Yearn",
+            "SushiSwap",
+        ]
 
         for i in range(incident_count):
             incident_type = random.choice(incident_types)
@@ -943,19 +966,23 @@ class DemoDataService:
             severity = random.choice(["高", "中", "低"])
             date = datetime.now() - timedelta(days=random.randint(30, 365))
 
-            incidents.append({
-                "id": f"INC-{random.randint(1000, 9999)}",
-                "date": date.isoformat(),
-                "type": incident_type,
-                "protocol": protocol,
-                "severity": severity,
-                "description": f"{protocol}遭受{incident_type}，影响程度{severity}",
-                "status": "已解决" if random.random() > 0.3 else "部分解决"
-            })
+            incidents.append(
+                {
+                    "id": f"INC-{random.randint(1000, 9999)}",
+                    "date": date.isoformat(),
+                    "type": incident_type,
+                    "protocol": protocol,
+                    "severity": severity,
+                    "description": f"{protocol}遭受{incident_type}，影响程度{severity}",
+                    "status": "已解决" if random.random() > 0.3 else "部分解决",
+                }
+            )
 
         return incidents
 
-    def _generate_ai_insights(self, wallet_address: str, risk_level: str) -> List[Dict[str, Any]]:
+    def _generate_ai_insights(
+        self, wallet_address: str, risk_level: str
+    ) -> List[Dict[str, Any]]:
         """生成AI洞察"""
         insights = []
 
@@ -965,77 +992,79 @@ class DemoDataService:
                 {
                     "title": "稳健的资产配置",
                     "content": "您的投资组合以稳定币和蓝筹资产为主，风险较低。建议继续保持稳健的投资策略，可以适当考虑增加部分收益型产品提高整体收益率。",
-                    "confidence": 0.9
+                    "confidence": 0.9,
                 },
                 {
                     "title": "稳定币多样化",
                     "content": "您的投资组合中稳定币占比较高，但集中在USDC。建议考虑分散到不同的稳定币中，降低单一稳定币的风险。",
-                    "confidence": 0.85
-                }
+                    "confidence": 0.85,
+                },
             ]
         elif risk_level == "medium":
             insights = [
                 {
                     "title": "适度的风险暴露",
                     "content": "您的投资组合在风险和收益之间取得了较好的平衡。ETH和BTC的配置适中，DeFi协议的使用也较为多样化。",
-                    "confidence": 0.87
+                    "confidence": 0.87,
                 },
                 {
                     "title": "协议分散建议",
                     "content": "您的资产主要集中在2-3个主流协议中，建议适度分散到更多协议以降低协议风险，但注意不要过度分散导致Gas成本提高。",
-                    "confidence": 0.82
+                    "confidence": 0.82,
                 },
                 {
                     "title": "市场波动风险提示",
                     "content": "当前市场波动较大，建议关注借贷头寸的健康因子，避免因市场下跌导致清算风险。",
-                    "confidence": 0.75
-                }
+                    "confidence": 0.75,
+                },
             ]
         elif risk_level == "medium-high":
             insights = [
                 {
                     "title": "跨链风险分析",
                     "content": "您的资产分布在多个区块链上，增加了资产多样性，但也带来了跨链桥和不同链上安全风险。建议关注各链上的安全更新。",
-                    "confidence": 0.8
+                    "confidence": 0.8,
                 },
                 {
                     "title": "高收益协议风险",
                     "content": "部分高收益协议存在较高的智能合约风险和流动性风险，建议将这些协议的资产控制在总资产的20%以内。",
-                    "confidence": 0.85
+                    "confidence": 0.85,
                 },
                 {
                     "title": "链间资产平衡",
                     "content": "您在Arbitrum上的资产占比较高，如果该L2出现问题，影响会较大。建议在不同链之间更均衡地配置资产。",
-                    "confidence": 0.78
-                }
+                    "confidence": 0.78,
+                },
             ]
         else:  # high
             insights = [
                 {
                     "title": "高杠杆风险警告",
                     "content": "您的投资组合使用了较高杠杆，在市场波动时面临较大的清算风险。建议降低杠杆率或增加抵押品以提高安全边际。",
-                    "confidence": 0.92
+                    "confidence": 0.92,
                 },
                 {
                     "title": "新兴协议风险",
                     "content": "您使用了多个新兴协议，这些协议尚未经过充分的市场验证和安全审计。建议将这类协议的配置控制在较低比例。",
-                    "confidence": 0.88
+                    "confidence": 0.88,
                 },
                 {
                     "title": "NFT流动性风险",
                     "content": "您的资产中包含较高比例的NFT，这类资产在市场下跌时流动性可能急剧下降。建议考虑分散部分到更具流动性的资产中。",
-                    "confidence": 0.85
+                    "confidence": 0.85,
                 },
                 {
                     "title": "紧急风险缓解策略",
                     "content": "根据当前市场情况和您的头寸，建议立即增加抵押品或减少部分借款，将健康因子提高到至少1.5以上，以防范潜在的市场波动。",
-                    "confidence": 0.9
-                }
+                    "confidence": 0.9,
+                },
             ]
 
         return insights
 
-    def get_market_scenario_simulation(self, wallet_address: str, scenario: str = "market_crash") -> Dict[str, Any]:
+    def get_market_scenario_simulation(
+        self, wallet_address: str, scenario: str = "market_crash"
+    ) -> Dict[str, Any]:
         """模拟极端市场情景下的投资组合表现
 
         参数:
@@ -1057,13 +1086,15 @@ class DemoDataService:
         # 设置不同情景的参数
         if scenario == "market_crash":
             title = "市场崩盘情景模拟"
-            description = "模拟加密市场急剧下跌30-50%的情景下，您的投资组合可能受到的影响"
+            description = (
+                "模拟加密市场急剧下跌30-50%的情景下，您的投资组合可能受到的影响"
+            )
             asset_changes = {
-                "ETH": -0.45,    # ETH下跌45%
-                "BTC": -0.40,    # BTC下跌40%
-                "USDC": -0.02,   # USDC轻微下跌(脱锚风险)
-                "USDT": -0.05,   # USDT轻微下跌
-                "DAI": -0.08,    # DAI下跌
+                "ETH": -0.45,  # ETH下跌45%
+                "BTC": -0.40,  # BTC下跌40%
+                "USDC": -0.02,  # USDC轻微下跌(脱锚风险)
+                "USDT": -0.05,  # USDT轻微下跌
+                "DAI": -0.08,  # DAI下跌
                 "OTHER": -0.50,  # 其他代币下跌50%
             }
             liquidation_risk = "高"
@@ -1071,27 +1102,31 @@ class DemoDataService:
 
         elif scenario == "bull_run":
             title = "牛市情景模拟"
-            description = "模拟加密市场强势上涨50-100%的情景下，您的投资组合可能获得的收益"
+            description = (
+                "模拟加密市场强势上涨50-100%的情景下，您的投资组合可能获得的收益"
+            )
             asset_changes = {
-                "ETH": 0.80,     # ETH上涨80%
-                "BTC": 0.60,     # BTC上涨60%
-                "USDC": 0.0,     # 稳定币保持不变
-                "USDT": 0.0,     # 稳定币保持不变
-                "DAI": 0.0,      # 稳定币保持不变
-                "OTHER": 1.20,   # 其他代币上涨120%
+                "ETH": 0.80,  # ETH上涨80%
+                "BTC": 0.60,  # BTC上涨60%
+                "USDC": 0.0,  # 稳定币保持不变
+                "USDT": 0.0,  # 稳定币保持不变
+                "DAI": 0.0,  # 稳定币保持不变
+                "OTHER": 1.20,  # 其他代币上涨120%
             }
             liquidation_risk = "极低"
             impermanent_loss = "中等"
 
         elif scenario == "defi_hack":
             title = "DeFi协议黑客攻击情景模拟"
-            description = "模拟主要DeFi协议遭受黑客攻击的情景下，您的投资组合可能面临的风险"
+            description = (
+                "模拟主要DeFi协议遭受黑客攻击的情景下，您的投资组合可能面临的风险"
+            )
             asset_changes = {
-                "ETH": -0.15,    # ETH下跌15%
-                "BTC": -0.10,    # BTC下跌10%
-                "USDC": -0.01,   # USDC几乎不变
-                "USDT": -0.01,   # USDT几乎不变
-                "DAI": -0.03,    # DAI轻微下跌
+                "ETH": -0.15,  # ETH下跌15%
+                "BTC": -0.10,  # BTC下跌10%
+                "USDC": -0.01,  # USDC几乎不变
+                "USDT": -0.01,  # USDT几乎不变
+                "DAI": -0.03,  # DAI轻微下跌
                 "OTHER": -0.25,  # 其他代币下跌25%
             }
             liquidation_risk = "中等"
@@ -1101,11 +1136,11 @@ class DemoDataService:
             title = "监管打击情景模拟"
             description = "模拟全球监管机构对加密货币实施严厉监管的情景下，您的投资组合可能面临的影响"
             asset_changes = {
-                "ETH": -0.30,    # ETH下跌30%
-                "BTC": -0.25,    # BTC下跌25%
-                "USDC": -0.15,   # USDC下跌15%
-                "USDT": -0.20,   # USDT下跌20%
-                "DAI": -0.10,    # DAI下跌10%
+                "ETH": -0.30,  # ETH下跌30%
+                "BTC": -0.25,  # BTC下跌25%
+                "USDC": -0.15,  # USDC下跌15%
+                "USDT": -0.20,  # USDT下跌20%
+                "DAI": -0.10,  # DAI下跌10%
                 "OTHER": -0.40,  # 其他代币下跌40%
             }
             liquidation_risk = "高"
@@ -1138,23 +1173,27 @@ class DemoDataService:
                 will_liquidate = random.random() < liquidation_chance
 
             if will_liquidate:
-                liquidations.append({
+                liquidations.append(
+                    {
+                        "asset": position.get("asset", ""),
+                        "protocol": position.get("protocol", ""),
+                        "value_usd": current_value,
+                        "health_factor": health_factor,
+                    }
+                )
+
+            simulated_positions.append(
+                {
                     "asset": position.get("asset", ""),
                     "protocol": position.get("protocol", ""),
-                    "value_usd": current_value,
-                    "health_factor": health_factor
-                })
-
-            simulated_positions.append({
-                "asset": position.get("asset", ""),
-                "protocol": position.get("protocol", ""),
-                "type": position.get("type", ""),
-                "current_value_usd": current_value,
-                "simulated_value_usd": new_value,
-                "change_usd": new_value - current_value,
-                "change_percent": change_rate * 100,
-                "liquidated": will_liquidate
-            })
+                    "type": position.get("type", ""),
+                    "current_value_usd": current_value,
+                    "simulated_value_usd": new_value,
+                    "change_usd": new_value - current_value,
+                    "change_percent": change_rate * 100,
+                    "liquidated": will_liquidate,
+                }
+            )
 
         # 生成风险缓解建议
         risk_mitigation = []
@@ -1196,19 +1235,25 @@ class DemoDataService:
             "current_portfolio_value": current_total,
             "simulated_portfolio_value": simulated_total,
             "value_change_usd": simulated_total - current_total,
-            "value_change_percent": (simulated_total - current_total) / current_total * 100 if current_total > 0 else 0,
+            "value_change_percent": (
+                (simulated_total - current_total) / current_total * 100
+                if current_total > 0
+                else 0
+            ),
             "positions": simulated_positions,
             "liquidations": liquidations,
             "risk_factors": {
                 "liquidation_risk": liquidation_risk,
                 "impermanent_loss": impermanent_loss,
-                "market_correlation": "高" if scenario in ["market_crash", "bull_run"] else "中",
+                "market_correlation": (
+                    "高" if scenario in ["market_crash", "bull_run"] else "中"
+                ),
                 "protocol_risk": "高" if scenario == "defi_hack" else "中",
                 "regulatory_risk": "高" if scenario == "regulatory_crackdown" else "中",
             },
             "risk_mitigation": risk_mitigation,
             "timestamp": datetime.now().isoformat(),
-            "is_demo_data": True
+            "is_demo_data": True,
         }
 
         self._demo_data_cache[cache_key] = result
