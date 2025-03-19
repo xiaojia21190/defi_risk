@@ -882,7 +882,10 @@ class BlockchainService:
         asset: str,
     ) -> Optional[Dict]:
         """
-        从Binance API获取24小时行情数据
+        获取24小时行情数据 (已弃用)
+
+        注意：该方法已被弃用，应直接使用_get_coingecko_24h_data方法获取数据。
+        保留此方法只是为了向后兼容。
 
         Args:
             asset: 资产名称或代币符号
@@ -890,87 +893,27 @@ class BlockchainService:
         Returns:
             Optional[Dict]: 包含24小时行情数据的字典，如果获取失败则返回None
         """
+        self.logger.warning(
+            f"_get_24h_data方法已弃用，正在重定向到_get_coingecko_24h_data方法获取{asset}的数据"
+        )
 
-        # 在_get_24h_data方法中添加
-        try:
-            # 尝试从CoinGecko获取数据
-            coingecko_data = await self._get_coingecko_24h_data(asset)
-            if coingecko_data is not None:
-                self.logger.info(f"使用CoinGecko获取{asset}的24小时数据")
-                return coingecko_data
-        except Exception as e:
-            self.logger.warning(
-                f"从CoinGecko获取{asset}的24小时数据失败: {e}，尝试使用Binance数据"
-            )
+        # 直接调用CoinGecko方法
+        return await self._get_coingecko_24h_data(asset)
 
+        # 以下代码已弃用
         # try:
-        #     # 使用historical_data_cache而不是未定义的cache
-        #     cache_key = f"24h_data_{asset}"
-        #     cache_interval = "1m"  # 1分钟缓存
-        #     cached_data = self.historical_data_cache.get(cache_key, cache_interval)
-
-        #     if cached_data is not None:
-        #         self.logger.info(f"从缓存获取{asset}的24小时数据")
-        #         return cached_data
-
-        #     url = "https://api.binance.com/api/v3/ticker/24hr"
-
-        #     # 标准化资产符号
-        #     symbol = self._normalize_asset_symbol(asset)
-
-        #     # 设置请求参数
-        #     params = {
-        #         "symbol": symbol,
-        #     }
-
-        #     self.logger.info(f"从Binance获取{symbol}的24小时数据")
-        #     response = requests.get(url, params=params, proxies=proxies)
-
-        #     if response.status_code == 200:
-        #         data = response.json()
-
-        #         if not data:
-        #             self.logger.warning(f"Binance返回的{symbol}数据为空")
-        #             return None
-
-        #         # 格式化数据，提取关键指标
-        #         formatted_data = {
-        #             "symbol": data.get("symbol", ""),
-        #             "price": float(data.get("lastPrice", 0)),
-        #             "price_change": float(data.get("priceChange", 0)),
-        #             "price_change_percent": float(data.get("priceChangePercent", 0)),
-        #             "high_price": float(data.get("highPrice", 0)),
-        #             "low_price": float(data.get("lowPrice", 0)),
-        #             "volume": float(data.get("volume", 0)),
-        #             "quote_volume": float(data.get("quoteVolume", 0)),
-        #             "weighted_avg_price": float(data.get("weightedAvgPrice", 0)),
-        #             "open_time": datetime.fromtimestamp(data.get("openTime", 0) / 1000),
-        #             "close_time": datetime.fromtimestamp(
-        #                 data.get("closeTime", 0) / 1000
-        #             ),
-        #             "volatility": (
-        #                 float(data.get("highPrice", 0)) - float(data.get("lowPrice", 0))
-        #             )
-        #             / float(data.get("lastPrice", 1))
-        #             * 100,  # 计算波动率
-        #             "raw_data": data,  # 保留原始数据以备需要
-        #         }
-
-        #         # 将结果存入缓存
-        #         self.historical_data_cache.set(
-        #             cache_key, formatted_data, cache_interval
-        #         )
-
-        #         self.logger.info(f"成功获取{symbol}的24小时数据")
-        #         return formatted_data
-        #     else:
-        #         self.logger.error(
-        #             f"Binance API返回错误: {response.status_code}, 响应: {response.text}"
-        #         )
-        #         return None
+        #     # 尝试从CoinGecko获取数据
+        #     coingecko_data = await self._get_coingecko_24h_data(asset)
+        #     if coingecko_data is not None:
+        #         self.logger.info(f"使用CoinGecko获取{asset}的24小时数据")
+        #         return coingecko_data
         # except Exception as e:
-        #     self.logger.error(f"从Binance获取{asset}的24小时数据失败: {e}")
-        #     return None
+        #     self.logger.warning(
+        #         f"从CoinGecko获取{asset}的24小时数据失败: {e}，尝试使用Binance数据"
+        #     )
+
+        # 以下注释掉的代码是原来的Binance数据获取逻辑，现已不再使用
+        # ... 更多注释掉的代码 ...
 
     def _normalize_asset_symbol(self, asset: str) -> str:
         """
@@ -1685,6 +1628,9 @@ class BlockchainService:
     ) -> List[Dict[str, Any]]:
         """
         获取钱包相关的警报，使用CoinGecko数据增强风险分析
+
+        注意：该方法已完全适配CoinGecko数据源，直接使用_get_coingecko_24h_data方法获取市场数据，
+        不再使用原有的_get_24h_data方法。
         """
         try:
             self.logger.info(f"获取钱包 {wallet_address} 的警报")
@@ -1720,12 +1666,12 @@ class BlockchainService:
             # 1. 检查资产价格波动
             for asset in assets:
                 try:
-                    # 获取24小时数据
-                    data_24h = await self._get_24h_data(asset)
+                    # 获取24小时数据 - 直接使用CoinGecko数据
+                    data_24h = await self._get_coingecko_24h_data(asset)
                     if data_24h:
                         # 计算价格波动率
-                        price_change = data_24h.get("price_change_percentage_24h", 0)
-                        current_price = data_24h.get("current_price", 0)
+                        price_change = data_24h.get("price_change_percent", 0)
+                        current_price = data_24h.get("price", 0)
                         previous_price = current_price / (1 + price_change / 100)
 
                         # 根据波动率确定警报级别
@@ -1752,6 +1698,7 @@ class BlockchainService:
                                         "previous_price": previous_price,
                                         "price_change_24h": price_change,
                                         "volatility": abs(price_change),
+                                        "data_source": "CoinGecko",
                                     },
                                 }
                             )
@@ -1775,10 +1722,16 @@ class BlockchainService:
                     # 估算清算价格（简化计算）
                     current_price = 0
                     try:
-                        data_24h = await self._get_24h_data(asset.split("-")[0])
+                        # 直接使用CoinGecko数据
+                        data_24h = await self._get_coingecko_24h_data(
+                            asset.split("-")[0]
+                        )
                         if data_24h:
-                            current_price = data_24h.get("current_price", 0)
-                    except Exception:
+                            current_price = data_24h.get("price", 0)
+                    except Exception as e:
+                        self.logger.error(
+                            f"获取{asset}价格数据失败用于清算价格计算: {str(e)}"
+                        )
                         pass
 
                     # 假设清算阈值为杠杆率的80%
@@ -1993,9 +1946,15 @@ class BlockchainService:
             # 构建API URL
             url = f"https://api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart"
             params = {"vs_currency": "usd", "days": days, "interval": "daily"}
+            headers = {
+                "accept": "application/json",
+                "x-cg-demo-api-key": "CG-2TiEpWzWzfnpD5hnRzk4ufDg",
+            }
 
             # 发送请求
-            response = requests.get(url, params=params, proxies=proxies)
+            response = requests.get(
+                url, params=params, headers=headers, proxies=proxies
+            )
 
             if response.status_code == 200:
                 data = response.json()
@@ -2166,7 +2125,14 @@ class BlockchainService:
                 "developer_data": "false",
             }
 
-            response = requests.get(url, params=params, proxies=proxies)
+            headers = {
+                "accept": "application/json",
+                "x-cg-demo-api-key": "CG-2TiEpWzWzfnpD5hnRzk4ufDg",
+            }
+
+            response = requests.get(
+                url, params=params, headers=headers, proxies=proxies
+            )
 
             if response.status_code == 200:
                 data = response.json()
