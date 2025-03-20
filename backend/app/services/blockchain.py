@@ -347,6 +347,13 @@ class BlockchainService:
             头寸列表
         """
         try:
+            # 缓存检查
+            cache_key = f"wallet_positions_{wallet_address}"
+            cached_positions = self.historical_data_cache.get(cache_key, "1d")
+            if cached_positions is not None:
+                self.logger.info(f"从缓存获取钱包头寸: {wallet_address}")
+                return cached_positions
+
             self.logger.info(f"开始获取地址 {wallet_address} 的所有DeFi头寸")
 
             # 首先尝试使用OKX API获取更全面的头寸数据

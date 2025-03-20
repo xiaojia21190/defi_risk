@@ -14,78 +14,6 @@ router = APIRouter()
 logger = logging.getLogger("defi_risk.api.market")
 
 
-@router.get("/data/{asset}")
-async def get_market_data(
-    asset: str,
-    blockchain_service: BlockchainService = Depends(get_blockchain_service),
-    demo_service: DemoDataService = Depends(get_demo_data_service),
-):
-    """
-    获取资产市场数据
-
-    - **asset**: 资产符号，如ETH、BTC等
-    """
-    try:
-        logger.info(f"收到市场数据请求: {asset}")
-
-        # 如果是演示模式，使用演示数据
-        if settings.DEMO_MODE:
-            logger.info(f"使用演示数据: 市场数据 {asset}")
-            return demo_service.get_market_data(asset)
-
-        # 实际环境下从区块链服务获取数据
-        market_data = await blockchain_service._get_24h_data(asset)
-        if market_data:
-            return {
-                "asset": asset,
-                "price": round(market_data.get("price", 0), 2),
-                "price_change_24h": round(market_data.get("price_change", 0), 2),
-                "volume_24h": round(market_data.get("volume", 0), 2),
-                "market_cap": round(market_data.get("market_cap", 0), 2),
-                "timestamp": datetime.now().isoformat(),
-                "is_demo_data": False,
-            }
-        return {"error": f"无法获取 {asset} 的市场数据"}
-    except Exception as e:
-        logger.error(f"获取市场数据时出错: {str(e)}")
-        return {"error": f"获取市场数据失败: {str(e)}"}
-
-
-@router.get("/data/{asset}/history")
-async def get_asset_price_history(
-    asset: str,
-    days: Optional[int] = 30,
-    blockchain_service: BlockchainService = Depends(get_blockchain_service),
-    demo_service: DemoDataService = Depends(get_demo_data_service),
-):
-    """
-    获取资产价格历史数据
-
-    - **asset**: 资产符号，如ETH、BTC等
-    - **days**: 历史数据的天数，默认30天
-    """
-    try:
-        logger.info(f"收到资产价格历史数据请求: {asset}，天数: {days}")
-
-        # 如果是演示模式，使用演示数据
-        if settings.DEMO_MODE:
-            logger.info(f"使用演示数据: 资产价格历史 {asset}")
-            return demo_service.get_asset_price_history(asset, days)
-
-        # 实际环境下从区块链服务获取数据
-        history_data = await blockchain_service.get_asset_historical_data(asset, days)
-        return {
-            "asset": asset,
-            "days": days,
-            "data_points": history_data,
-            "is_demo_data": False,
-            "timestamp": datetime.now().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"获取资产价格历史数据时出错: {str(e)}")
-        return {"error": f"获取资产价格历史数据失败: {str(e)}"}
-
-
 def _convert_timestamp(timestamp_obj):
     """转换单个时间戳对象为ISO格式字符串"""
     if isinstance(timestamp_obj, pd.Timestamp):
@@ -95,35 +23,31 @@ def _convert_timestamp(timestamp_obj):
     return timestamp_obj
 
 
-def _convert_timestamps_to_iso(obj):
-    """递归地将所有时间戳转换为ISO格式字符串"""
-    if isinstance(obj, (pd.Timestamp, datetime)):
-        return _convert_timestamp(obj)
-    elif isinstance(obj, dict):
-        return {k: _convert_timestamps_to_iso(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [_convert_timestamps_to_iso(item) for item in obj]
-    return obj
-
-
 @router.get("/predict/{asset}")
 async def predict_market(
     asset: str,
     time_frame: str = Query("24h", description="预测时间范围: 24h, 7d, 30d"),
+    days: Optional[int] = Query(30, description="历史数据的天数"),
     ai_service: AiService = Depends(get_ai_service),
     blockchain_service: BlockchainService = Depends(get_blockchain_service),
+    demo_service: DemoDataService = Depends(get_demo_data_service),
 ):
     """
-    预测市场趋势
+    获取市场数据、历史数据并预测市场趋势
 
     - **asset**: 资产名称（例如：ETH, BTC, USDC等）
     - **time_frame**: 预测时间范围（24h, 7d, 30d）
+    - **days**: 历史数据的天数，默认30天
     """
     try:
-        logger.info(f"收到市场预测请求: {asset}, 时间范围: {time_frame}")
+        logger.info(
+            f"收到综合市场数据和预测请求: {asset}, 时间范围: {time_frame}, 历史天数: {days}"
+        )
 
-        # 获取资产历史数据
-        historical_data = await blockchain_service.get_asset_historical_data(asset)
+        # 获取资产历史数据用于AI分析
+        historical_data = await blockchain_service.get_coingecko_historical_data(
+            asset, days
+        )
 
         # 构建AI分析上下文
         if historical_data is not None:
@@ -168,11 +92,20 @@ async def predict_market(
         }
 
         # 转换所有时间戳为ISO格式
-        converted_analysis = _convert_timestamps_to_iso(analysis_dict)
+        converted_analysis = {
+            "predictions": [
+                _convert_timestamp(p) for p in analysis_dict["predictions"]
+            ],
+            "insights": analysis_dict["insights"],
+            "recommendations": analysis_dict["recommendations"],
+            "confidence": analysis_dict["confidence"],
+        }
 
+        # 合并所有数据到一个结果中
         result = {
             "asset": asset,
             "time_frame": time_frame,
+            "price_history": historical_data,
             "predictions": converted_analysis["predictions"],
             "insights": converted_analysis["insights"],
             "recommendations": converted_analysis["recommendations"],
@@ -182,13 +115,8 @@ async def predict_market(
 
         return result
     except Exception as e:
-        logger.error(f"预测市场趋势时出错: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"预测市场趋势失败: {str(e)}")
-
-
-# 注意: 市场警报功能已移至钱包API
-# 要获取市场警报，请使用以下端点:
-# GET /api/wallet/{wallet_address}/alerts
+        logger.error(f"获取市场数据和预测时出错: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取市场数据和预测失败: {str(e)}")
 
 
 @router.get("/gas")

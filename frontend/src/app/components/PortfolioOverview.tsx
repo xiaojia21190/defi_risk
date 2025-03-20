@@ -1,12 +1,15 @@
 "use client";
 
-import React from "react";
-import { Portfolio } from "../services/api";
-import { TrendingUp, Wallet, BarChart3, Percent, ChartBar, Target, DollarSign, ArrowUpDown, Loader2 } from "lucide-react";
+import React, { useState } from "react";
+import { TrendingUp, Wallet, BarChart3, Percent, ChartBar, Target, DollarSign, ArrowUpDown, Loader2, Shield, Network, Coins, Info, AlertTriangle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { apiService } from "../services/api";
 
 // 使用简单的自定义饼图组件
 const SimplePieChart: React.FC<{
@@ -39,7 +42,7 @@ const SimplePieChart: React.FC<{
           return <path key={item.title} d={pathData} fill={item.color} stroke="white" strokeWidth="0.5" />;
         })}
       </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+      <div className="flex absolute inset-0 flex-col justify-center items-center text-center">
         {data.map((item) => {
           const percentage = (item.value / totalValue) * 100;
           if (percentage > 5) {
@@ -59,12 +62,74 @@ const SimplePieChart: React.FC<{
 };
 
 interface PortfolioOverviewProps {
-  portfolio: Portfolio | null;
+  portfolio: {
+    wallet_address: string;
+    total_value: number;
+    total_value_usd: number;
+    position_count: number;
+    protocol_count: number;
+    positions: Array<{
+      protocol: string;
+      total_assets: number;
+      total_debts: number;
+      leverage: number;
+      positions: Array<{
+        protocol: string;
+        asset: string;
+        amount: number;
+        invest_type: number;
+        apy: number | null;
+        tokenList: Array<{
+          tokenSymbol: string;
+          tokenLogo: string;
+          coinAmount: string;
+          currencyAmount: string;
+          tokenPrecision: number;
+          tokenAddress: string;
+          network: string;
+        }>;
+      }>;
+    }>;
+    protocols: Array<{
+      name: string;
+      chain: string;
+      tvl: number;
+      supported_assets: string[];
+      features: string[];
+      description: string;
+    }>;
+    timestamp: string;
+    is_demo_data: boolean;
+  } | null;
   loading?: boolean;
   error?: string | null;
 }
 
+interface ProtocolRiskAnalysis {
+  protocol: string;
+  risk_score: number;
+  risk_level: string;
+  risk_factors: Array<{
+    factor: string;
+    score: number;
+    description: string;
+  }>;
+  recommendations: string[];
+}
+
 const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loading, error }) => {
+  const [selectedProtocol, setSelectedProtocol] = useState<{
+    name: string;
+    chain: string;
+    tvl: number;
+    supported_assets: string[];
+    features: string[];
+    description: string;
+  } | null>(null);
+  const [protocolRisk, setProtocolRisk] = useState<ProtocolRiskAnalysis | null>(null);
+  const [loadingRisk, setLoadingRisk] = useState(false);
+  const [activeTab, setActiveTab] = useState<"info" | "risk">("info");
+
   if (loading) {
     return (
       <Card>
@@ -72,7 +137,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
           <CardTitle>投资组合概览</CardTitle>
           <CardDescription>加载中...</CardDescription>
         </CardHeader>
-        <CardContent className="flex items-center justify-center py-8">
+        <CardContent className="flex justify-center items-center py-8">
           <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
         </CardContent>
       </Card>
@@ -101,30 +166,10 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
     );
   }
 
-  // 计算每个协议的总价值
-  const protocolValues = portfolio.positions.reduce((acc, pos) => {
-    // 获取资产符号，优先使用tokenList
-    const assetSymbol = pos.tokenList && pos.tokenList.length > 0 ? pos.tokenList[0].tokenSymbol.split("/")[0] : pos.asset.split("/")[0];
-
-    const marketAnalysis = portfolio.market_analysis[assetSymbol];
-
-    // 获取资产价值，优先使用amount，如果没有则尝试从tokenList获取
-    let value = 0;
-    if (pos.amount !== undefined) {
-      value = pos.amount * (marketAnalysis?.current_price || 0);
-    } else if (pos.tokenList && pos.tokenList.length > 0) {
-      // 使用currencyAmount作为美元价值
-      value = parseFloat(pos.tokenList[0].currencyAmount || "0");
-    }
-
-    acc[pos.protocol] = (acc[pos.protocol] || 0) + value;
-    return acc;
-  }, {} as { [key: string]: number });
-
-  // 生成饼图数据
-  const pieData = Object.entries(protocolValues).map(([protocol, value], index) => ({
-    title: protocol,
-    value,
+  // 生成协议分布饼图数据
+  const protocolData = portfolio.positions.map((protocolPos, index) => ({
+    title: protocolPos.protocol,
+    value: protocolPos.total_assets,
     color: [
       "#2563eb", // blue-600
       "#16a34a", // green-600
@@ -137,88 +182,29 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
     ][index % 8],
   }));
 
-  // 计算总收益率
-  const totalAPY = portfolio.positions.reduce((sum, pos) => sum + (pos.apy || 0), 0) / portfolio.positions.length;
-
-  // 计算资产类型分布
-  const assetTypeDistribution = portfolio.positions.reduce((acc, pos) => {
-    // 获取资产符号，优先使用tokenList
-    const assetSymbol = pos.tokenList && pos.tokenList.length > 0 ? pos.tokenList[0].tokenSymbol.split("/")[0] : pos.asset.split("/")[0];
-
-    const marketAnalysis = portfolio.market_analysis[assetSymbol];
-
-    // 获取资产价值，优先使用amount，如果没有则尝试从tokenList获取
-    let value = 0;
-    if (pos.amount !== undefined) {
-      value = pos.amount * (marketAnalysis?.current_price || 0);
-    } else if (pos.tokenList && pos.tokenList.length > 0) {
-      // 使用currencyAmount作为美元价值
-      value = parseFloat(pos.tokenList[0].currencyAmount || "0");
-    }
-
-    // 根据invest_type分类资产类型
-    let type = "其他";
-    if (pos.invest_type === 1) {
-      type = "存币";
-    } else if (pos.invest_type === 2) {
-      type = "流动性池";
-    } else if (pos.invest_type === 3) {
-      type = "挖矿";
-    } else if (pos.invest_type === 4) {
-      type = "机枪池";
-    } else if (pos.invest_type === 5) {
-      type = "质押";
-    } else if (pos.invest_type === 6) {
-      type = "借贷";
-    } else {
-      // 如果没有invest_type，使用旧的分类逻辑
-      if (assetSymbol === "ETH" || assetSymbol === "WETH" || assetSymbol === "BTC") {
-        type = "主流币";
-      } else if (assetSymbol === "USDC" || assetSymbol === "USDT" || assetSymbol === "DAI") {
-        type = "稳定币";
-      } else if (assetSymbol.includes("LP") || assetSymbol.includes("Pool")) {
-        type = "流动性代币";
-      }
-    }
-
-    acc[type] = (acc[type] || 0) + value;
+  // 生成资产类型分布数据
+  const assetTypeData = portfolio.positions.reduce((acc, protocolPos) => {
+    protocolPos.positions.forEach((position) => {
+      const type = getInvestTypeName(position.invest_type);
+      acc[type] = (acc[type] || 0) + position.amount;
+    });
     return acc;
   }, {} as { [key: string]: number });
 
-  // 计算APY趋势
-  const calculateAPYTrend = () => {
-    const apys = portfolio.positions.map((pos) => pos.apy || 0);
-    const avgAPY = apys.reduce((sum, apy) => sum + apy, 0) / apys.length;
-
-    if (avgAPY > 15) return "高";
-    if (avgAPY > 5) return "中";
-    return "低";
-  };
-
-  // 计算杠杆使用情况
-  const calculateLeverageUsage = () => {
-    const leveragedPositions = portfolio.positions.filter((pos) => pos.leverage && pos.leverage > 1);
-    const avgLeverage = leveragedPositions.length > 0 ? leveragedPositions.reduce((sum, pos) => sum + (pos.leverage || 1), 0) / leveragedPositions.length : 1;
-
-    if (avgLeverage > 2) return "高";
-    if (avgLeverage > 1.5) return "中";
-    return "低";
-  };
-
-  // 计算多样性得分
-  const calculateDiversityScore = () => {
-    const protocols = new Set(portfolio.positions.map((pos) => pos.protocol)).size;
-    const assets = new Set(portfolio.positions.map((pos) => pos.asset)).size;
-
-    const protocolScore = Math.min(protocols / 3, 1); // 最多3个协议为满分
-    const assetScore = Math.min(assets / 5, 1); // 最多5个资产为满分
-
-    const score = ((protocolScore + assetScore) / 2) * 100;
-
-    if (score > 70) return "高";
-    if (score > 40) return "中";
-    return "低";
-  };
+  const assetTypeChartData = Object.entries(assetTypeData).map(([type, value], index) => ({
+    title: type,
+    value,
+    color: [
+      "#2563eb", // blue-600
+      "#16a34a", // green-600
+      "#dc2626", // red-600
+      "#9333ea", // purple-600
+      "#ea580c", // orange-600
+      "#0891b2", // cyan-600
+      "#4f46e5", // indigo-600
+      "#db2777", // pink-600
+    ][index % 8],
+  }));
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("zh-CN", {
@@ -233,134 +219,332 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
     return `${value.toFixed(2)}%`;
   };
 
-  const apyTrend = calculateAPYTrend();
-  const leverageUsage = calculateLeverageUsage();
-  const diversityScore = calculateDiversityScore();
+  const getInvestTypeName = (type: number) => {
+    switch (type) {
+      case 1:
+        return "存币";
+      case 2:
+        return "流动性池";
+      case 3:
+        return "挖矿";
+      case 4:
+        return "机枪池";
+      case 5:
+        return "质押";
+      case 6:
+        return "借贷";
+      default:
+        return "其他";
+    }
+  };
+
+  // 获取协议风险分析
+  const fetchProtocolRisk = async (protocolName: string) => {
+    try {
+      setLoadingRisk(true);
+      const riskData = await apiService.analyzeProtocolRisk(protocolName);
+      setProtocolRisk(riskData);
+    } catch (error) {
+      console.error(`获取协议 ${protocolName} 风险分析失败:`, error);
+      setProtocolRisk(null);
+    } finally {
+      setLoadingRisk(false);
+    }
+  };
+
+  // 打开协议详情
+  const openProtocolDetails = (protocol: any) => {
+    setSelectedProtocol(protocol);
+    setActiveTab("info");
+    // 获取风险分析
+    fetchProtocolRisk(protocol.name);
+  };
+
+  // 关闭协议详情
+  const closeProtocolDetails = () => {
+    setSelectedProtocol(null);
+    setProtocolRisk(null);
+  };
+
+  // 渲染风险等级标签
+  const renderRiskLevel = (level: string) => {
+    let variant: "default" | "secondary" | "destructive" | "outline" = "default";
+    if (level === "高") variant = "destructive";
+    else if (level === "中等") variant = "secondary";
+
+    return <Badge variant={variant}>{level}</Badge>;
+  };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>投资组合概览</CardTitle>
-        <CardDescription>总资产价值: {formatCurrency(portfolio?.total_value || 0)}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-          <div>
-            <h3 className="mb-4 text-lg font-medium">资产分布</h3>
-            <div className="w-full aspect-square max-w-[300px] mx-auto relative bg-slate-900 rounded-full">
-              {pieData.length > 0 ? (
-                <SimplePieChart data={pieData} total={portfolio?.total_value || 0} />
-              ) : (
-                <div className="flex items-center justify-center h-full rounded-full bg-muted/20">
-                  <p className="text-muted-foreground">暂无数据</p>
-                </div>
-              )}
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <div className="flex justify-between items-center">
+            <div>
+              <CardTitle>投资组合概览</CardTitle>
+              <CardDescription>总资产价值: {formatCurrency(portfolio.total_value_usd)}</CardDescription>
+            </div>
+            <div className="flex gap-2 items-center">
+              <Badge variant={portfolio.is_demo_data ? "secondary" : "default"}>{portfolio.is_demo_data ? "演示数据" : "实时数据"}</Badge>
             </div>
           </div>
-          <div>
-            <h3 className="mb-4 text-lg font-medium">投资组合指标</h3>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <div className="p-2 mr-2 rounded-full bg-primary/20">
-                    <Percent className="w-5 h-5 text-primary" />
-                  </div>
-                  <span className="text-sm font-medium">平均收益率</span>
-                </div>
-                <div className="flex items-center">
-                  <span className="mr-2 text-sm">{formatPercentage(totalAPY)}</span>
-                  <Badge variant={apyTrend === "高" ? "destructive" : apyTrend === "中" ? "secondary" : "outline"}>{apyTrend}</Badge>
-                </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            <div>
+              <h3 className="mb-4 text-lg font-medium">协议分布</h3>
+              <div className="w-full aspect-square max-w-[300px] mx-auto relative bg-slate-900 rounded-full">
+                <SimplePieChart data={protocolData} total={portfolio.total_value_usd} />
               </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <div className="p-2 mr-2 rounded-full bg-secondary/20">
-                    <Target className="w-5 h-5 text-secondary" />
-                  </div>
-                  <span className="text-sm font-medium">杠杆使用</span>
-                </div>
-                <div className="flex items-center">
-                  <Badge variant={leverageUsage === "高" ? "destructive" : leverageUsage === "中" ? "secondary" : "outline"}>{leverageUsage}</Badge>
-                </div>
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <div className="p-2 mr-2 rounded-full bg-primary/20">
-                    <BarChart3 className="w-5 h-5 text-primary" />
-                  </div>
-                  <span className="text-sm font-medium">多样性得分</span>
-                </div>
-                <div className="flex items-center">
-                  <Badge variant={diversityScore === "高" ? "destructive" : diversityScore === "中" ? "secondary" : "outline"}>{diversityScore}</Badge>
-                </div>
+            </div>
+            <div>
+              <h3 className="mb-4 text-lg font-medium">资产类型分布</h3>
+              <div className="w-full aspect-square max-w-[300px] mx-auto relative bg-slate-900 rounded-full">
+                <SimplePieChart data={assetTypeChartData} total={portfolio.total_value_usd} />
               </div>
             </div>
           </div>
-        </div>
+        </CardContent>
+      </Card>
 
-        <div className="mt-6">
-          <h3 className="mb-4 text-lg font-medium">资产列表</h3>
-          <div className="border rounded-md">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>资产</TableHead>
-                  <TableHead>协议</TableHead>
-                  <TableHead>类型</TableHead>
-                  <TableHead className="text-right">数量</TableHead>
-                  <TableHead className="text-right">价值</TableHead>
-                  <TableHead className="text-right">收益率</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {portfolio.positions.map((position, index) => {
-                  // 获取资产符号，优先使用tokenList
-                  const assetSymbol = position.tokenList && position.tokenList.length > 0 ? position.tokenList[0].tokenSymbol.split("/")[0] : position.asset.split("/")[0];
-
-                  const marketAnalysis = portfolio.market_analysis[assetSymbol];
-
-                  // 获取资产价值，优先使用amount，如果没有则尝试从tokenList获取
-                  let value = 0;
-                  let displayAmount = "0";
-
-                  if (position.amount !== undefined) {
-                    value = position.amount * (marketAnalysis?.current_price || 0);
-                    displayAmount = position.amount.toFixed(4);
-                  } else if (position.tokenList && position.tokenList.length > 0) {
-                    // 使用currencyAmount作为美元价值
-                    value = parseFloat(position.tokenList[0].currencyAmount || "0");
-                    displayAmount = position.tokenList[0].coinAmount || "0";
-                  }
-
-                  // 获取投资类型
-                  let investType = "未知";
-                  if (position.invest_type === 1) investType = "存币";
-                  else if (position.invest_type === 2) investType = "流动性池";
-                  else if (position.invest_type === 3) investType = "挖矿";
-                  else if (position.invest_type === 4) investType = "机枪池";
-                  else if (position.invest_type === 5) investType = "质押";
-                  else if (position.invest_type === 6) investType = "借贷";
-
-                  // 获取显示的资产名称
-                  const displayAsset = position.tokenList && position.tokenList.length > 0 ? position.tokenList[0].tokenSymbol : position.asset;
-
-                  return (
-                    <TableRow key={index}>
-                      <TableCell>{displayAsset}</TableCell>
-                      <TableCell>{position.protocol}</TableCell>
-                      <TableCell>{investType}</TableCell>
-                      <TableCell className="text-right">{displayAmount}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(value)}</TableCell>
-                      <TableCell className="text-right">{position.apy ? <span className={cn(position.apy > 0 ? "text-green-500" : "text-red-500")}>{formatPercentage(position.apy)}</span> : <span className="text-muted-foreground">-</span>}</TableCell>
+      <Card>
+        <CardHeader>
+          <CardTitle>持仓详情</CardTitle>
+          <CardDescription>
+            共 {portfolio.position_count} 个持仓，{portfolio.protocol_count} 个协议
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-6">
+            {portfolio.positions.map((protocolPos) => (
+              <div key={protocolPos.protocol} className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <div className="flex gap-2 items-center">
+                    <h4 className="text-lg font-medium">{protocolPos.protocol}</h4>
+                    <Badge variant="outline">杠杆率: {protocolPos.leverage}x</Badge>
+                  </div>
+                  <div className="text-sm text-muted-foreground">总资产: {formatCurrency(protocolPos.total_assets)}</div>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>资产</TableHead>
+                      <TableHead>数量</TableHead>
+                      <TableHead>价值</TableHead>
+                      <TableHead>类型</TableHead>
+                      <TableHead>APY</TableHead>
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {protocolPos.positions.map((position) => (
+                      <TableRow key={`${position.protocol}-${position.asset}`}>
+                        <TableCell>
+                          <div className="flex gap-2 items-center">
+                            {position.tokenList[0]?.tokenLogo && <img src={position.tokenList[0].tokenLogo} alt={position.asset} className="w-6 h-6 rounded-full" />}
+                            <span>{position.asset}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell>{parseFloat(position.tokenList[0]?.coinAmount || "0").toFixed(4)}</TableCell>
+                        <TableCell>{formatCurrency(parseFloat(position.tokenList[0]?.currencyAmount || "0"))}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">{getInvestTypeName(position.invest_type)}</Badge>
+                        </TableCell>
+                        <TableCell>{position.apy ? <Badge variant="default">{formatPercentage(position.apy)}</Badge> : <span className="text-muted-foreground">-</span>}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ))}
           </div>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>协议信息</CardTitle>
+          <CardDescription>支持的协议和功能</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {portfolio.protocols.map((protocol) => (
+              <div key={protocol.name} className="p-4 rounded-lg border transition-colors cursor-pointer bg-card/50 hover:bg-card/80" onClick={() => openProtocolDetails(protocol)}>
+                <div className="flex justify-between items-center mb-2">
+                  <div className="flex gap-2 items-center">
+                    <h4 className="font-medium">{protocol.name}</h4>
+                    <Badge variant="outline">{protocol.chain}</Badge>
+                  </div>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="w-8 h-8"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openProtocolDetails(protocol);
+                    }}
+                  >
+                    <Info className="w-4 h-4" />
+                  </Button>
+                </div>
+                <p className="mb-3 text-sm text-muted-foreground line-clamp-2">{protocol.description}</p>
+                <div className="space-y-2">
+                  <div className="flex gap-2 items-center text-sm">
+                    <Coins className="w-4 h-4" />
+                    <span>支持资产: {protocol.supported_assets.join(", ")}</span>
+                  </div>
+                  <div className="flex gap-2 items-center text-sm">
+                    <BarChart3 className="w-4 h-4" />
+                    <span>TVL: {formatCurrency(protocol.tvl)}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {protocol.features.map((feature) => (
+                      <Badge key={feature} variant="secondary" className="text-xs">
+                        {feature}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 协议详情弹窗 */}
+      <Dialog open={selectedProtocol !== null} onOpenChange={(open: boolean) => !open && closeProtocolDetails()}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          {selectedProtocol && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex justify-between items-center">
+                  <span>{selectedProtocol.name}</span>
+                  {selectedProtocol.chain && <Badge variant="secondary">{selectedProtocol.chain}</Badge>}
+                </DialogTitle>
+                <DialogDescription>{selectedProtocol.description || "暂无描述"}</DialogDescription>
+              </DialogHeader>
+
+              <Tabs defaultValue={activeTab} onValueChange={(value: string) => setActiveTab(value as "info" | "risk")} className="mt-4">
+                <TabsList className="grid grid-cols-2 mb-4">
+                  <TabsTrigger value="info">协议信息</TabsTrigger>
+                  <TabsTrigger value="risk">风险分析</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="info" className="space-y-4">
+                  {/* 协议基本信息 */}
+                  <div className="grid grid-cols-2 gap-4">
+                    {selectedProtocol.tvl !== undefined && (
+                      <div>
+                        <h4 className="mb-1 text-sm font-medium">总锁仓价值</h4>
+                        <p className="text-2xl font-bold">{formatCurrency(selectedProtocol.tvl)}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 支持的资产 */}
+                  {selectedProtocol.supported_assets && selectedProtocol.supported_assets.length > 0 && (
+                    <div className="mt-4">
+                      <h4 className="mb-2 text-sm font-medium">支持的资产</h4>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedProtocol.supported_assets.map((asset) => (
+                          <Badge key={asset} variant="secondary">
+                            {asset}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 功能特性 */}
+                  {selectedProtocol.features && selectedProtocol.features.length > 0 && (
+                    <div className="mt-4">
+                      <h4 className="mb-2 text-sm font-medium">功能特性</h4>
+                      <ul className="space-y-1 text-sm">
+                        {selectedProtocol.features.map((feature, index) => (
+                          <li key={index} className="flex gap-2 items-start">
+                            <span className="text-primary">•</span>
+                            <span>{feature}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </TabsContent>
+
+                <TabsContent value="risk" className="space-y-4">
+                  {loadingRisk ? (
+                    <div className="flex justify-center items-center py-12">
+                      <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                    </div>
+                  ) : !protocolRisk ? (
+                    <div className="py-8 text-center">
+                      <AlertTriangle className="mx-auto mb-2 w-8 h-8 text-amber-500" />
+                      <p className="text-muted-foreground">无法获取风险分析数据</p>
+                      <Button className="mt-4" onClick={() => fetchProtocolRisk(selectedProtocol.name)}>
+                        重试
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      {/* 风险评分 */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <h4 className="mb-1 text-sm font-medium">风险评分</h4>
+                          <div className="flex gap-2 items-center">
+                            <p className="text-2xl font-bold">{protocolRisk.risk_score}</p>
+                            <span className="text-sm text-muted-foreground">/100</span>
+                          </div>
+                        </div>
+                        <div>
+                          <h4 className="mb-1 text-sm font-medium">风险等级</h4>
+                          <div>{renderRiskLevel(protocolRisk.risk_level)}</div>
+                        </div>
+                      </div>
+
+                      {/* 风险因素 */}
+                      {protocolRisk.risk_factors && protocolRisk.risk_factors.length > 0 && (
+                        <div className="mt-4">
+                          <h4 className="mb-2 text-sm font-medium">风险因素</h4>
+                          <div className="space-y-3">
+                            {protocolRisk.risk_factors.map((factor, index) => (
+                              <div key={index} className="p-3 rounded-md bg-secondary/50">
+                                <div className="flex justify-between items-center mb-1">
+                                  <h5 className="font-medium">{factor.factor}</h5>
+                                  <Badge variant={factor.score > 80 ? "default" : factor.score > 60 ? "secondary" : "destructive"}>{factor.score}/100</Badge>
+                                </div>
+                                <p className="text-sm text-muted-foreground">{factor.description}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* AI建议 */}
+                      {protocolRisk.recommendations && protocolRisk.recommendations.length > 0 && (
+                        <div className="mt-4">
+                          <h4 className="mb-2 text-sm font-medium">AI建议</h4>
+                          <ul className="space-y-1 text-sm">
+                            {protocolRisk.recommendations.map((rec, index) => (
+                              <li key={index} className="flex gap-2 items-start">
+                                <span className="text-primary">•</span>
+                                <span>{rec}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </TabsContent>
+              </Tabs>
+
+              <DialogFooter className="mt-6">
+                <Button onClick={closeProtocolDetails}>关闭</Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 };
 

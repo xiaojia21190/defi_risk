@@ -23,6 +23,7 @@ from datetime import datetime
 import uuid
 from app.models.domain.ai import AiAnalysis, AiPrediction, AiInsight, AiRequest
 from app.core.config import settings
+import requests
 
 
 logger = logging.getLogger("defi_risk.ai_service")
@@ -66,8 +67,8 @@ class AiService:
         request_data = self._build_request(analysis_type, context, parameters)
 
         try:
-            # 调用AI API
-            response_data = await self._call_ai_api(request_data)
+            # 调用AI API（现在是同步的）
+            response_data = self._call_ai_api(request_data)
 
             # 解析响应
             analysis = self._parse_response(analysis_type, response_data)
@@ -118,7 +119,7 @@ class AiService:
             logger.error(f"构建AI请求时出错: {str(e)}")
             raise Exception(f"构建AI请求失败: {str(e)}")
 
-    async def _call_ai_api(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _call_ai_api(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
         """调用AI API"""
         headers = {
             "Content-Type": "application/json",
@@ -126,27 +127,41 @@ class AiService:
         }
 
         # 设置代理
-        proxy = self.proxy_url if self.proxy_url else None
+        proxies = (
+            {"http": self.proxy_url, "https": self.proxy_url}
+            if self.proxy_url
+            else None
+        )
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
+        try:
+            response = requests.post(
                 f"{self.api_url}/chat/completions",
                 headers=headers,
                 json=request_data,
-                proxy=proxy,
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"AI API请求失败: {response.status}, {error_text}")
+                proxies=proxies,
+            )
 
-                response_json = await response.json()
+            if response.status_code != 200:
+                raise Exception(
+                    f"AI API请求失败: {response.status_code}, {response.text}"
+                )
 
-                # 提取内容
-                try:
-                    content = response_json["choices"][0]["message"]["content"]
-                    return json.loads(content)
-                except (KeyError, json.JSONDecodeError) as e:
-                    raise Exception(f"解析AI响应失败: {str(e)}")
+            response_json = response.json()
+
+            # 提取内容
+            try:
+                content = response_json["choices"][0]["message"]["content"]
+                # 处理markdown代码块格式
+                if content.startswith("```json"):
+                    content = content[7:]  # 移除 ```json
+                if content.endswith("```"):
+                    content = content[:-3]  # 移除 ```
+                content = content.strip()  # 移除首尾空白
+                return json.loads(content)
+            except (KeyError, json.JSONDecodeError) as e:
+                raise Exception(f"解析AI响应失败: {str(e)}")
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"AI API请求异常: {str(e)}")
 
     def _parse_response(
         self, analysis_type: str, response_data: Dict[str, Any]
@@ -680,7 +695,7 @@ class AiService:
 
             # 如果没有合适的方法，使用OpenAI API
             else:
-                return await self._analyze_with_openai(analysis_type, data, parameters)
+                return self._analyze_with_openai(analysis_type, data, parameters)
 
             logger.info(f"AI预测器分析完成: {analysis_type}")
 
@@ -690,18 +705,6 @@ class AiService:
         except Exception as e:
             error_message = f"AI预测器分析失败: {str(e)}"
             logger.error(error_message)
-
-            # 尝试使用OpenAI API作为备选
-            try:
-                logger.info(f"尝试使用OpenAI API进行分析: {analysis_type}")
-                return await self._analyze_with_openai(analysis_type, data, parameters)
-            except Exception as e2:
-                # 记录两个错误
-                logger.error(f"OpenAI API分析也失败: {str(e2)}")
-                # 返回包含两个错误的分析结果
-                return self._create_error_analysis(
-                    analysis_type, f"AI预测器错误: {str(e)}; OpenAI API错误: {str(e2)}"
-                )
 
     def _process_predictor_result(
         self, analysis_type: str, result: Dict[str, Any]
@@ -822,8 +825,8 @@ class AiService:
         # 构建请求
         request_data = self._build_request(analysis_type, data, parameters)
 
-        # 调用AI API
-        response_data = await self._call_ai_api(request_data)
+        # 调用AI API (同步)
+        response_data = self._call_ai_api(request_data)
 
         # 解析响应
         analysis = self._parse_response(analysis_type, response_data)

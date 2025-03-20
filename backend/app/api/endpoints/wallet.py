@@ -23,30 +23,116 @@ async def get_wallet_positions(
     demo_service: DemoDataService = Depends(get_demo_data_service),
 ):
     """
-    获取钱包在所有协议中的头寸
+    获取钱包在所有协议中的头寸和协议信息
 
     - **wallet_address**: 钱包地址
     """
     try:
-        logger.info(f"收到钱包头寸请求: {wallet_address}")
+        logger.info(f"收到钱包头寸和协议信息请求: {wallet_address}")
 
         # 如果是演示模式，使用演示数据
         if settings.DEMO_MODE:
-            logger.info(f"使用演示数据: 钱包头寸 {wallet_address}")
-            return demo_service.get_wallet_positions(wallet_address)
+            logger.info(f"使用演示数据: 钱包头寸和协议信息 {wallet_address}")
+            # 获取钱包头寸
+            wallet_data = demo_service.get_wallet_positions(wallet_address)
+            # 获取协议信息
+            protocols = demo_service.get_protocols()
+
+            # 提取使用的协议信息
+            protocols_used = []
+            protocols_set = set()
+
+            for position in wallet_data.get("positions", []):
+                protocol_name = position.get("protocol", "")
+                if protocol_name and protocol_name not in protocols_set:
+                    protocols_set.add(protocol_name)
+                    # 从协议列表中查找协议信息
+                    protocol_info = next(
+                        (
+                            p
+                            for p in protocols.get("protocols", [])
+                            if p["name"] == protocol_name
+                        ),
+                        None,
+                    )
+                    if protocol_info:
+                        protocols_used.append(protocol_info)
+                    else:
+                        # 如果没有找到协议信息，使用基本信息
+                        protocols_used.append(
+                            {
+                                "name": protocol_name,
+                                "chain": position.get("chain", "Unknown"),
+                                "tvl": 0,
+                                "supported_assets": ["ETH", "USDC"],
+                                "features": ["借贷", "流动性挖矿"],
+                                "description": f"{protocol_name}是一个DeFi协议",
+                            }
+                        )
+
+            return {
+                "wallet_address": wallet_address,
+                "positions": wallet_data.get("positions", []),
+                "total_value_usd": wallet_data.get("total_value_usd", 0),
+                "position_count": len(wallet_data.get("positions", [])),
+                "protocols": protocols_used,
+                "protocol_count": len(protocols_used),
+                "timestamp": datetime.now().isoformat(),
+                "is_demo_data": True,
+            }
 
         # 获取所有协议头寸
         positions = await blockchain_service.get_all_positions(wallet_address)
 
-        # 计算总价值 - 适配OKX数据结构
+        # 计算总价值
         total_value = 0
         for position in positions:
-            # OKX数据结构中使用total_assets字段
             if "total_assets" in position:
                 total_value += position.get("total_assets", 0)
-            # 兼容其他数据结构
             elif "amount" in position:
                 total_value += position.get("amount", 0)
+
+        # 提取协议列表并获取协议信息
+        protocols_used = []
+        protocols_set = set()
+
+        for position in positions:
+            protocol_name = position.get("protocol", "")
+            if protocol_name and protocol_name not in protocols_set:
+                protocols_set.add(protocol_name)
+                try:
+                    # 获取协议详细信息
+                    protocol_info = await blockchain_service.get_protocol(protocol_name)
+                    protocols_used.append(
+                        {
+                            "name": protocol_name,
+                            "chain": protocol_info.get(
+                                "chain", position.get("chain", "Unknown")
+                            ),
+                            "tvl": protocol_info.get("tvl", 0),
+                            "supported_assets": protocol_info.get(
+                                "supported_assets", ["ETH", "USDC"]
+                            ),
+                            "features": protocol_info.get(
+                                "features", ["借贷", "流动性挖矿"]
+                            ),
+                            "description": protocol_info.get(
+                                "description", f"{protocol_name}是一个DeFi协议"
+                            ),
+                        }
+                    )
+                except Exception:
+                    # 如果获取协议信息失败，使用基本信息
+                    protocols_used.append(
+                        {
+                            "name": protocol_name,
+                            "chain": position.get("chain", "Unknown"),
+                            "tvl": 0,
+                            "supported_assets": ["ETH", "USDC"],
+                            "features": ["借贷", "流动性挖矿"],
+                            "description": f"{protocol_name}是一个DeFi协议",
+                        }
+                    )
 
         # 构建响应
         response = {
@@ -54,18 +140,22 @@ async def get_wallet_positions(
             "positions": positions,
             "total_value_usd": total_value,
             "position_count": len(positions),
+            "protocols": protocols_used,
+            "protocol_count": len(protocols_used),
             "timestamp": datetime.now().isoformat(),
             "is_demo_data": False,
         }
 
         return response
     except Exception as e:
-        logger.error(f"获取钱包头寸时出错: {str(e)}")
+        logger.error(f"获取钱包头寸和协议信息时出错: {str(e)}")
         # 如果出错且是演示模式，返回演示数据
         if settings.DEMO_MODE:
-            logger.info(f"出错时使用演示数据: 钱包头寸 {wallet_address}")
+            logger.info(f"出错时使用演示数据: 钱包头寸和协议信息 {wallet_address}")
             return demo_service.get_wallet_positions(wallet_address)
-        raise HTTPException(status_code=500, detail=f"获取钱包头寸失败: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"获取钱包头寸和协议信息失败: {str(e)}"
+        )
 
 
 @router.get("/{wallet_address}/risk")

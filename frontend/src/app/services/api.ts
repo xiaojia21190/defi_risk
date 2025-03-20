@@ -34,8 +34,13 @@ export interface ProtocolPosition {
 }
 
 export interface Portfolio {
+  wallet_address: string;
   total_value: number;
+  total_value_usd: number;
+  position_count: number;
+  protocol_count: number;
   positions: Position[];
+  protocols: Protocol[];
   risk_level: string;
   recommendations: string[];
   market_analysis: {
@@ -47,7 +52,8 @@ export interface Portfolio {
       volatility_30d: number;
     };
   };
-  timestamp?: string;
+  timestamp: string;
+  is_demo_data: boolean;
 }
 
 export interface MarketData {
@@ -299,41 +305,34 @@ class ApiService {
 
       // 初始化portfolio对象
       const portfolio: Portfolio = {
+        wallet_address: address,
         total_value: positionsResponse.portfolio_summary?.total_value || 0,
+        total_value_usd: positionsResponse.portfolio_summary?.total_value_usd || 0,
+        position_count: positionsResponse.positions?.length || 0,
+        protocol_count: positionsResponse.positions?.length || 0,
         positions: [],
+        protocols: [],
         risk_level: "", // 初始为空，需要单独加载
         recommendations: [],
-        market_analysis: {}
+        market_analysis: {},
+        timestamp: positionsResponse.timestamp || "",
+        is_demo_data: positionsResponse.is_demo_data || false
       };
 
       // 转换头寸数据
       if (positionsResponse && positionsResponse.positions) {
-        // 处理新的OKX数据结构
         const positions: Position[] = [];
 
         for (const protocolPosition of positionsResponse.positions) {
-          // 检查是否是新的OKX数据结构
-          if (protocolPosition.positions && Array.isArray(protocolPosition.positions)) {
-            // 新的OKX数据结构
-            for (const position of protocolPosition.positions) {
-              positions.push({
-                protocol: protocolPosition.protocol,
-                asset: position.asset,
-                amount: position.amount,
-                leverage: protocolPosition.leverage,
-                apy: position.apy,
-                invest_type: position.invest_type,
-                tokenList: position.tokenList
-              });
-            }
-          } else {
-            // 旧的数据结构
+          for (const position of protocolPosition.positions) {
             positions.push({
               protocol: protocolPosition.protocol,
-              asset: protocolPosition.asset,
-              amount: protocolPosition.amount,
+              asset: position.asset,
+              amount: position.amount,
               leverage: protocolPosition.leverage,
-              apy: protocolPosition.apy
+              apy: position.apy,
+              invest_type: position.invest_type,
+              tokenList: position.tokenList
             });
           }
         }

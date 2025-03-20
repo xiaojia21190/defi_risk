@@ -54,10 +54,10 @@ class Settings:
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
     OPENAI_API_URL: str = os.getenv("OPENAI_API_URL")
 
-    AI_MODEL: str = Field(default="gpt-4o", env="AI_MODEL")
+    AI_MODEL: str = os.getenv("OPENAI_API_MODEL")
 
     # 代理设置
-    PROXY_URL: Optional[str] = Field(default="http://127.0.0.1:7890", env="PROXY_URL")
+    PROXY_URL = "http://127.0.0.1:7890"
 
     # 风险权重配置
     RISK_WEIGHTS: Dict[str, float] = {
