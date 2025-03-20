@@ -21,6 +21,7 @@ from web3 import Web3
 from app.core.config import settings
 from dataclasses import dataclass
 from cachetools import TTLCache
+from app.models.domain.risk import RiskAnalysisResult, RiskMetrics, RiskAnalysis
 
 
 logger = logging.getLogger("defi_risk.blockchain_service")
@@ -1397,7 +1398,7 @@ class BlockchainService:
                 "github_repos": [],
             }
 
-    async def analyze_protocol_risk(self, protocol: str) -> Dict[str, Any]:
+    async def analyze_protocol_risk(self, protocol: str) -> RiskAnalysisResult:
         """
         分析协议的风险指标
 
@@ -1405,7 +1406,7 @@ class BlockchainService:
             protocol: 协议名称
 
         Returns:
-            Dict: 协议的风险分析结果
+            RiskAnalysisResult: 协议的风险分析结果
         """
         try:
             # 获取完整的协议数据
@@ -1506,32 +1507,34 @@ class BlockchainService:
             elif normalized_risk_score >= 20:
                 risk_level = "高"
 
-            return {
-                "protocol": protocol_name,
-                "category": protocol_category,
-                "chains": protocol_chains,
-                "tvl": tvl,
-                "tvl_stability": tvl_stability * 100,  # 转换为百分比
-                "audit_status": audit_status,
-                "risk_score": normalized_risk_score,
-                "risk_level": risk_level,
-                "analysis": {
-                    "tvl_factor": f"TVL为{tvl:,.2f}美元，"
+            return RiskAnalysisResult(
+                asset_id=protocol_name,
+                risk_score=normalized_risk_score,
+                risk_level=risk_level,
+                metrics=RiskMetrics(
+                    tvl_stability=tvl_stability * 100,
+                    audit_score=audit_status.get("audit_score", 0),
+                    market_cap=tvl,
+                ),
+                analysis=RiskAnalysis(
+                    tvl_factor=f"TVL为{tvl:,.2f}美元，"
                     + (
                         "较高"
                         if tvl > 100000000
                         else "中等" if tvl > 10000000 else "较低"
                     ),
-                    "stability_factor": f"TVL稳定性为{tvl_stability*100:.2f}%，"
+                    stability_factor=f"TVL稳定性为{tvl_stability*100:.2f}%，"
                     + (
                         "很稳定"
                         if tvl_stability > 0.8
                         else "较稳定" if tvl_stability > 0.5 else "波动较大"
                     ),
-                    "audit_factor": f"{'已通过' + str(audit_count) + '次专业审计' if audit_status.get('audited', False) else '未经专业审计或缺乏审计信息'}，{'且代码开源' if is_open_source else '代码未开源'}",
-                    "chain_factor": f"部署在{chain_count}条链上，"
+                    audit_factor=f"{'已通过' + str(audit_count) + '次专业审计' if audit_status.get('audited', False) else '未经专业审计或缺乏审计信息'}，{'且代码开源' if is_open_source else '代码未开源'}",
+                    chain_factor=f"部署在{chain_count}条链上，"
                     + ("风险分散" if chain_count <= 2 else "增加了一定的风险面"),
-                    "recommendation": f"综合评估，{protocol_name}协议的风险等级为{risk_level}，"
+                ),
+                recommendations=[
+                    f"综合评估，{protocol_name}协议的风险等级为{risk_level}，"
                     + (
                         "建议可以适量配置"
                         if normalized_risk_score >= 60
@@ -1541,12 +1544,19 @@ class BlockchainService:
                             else "建议避免参与或严格控制仓位"
                         )
                     ),
-                },
-                "raw_data": {"protocol_data": protocol_data},
-            }
+                ],
+                raw_data={"protocol_data": protocol_data},
+            )
         except Exception as e:
             self.logger.error(f"分析协议风险失败: {str(e)}")
-            return {"error": f"分析协议风险时出错: {str(e)}"}
+            return RiskAnalysisResult(
+                asset_id=protocol,
+                risk_score=0,
+                risk_level="未知",
+                metrics=RiskMetrics(),
+                analysis=RiskAnalysis(),
+                error=f"分析协议风险时出错: {str(e)}",
+            )
 
     async def _calculate_lp_token_price(
         self, token_address: str, token_symbol: str = None
@@ -2172,7 +2182,7 @@ class BlockchainService:
             self.logger.error(f"从CoinGecko获取{asset}的24小时数据失败: {str(e)}")
             return None
 
-    async def analyze_asset_risk(self, asset: str) -> Dict[str, Any]:
+    async def analyze_asset_risk(self, asset: str) -> RiskAnalysisResult:
         """
         分析资产的风险指标，使用CoinGecko数据
 
@@ -2180,18 +2190,32 @@ class BlockchainService:
             asset: 资产符号或ID
 
         Returns:
-            Dict: 资产风险分析结果
+            RiskAnalysisResult: 资产风险分析结果
         """
         try:
             # 获取24小时数据
             data_24h = await self._get_coingecko_24h_data(asset)
             if not data_24h:
-                return {"error": f"无法获取{asset}的市场数据"}
+                return RiskAnalysisResult(
+                    asset_id=asset,
+                    risk_score=0,
+                    risk_level="未知",
+                    metrics=RiskMetrics(),
+                    analysis=RiskAnalysis(),
+                    error=f"无法获取{asset}的市场数据",
+                )
 
             # 获取历史数据
             historical_data = await self.get_coingecko_historical_data(asset)
             if historical_data is None or historical_data.empty:
-                return {"error": f"无法获取{asset}的历史数据"}
+                return RiskAnalysisResult(
+                    asset_id=asset,
+                    risk_score=0,
+                    risk_level="未知",
+                    metrics=RiskMetrics(),
+                    analysis=RiskAnalysis(),
+                    error=f"无法获取{asset}的历史数据",
+                )
 
             # 1. 价格波动性分析
             price_volatility = historical_data["price"].pct_change().std() * 100
@@ -2252,39 +2276,49 @@ class BlockchainService:
             elif risk_score >= 20:
                 risk_level = "中高风险"
 
-            metrics = {
-                "price_volatility": round(price_volatility, 2),
-                "market_cap": market_cap,
-                "market_cap_rank": market_cap_rank,
-                "volume_to_mcap_ratio": round(volume_to_mcap_ratio, 4),
-                "price_trend": {
-                    "current": current_price,
-                    "ma7": price_ma7,
-                    "ma30": price_ma30,
-                },
-            }
-
-            return {
-                "asset": asset,
-                "risk_score": risk_score,
-                "risk_level": risk_level,
-                "metrics": metrics,
-                "analysis": {
-                    "market_cap_analysis": f"市值{market_cap:,.0f}美元，排名第{market_cap_rank}位",
-                    "liquidity_analysis": f"日交易量/市值比率{volume_to_mcap_ratio:.2%}",
-                    "volatility_analysis": f"价格波动率{price_volatility:.2f}%",
-                    "trend_analysis": (
+            return RiskAnalysisResult(
+                asset_id=asset,
+                risk_score=risk_score,
+                risk_level=risk_level,
+                metrics=RiskMetrics(
+                    price_volatility=price_volatility,
+                    market_cap=market_cap,
+                    market_cap_rank=market_cap_rank,
+                    volume_to_mcap_ratio=volume_to_mcap_ratio,
+                ),
+                analysis=RiskAnalysis(
+                    market_cap_analysis=f"市值{market_cap:,.0f}美元，排名第{market_cap_rank}位",
+                    liquidity_analysis=f"日交易量/市值比率{volume_to_mcap_ratio:.2%}",
+                    volatility_analysis=f"价格波动率{price_volatility:.2f}%",
+                    trend_analysis=(
                         "上升趋势" if current_price > price_ma7 else "下降趋势"
                     ),
-                },
-                "recommendations": self._generate_risk_recommendations(
-                    risk_score, metrics
                 ),
-            }
-
+                recommendations=self._generate_risk_recommendations(
+                    risk_score,
+                    {
+                        "price_volatility": price_volatility,
+                        "market_cap": market_cap,
+                        "market_cap_rank": market_cap_rank,
+                        "volume_to_mcap_ratio": volume_to_mcap_ratio,
+                        "price_trend": {
+                            "current": current_price,
+                            "ma7": price_ma7,
+                            "ma30": price_ma30,
+                        },
+                    },
+                ),
+            )
         except Exception as e:
             self.logger.error(f"分析资产{asset}风险时出错: {str(e)}")
-            return {"error": f"风险分析失败: {str(e)}"}
+            return RiskAnalysisResult(
+                asset_id=asset,
+                risk_score=0,
+                risk_level="未知",
+                metrics=RiskMetrics(),
+                analysis=RiskAnalysis(),
+                error=f"风险分析失败: {str(e)}",
+            )
 
     def _generate_risk_recommendations(
         self, risk_score: int, metrics: Dict[str, Any]

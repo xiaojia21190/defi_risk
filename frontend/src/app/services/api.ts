@@ -5,7 +5,7 @@ declare const process: {
   };
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 export interface Position {
   protocol: string;
@@ -47,6 +47,7 @@ export interface Portfolio {
       volatility_30d: number;
     };
   };
+  timestamp?: string;
 }
 
 export interface MarketData {
@@ -293,20 +294,17 @@ class ApiService {
     }
 
     try {
-      // 使用后端的钱包风险分析API
-      const response = await this.fetchJson<any>(`/wallet/${address}/risk`);
+      // 只获取钱包头寸
+      const positionsResponse = await this.fetchJson<any>(`/wallet/${address}/positions`);
 
-      // 将后端响应转换为前端期望的Portfolio格式
+      // 初始化portfolio对象
       const portfolio: Portfolio = {
-        total_value: response.portfolio_summary?.total_value || 0,
+        total_value: positionsResponse.portfolio_summary?.total_value || 0,
         positions: [],
-        risk_level: response.risk_assessment?.risk_level || "medium",
-        recommendations: response.risk_assessment?.recommendations || [],
+        risk_level: "", // 初始为空，需要单独加载
+        recommendations: [],
         market_analysis: {}
       };
-
-      // 获取钱包头寸
-      const positionsResponse = await this.fetchJson<any>(`/wallet/${address}/positions`);
 
       // 转换头寸数据
       if (positionsResponse && positionsResponse.positions) {
@@ -343,19 +341,45 @@ class ApiService {
         portfolio.positions = positions;
       }
 
-      // 获取市场分析数据
-      const assets = [...new Set(portfolio.positions.map(p => {
-        // 从资产名称或tokenList中提取基础资产
-        if (p.tokenList && p.tokenList.length > 0) {
-          return p.tokenList[0].tokenSymbol.split('/')[0];
-        }
-        return p.asset.split('/')[0];
-      }))];
+      return portfolio;
+    } catch (error) {
+      console.error('获取投资组合数据失败:', error);
+      throw error;
+    }
+  }
+
+  // 新方法：获取钱包风险评估
+  async getWalletRiskAssessment(address: string): Promise<{ risk_level: string, recommendations: string[] }> {
+    if (!address || address === '') {
+      throw new Error('未提供钱包地址');
+    }
+
+    try {
+      const response = await this.fetchJson<any>(`/wallet/${address}/risk`);
+
+      return {
+        risk_level: response.risk_assessment?.risk_level || "medium",
+        recommendations: response.risk_assessment?.recommendations || []
+      };
+    } catch (error) {
+      console.error('获取钱包风险评估失败:', error);
+      throw error;
+    }
+  }
+
+  // 新方法：获取投资组合资产的市场分析
+  async getPortfolioMarketAnalysis(assets: string[]): Promise<Record<string, any>> {
+    if (!assets || assets.length === 0) {
+      return {};
+    }
+
+    try {
+      const marketAnalysis: Record<string, any> = {};
 
       for (const asset of assets) {
         try {
           const marketData = await this.getMarketData(asset);
-          portfolio.market_analysis[asset] = {
+          marketAnalysis[asset] = {
             current_price: marketData.price,
             volume_24h: marketData.volume_24h,
             market_cap: marketData.market_cap,
@@ -367,10 +391,10 @@ class ApiService {
         }
       }
 
-      return portfolio;
+      return marketAnalysis;
     } catch (error) {
-      console.error('获取投资组合数据失败:', error);
-      throw error;
+      console.error('获取投资组合市场分析失败:', error);
+      return {};
     }
   }
 
@@ -396,10 +420,7 @@ class ApiService {
   async predictMarket(asset: string, timeFrame: string = '24h'): Promise<MarketPrediction> {
     try {
       // 使用后端的市场预测API
-      const response = await this.fetchJson<any>(`/market/predict/${asset}`, {
-        method: 'POST',
-        body: JSON.stringify({ time_frame: timeFrame }),
-      });
+      const response = await this.fetchJson<any>(`/market/predict/${asset}?time_frame=${timeFrame}`);
 
       // 将后端响应转换为前端期望的MarketPrediction格式
       return {
@@ -429,8 +450,8 @@ class ApiService {
   async getGasPrice(): Promise<number> {
     try {
       // 使用后端的gas价格API
-      const response = await this.fetchJson<any>('/market/gas-price');
-      return response.gas_price || 0;
+      const response = await this.fetchJson<any>('/market/gas');
+      return response || 0;
     } catch (error) {
       console.error('获取Gas价格失败:', error);
       return 0;
@@ -665,7 +686,7 @@ class ApiService {
   // 添加一个健康检查方法
   async checkApiHealth(): Promise<boolean> {
     try {
-      const response = await fetch(`${API_BASE_URL.replace('/api', '')}/health`);
+      const response = await fetch(`${API_BASE_URL.replace('/api/v1', '')}/health`);
       return response.ok;
     } catch (error) {
       console.error('API健康检查失败:', error);

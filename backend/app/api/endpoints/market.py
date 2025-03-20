@@ -34,8 +34,18 @@ async def get_market_data(
             return demo_service.get_market_data(asset)
 
         # 实际环境下从区块链服务获取数据
-        market_data = await blockchain_service.get_asset_data(asset)
-        return market_data
+        market_data = await blockchain_service._get_24h_data(asset)
+        if market_data:
+            return {
+                "asset": asset,
+                "price": round(market_data.get("price", 0), 2),
+                "price_change_24h": round(market_data.get("price_change", 0), 2),
+                "volume_24h": round(market_data.get("volume", 0), 2),
+                "market_cap": round(market_data.get("market_cap", 0), 2),
+                "timestamp": datetime.now().isoformat(),
+                "is_demo_data": False,
+            }
+        return {"error": f"无法获取 {asset} 的市场数据"}
     except Exception as e:
         logger.error(f"获取市场数据时出错: {str(e)}")
         return {"error": f"获取市场数据失败: {str(e)}"}
@@ -69,11 +79,31 @@ async def get_asset_price_history(
             "days": days,
             "data_points": history_data,
             "is_demo_data": False,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
     except Exception as e:
         logger.error(f"获取资产价格历史数据时出错: {str(e)}")
         return {"error": f"获取资产价格历史数据失败: {str(e)}"}
+
+
+def _convert_timestamp(timestamp_obj):
+    """转换单个时间戳对象为ISO格式字符串"""
+    if isinstance(timestamp_obj, pd.Timestamp):
+        return timestamp_obj.isoformat()
+    elif isinstance(timestamp_obj, datetime):
+        return timestamp_obj.isoformat()
+    return timestamp_obj
+
+
+def _convert_timestamps_to_iso(obj):
+    """递归地将所有时间戳转换为ISO格式字符串"""
+    if isinstance(obj, (pd.Timestamp, datetime)):
+        return _convert_timestamp(obj)
+    elif isinstance(obj, dict):
+        return {k: _convert_timestamps_to_iso(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_timestamps_to_iso(item) for item in obj]
+    return obj
 
 
 @router.get("/predict/{asset}")
@@ -96,25 +126,61 @@ async def predict_market(
         historical_data = await blockchain_service.get_asset_historical_data(asset)
 
         # 构建AI分析上下文
+        if historical_data is not None:
+            # 先将DataFrame转换为字典列表
+            history_dict = []
+            for _, row in historical_data.iterrows():
+                history_dict.append(
+                    {
+                        "timestamp": _convert_timestamp(row["timestamp"]),
+                        "price": float(row["price"]),
+                        "volume": (
+                            float(row["volume"])
+                            if "volume" in row and row["volume"] is not None
+                            else None
+                        ),
+                        "market_cap": (
+                            float(row["market_cap"])
+                            if "market_cap" in row and row["market_cap"] is not None
+                            else None
+                        ),
+                        "source": row["source"] if "source" in row else None,
+                    }
+                )
+        else:
+            history_dict = {}
+
         context = {
             "asset": asset,
             "time_frame": time_frame,
-            "historical_data": (
-                historical_data.to_dict() if historical_data is not None else {}
-            ),
+            "historical_data": history_dict,
         }
 
         # 调用AI服务进行分析
         analysis = await ai_service.analyze("market_prediction", context)
 
-        return {
-            "asset": asset,
-            "time_frame": time_frame,
+        # 确保analysis中的所有数据都被正确转换
+        analysis_dict = {
             "predictions": analysis.predictions,
             "insights": analysis.insights,
             "recommendations": analysis.recommendations,
             "confidence": analysis.confidence,
         }
+
+        # 转换所有时间戳为ISO格式
+        converted_analysis = _convert_timestamps_to_iso(analysis_dict)
+
+        result = {
+            "asset": asset,
+            "time_frame": time_frame,
+            "predictions": converted_analysis["predictions"],
+            "insights": converted_analysis["insights"],
+            "recommendations": converted_analysis["recommendations"],
+            "confidence": converted_analysis["confidence"],
+            "timestamp": _convert_timestamp(datetime.now()),
+        }
+
+        return result
     except Exception as e:
         logger.error(f"预测市场趋势时出错: {str(e)}")
         raise HTTPException(status_code=500, detail=f"预测市场趋势失败: {str(e)}")

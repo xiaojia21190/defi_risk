@@ -1,8 +1,9 @@
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 from datetime import datetime
 import uuid
+from pydantic import BaseModel, Field
 
 
 class RiskLevel(Enum):
@@ -80,3 +81,42 @@ class Portfolio:
     total_value: float = 0.0  # 总价值
     timestamp: datetime = field(default_factory=datetime.utcnow)  # 时间戳
     metadata: Dict[str, Any] = field(default_factory=dict)  # 元数据
+
+
+class RiskMetrics(BaseModel):
+    """风险指标数据模型"""
+
+    price_volatility: float = Field(default=0.0, description="价格波动率(%)")
+    market_cap: float = Field(default=0.0, description="市值(USD)")
+    market_cap_rank: int = Field(default=0, description="市值排名")
+    volume_to_mcap_ratio: float = Field(default=0.0, description="交易量/市值比率")
+    tvl_stability: Optional[float] = Field(default=None, description="TVL稳定性(%)")
+    audit_score: Optional[int] = Field(default=None, description="审计评分")
+
+
+class RiskAnalysis(BaseModel):
+    """风险分析结果详情"""
+
+    market_cap_analysis: Optional[str] = None
+    liquidity_analysis: Optional[str] = None
+    volatility_analysis: Optional[str] = None
+    trend_analysis: Optional[str] = None
+    tvl_factor: Optional[str] = None
+    stability_factor: Optional[str] = None
+    audit_factor: Optional[str] = None
+    chain_factor: Optional[str] = None
+
+
+class RiskAnalysisResult(BaseModel):
+    """统一的风险分析结果模型"""
+
+    asset_id: str = Field(..., description="资产或协议标识符")
+    risk_score: float = Field(..., description="风险评分(0-100)")
+    risk_level: str = Field(..., description="风险等级(极低/低/中/高/极高)")
+    metrics: RiskMetrics = Field(..., description="风险指标数据")
+    analysis: RiskAnalysis = Field(..., description="风险分析详情")
+    recommendations: List[str] = Field(default_factory=list, description="风险建议")
+    confidence: Optional[float] = Field(default=None, description="AI分析可信度")
+    timestamp: datetime = Field(default_factory=datetime.now, description="分析时间戳")
+    raw_data: Optional[Dict] = Field(default=None, description="原始数据")
+    error: Optional[str] = Field(default=None, description="错误信息")

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import logging
 import math
 
-from backend.app.core.config import Settings
+from app.core.config import Settings
 
 logger = logging.getLogger("defi_risk.services.demo_data")
 

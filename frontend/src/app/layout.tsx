@@ -13,6 +13,10 @@ const inter = Inter({
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f8fafc" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f172a" },
+  ],
 };
 
 export const metadata: Metadata = {
@@ -20,10 +24,6 @@ export const metadata: Metadata = {
   description: "全面的DeFi风险监控平台，帮助您分析和管理加密货币投资组合的风险",
   keywords: "DeFi, 风险监控, 加密货币, 区块链, 投资组合分析",
   authors: [{ name: "DeFi Risk Team" }],
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f8fafc" },
-    { media: "(prefers-color-scheme: dark)", color: "#0f172a" },
-  ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

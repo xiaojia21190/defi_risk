@@ -3,63 +3,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { apiService } from "../services/api";
 import { AlertTriangle, BarChart3, Lightbulb, CheckCircle, Bell, Wallet, Target, ArrowUpDown, Loader2, Filter, RefreshCw, Clock } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
-import { Badge } from "./ui/badge";
-import { Button } from "./ui/button";
-
-// 注意：由于缺少必要的UI组件库，我们将使用简化版的组件
-// 简化版Switch组件
-const Switch = ({ checked, onCheckedChange, size }: { checked: boolean; onCheckedChange: (checked: boolean) => void; size?: string }) => (
-  <button
-    type="button"
-    role="switch"
-    aria-checked={checked}
-    className={`relative inline-flex h-${size === "sm" ? "4" : "6"} w-${size === "sm" ? "8" : "11"} flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${checked ? 'bg-primary' : 'bg-gray-200'}`}
-    onClick={() => onCheckedChange(!checked)}
-  >
-    <span
-      className={`pointer-events-none inline-block h-${size === "sm" ? "3" : "5"} w-${size === "sm" ? "3" : "5"} transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${checked ? `translate-x-${size === "sm" ? "4" : "5"}` : 'translate-x-0'}`}
-    />
-  </button>
-);
-
-// 简化版Select组件
-const Select = ({ value, onValueChange, children }: { value: string; onValueChange: (value: string) => void; children: React.ReactNode }) => (
-  <select
-    value={value}
-    onChange={(e) => onValueChange(e.target.value)}
-    className="h-7 w-[90px] rounded-md border border-input bg-background px-2 py-1 text-sm"
-  >
-    {children}
-  </select>
-);
-
-const SelectTrigger = ({ children, className }: { children: React.ReactNode; className?: string }) => (
-  <div className={`flex items-center gap-1 ${className || ''}`}>
-    {children}
-  </div>
-);
-
-const SelectValue = ({ placeholder }: { placeholder: string }) => <span>{placeholder}</span>;
-
-const SelectContent = ({ children }: { children: React.ReactNode }) => <>{children}</>;
-
-const SelectItem = ({ value, children }: { value: string; children: React.ReactNode }) => (
-  <option value={value}>{children}</option>
-);
-
-// 简化版Tooltip组件
-const TooltipProvider = ({ children }: { children: React.ReactNode }) => <>{children}</>;
-
-const Tooltip = ({ children }: { children: React.ReactNode }) => <>{children}</>;
-
-const TooltipTrigger = ({ asChild, children }: { asChild?: boolean; children: React.ReactNode }) => <>{children}</>;
-
-const TooltipContent = ({ children }: { children: React.ReactNode }) => (
-  <div className="absolute bottom-full mb-2 rounded-md bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md">
-    {children}
-  </div>
-);
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 interface AlertsListProps {
   address?: string;
@@ -101,48 +51,48 @@ interface AlertStats {
 
 interface SeverityConfig {
   label: string;
-  color: string;
+  color: "destructive" | "secondary" | "default" | "outline";
   icon: React.ReactNode;
 }
 
 const severityConfigs: Record<string, SeverityConfig> = {
   high: {
     label: "高",
-    color: "bg-destructive text-destructive-foreground",
-    icon: <AlertTriangle className="h-4 w-4" />,
+    color: "destructive",
+    icon: <AlertTriangle className="w-4 h-4" />,
   },
   medium: {
     label: "中",
-    color: "bg-amber-500 text-white",
-    icon: <Bell className="h-4 w-4" />,
+    color: "secondary",
+    icon: <Bell className="w-4 h-4" />,
   },
   low: {
     label: "低",
-    color: "bg-green-500 text-white",
-    icon: <CheckCircle className="h-4 w-4" />,
+    color: "default",
+    icon: <CheckCircle className="w-4 h-4" />,
   },
 };
 
 const typeConfigs: Record<string, { label: string; icon: React.ReactNode }> = {
   liquidation: {
     label: "清算风险",
-    icon: <Target className="h-4 w-4" />,
+    icon: <Target className="w-4 h-4" />,
   },
   marketVolatility: {
     label: "市场波动",
-    icon: <BarChart3 className="h-4 w-4" />,
+    icon: <BarChart3 className="w-4 h-4" />,
   },
   technicalSignal: {
     label: "技术信号",
-    icon: <ArrowUpDown className="h-4 w-4" />,
+    icon: <ArrowUpDown className="w-4 h-4" />,
   },
   riskWarning: {
     label: "风险警告",
-    icon: <AlertTriangle className="h-4 w-4" />,
+    icon: <AlertTriangle className="w-4 h-4" />,
   },
   opportunityAlert: {
     label: "机会提示",
-    icon: <Lightbulb className="h-4 w-4" />,
+    icon: <Lightbulb className="w-4 h-4" />,
   },
 };
 
@@ -247,13 +197,13 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
       // 计算统计数据
       const newStats: AlertStats = {
         total: formattedAlerts.length,
-        high: formattedAlerts.filter(a => a.severity === "high").length,
-        medium: formattedAlerts.filter(a => a.severity === "medium").length,
-        low: formattedAlerts.filter(a => a.severity === "low").length,
+        high: formattedAlerts.filter((a) => a.severity === "high").length,
+        medium: formattedAlerts.filter((a) => a.severity === "medium").length,
+        low: formattedAlerts.filter((a) => a.severity === "low").length,
         byType: {},
       };
 
-      formattedAlerts.forEach(alert => {
+      formattedAlerts.forEach((alert) => {
         newStats.byType[alert.type] = (newStats.byType[alert.type] || 0) + 1;
       });
 
@@ -284,7 +234,7 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
   };
 
   // 过滤警报
-  const filteredAlerts = alerts.filter(alert => {
+  const filteredAlerts = alerts.filter((alert) => {
     const matchesSeverity = !filter.severity || alert.severity === filter.severity;
     const matchesType = !filter.type || alert.type === filter.type;
     return matchesSeverity && matchesType;
@@ -303,43 +253,29 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
   return (
     <Card>
       <CardHeader>
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
           <div>
             <CardTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              <AlertTriangle className="w-5 h-5 text-amber-500" />
               风险警报
               {stats.total > 0 && (
-                <Badge className="ml-2 bg-amber-500">
+                <Badge variant="secondary" className="ml-2">
                   {stats.total}
                 </Badge>
               )}
             </CardTitle>
-            <CardDescription>
-              监控您的DeFi投资风险和市场变化
-            </CardDescription>
+            <CardDescription>监控您的DeFi投资风险和市场变化</CardDescription>
           </div>
 
-          <div className="flex items-center gap-2">
-            {lastRefreshTime && (
-              <span className="text-xs text-muted-foreground hidden sm:inline-block">
-                上次更新: {lastRefreshTime}
-              </span>
-            )}
+          <div className="flex items-center gap-4">
+            {lastRefreshTime && <span className="hidden text-xs text-muted-foreground sm:inline-block">上次更新: {lastRefreshTime}</span>}
 
             <div className="flex items-center gap-2">
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button
-                      className="gap-1"
-                      onClick={handleRefresh}
-                      disabled={refreshing || loading}
-                    >
-                      {refreshing ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-3.5 w-3.5" />
-                      )}
+                    <Button variant="outline" size="sm" className="gap-1" onClick={handleRefresh} disabled={refreshing || loading}>
+                      {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                       <span className="hidden sm:inline-block">刷新</span>
                     </Button>
                   </TooltipTrigger>
@@ -349,42 +285,33 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
                 </Tooltip>
               </TooltipProvider>
 
-              <div className="flex items-center gap-2 bg-secondary/50 px-2 py-1 rounded-md">
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div className="flex items-center gap-1.5">
-                        <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-                        <Switch
-                          checked={autoRefresh}
-                          onCheckedChange={toggleAutoRefresh}
-                          size="sm"
-                        />
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>自动刷新警报</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex items-center gap-1.5">
+                      <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                      <Switch checked={autoRefresh} onCheckedChange={toggleAutoRefresh} />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>自动刷新警报</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
 
-                {autoRefresh && (
-                  <Select
-                    value={refreshInterval.toString()}
-                    onValueChange={handleIntervalChange}
-                  >
-                    <SelectTrigger className="h-7 w-[90px]">
-                      <SelectValue placeholder="刷新间隔" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="30">30秒</SelectItem>
-                      <SelectItem value="60">1分钟</SelectItem>
-                      <SelectItem value="300">5分钟</SelectItem>
-                      <SelectItem value="600">10分钟</SelectItem>
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
+              {autoRefresh && (
+                <Select value={refreshInterval.toString()} onValueChange={handleIntervalChange}>
+                  <SelectTrigger className="h-7 w-[90px]">
+                    <SelectValue placeholder="刷新间隔" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="30">30秒</SelectItem>
+                    <SelectItem value="60">1分钟</SelectItem>
+                    <SelectItem value="300">5分钟</SelectItem>
+                    <SelectItem value="600">10分钟</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
             </div>
           </div>
         </div>
@@ -394,42 +321,34 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
         {/* 过滤器 */}
         <div className="flex flex-wrap gap-2 mb-4">
           <div>
-            <span className="text-xs text-muted-foreground mr-2">严重性:</span>
+            <span className="mr-2 text-xs text-muted-foreground">严重性:</span>
             <div className="flex gap-1 mt-1">
-              <Badge
-                className={`cursor-pointer ${!filter.severity ? "bg-primary" : "bg-secondary"}`}
-                onClick={() => setFilter({ ...filter, severity: null })}
-              >
+              <Badge variant={!filter.severity ? "default" : "secondary"} className="cursor-pointer" onClick={() => setFilter({ ...filter, severity: null })}>
                 全部
               </Badge>
               {Object.entries(severityConfigs).map(([key, config]) => (
-                <Badge
-                  key={key}
-                  className={`cursor-pointer ${filter.severity === key ? config.color : "bg-secondary"}`}
-                  onClick={() => setFilter({ ...filter, severity: key as Alert["severity"] })}
-                >
-                  {config.label}
+                <Badge key={key} variant={filter.severity === key ? (key === "high" ? "destructive" : key === "medium" ? "secondary" : "default") : "outline"} className="cursor-pointer" onClick={() => setFilter({ ...filter, severity: key as Alert["severity"] })}>
+                  <div className="flex items-center gap-1">
+                    {config.icon}
+                    <span>{config.label}</span>
+                  </div>
                 </Badge>
               ))}
             </div>
           </div>
 
           <div className="ml-auto">
-            <span className="text-xs text-muted-foreground mr-2">类型:</span>
+            <span className="mr-2 text-xs text-muted-foreground">类型:</span>
             <div className="flex flex-wrap gap-1 mt-1">
-              <Badge
-                className={`cursor-pointer ${!filter.type ? "bg-primary" : "bg-secondary"}`}
-                onClick={() => setFilter({ ...filter, type: null })}
-              >
+              <Badge variant={!filter.type ? "default" : "secondary"} className="cursor-pointer" onClick={() => setFilter({ ...filter, type: null })}>
                 全部
               </Badge>
               {Object.entries(typeConfigs).map(([key, config]) => (
-                <Badge
-                  key={key}
-                  className={`cursor-pointer ${filter.type === key ? "bg-primary" : "bg-secondary"}`}
-                  onClick={() => setFilter({ ...filter, type: key as Alert["type"] })}
-                >
-                  {config.label}
+                <Badge key={key} variant={filter.type === key ? "default" : "secondary"} className="cursor-pointer" onClick={() => setFilter({ ...filter, type: key as Alert["type"] })}>
+                  <div className="flex items-center gap-1">
+                    {config.icon}
+                    <span>{config.label}</span>
+                  </div>
                 </Badge>
               ))}
             </div>
@@ -438,7 +357,7 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
 
         {/* 警报统计 */}
         {stats.total > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 gap-4 mb-6 md:grid-cols-4">
             <Card className="bg-secondary/30">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
@@ -446,43 +365,43 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
                     <p className="text-sm text-muted-foreground">总警报</p>
                     <p className="text-2xl font-bold">{stats.total}</p>
                   </div>
-                  <Bell className="h-8 w-8 text-primary opacity-80" />
+                  <Bell className="w-8 h-8 text-primary opacity-80" />
                 </div>
               </CardContent>
             </Card>
 
-            <Card className={`${stats.high > 0 ? "bg-destructive/10" : "bg-secondary/30"}`}>
+            <Card className={cn("transition-colors", stats.high > 0 ? "bg-destructive/10" : "bg-secondary/30")}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">高风险</p>
-                    <p className={`text-2xl font-bold ${stats.high > 0 ? "text-destructive" : ""}`}>{stats.high}</p>
+                    <p className={cn("text-2xl font-bold", stats.high > 0 && "text-destructive")}>{stats.high}</p>
                   </div>
-                  <AlertTriangle className={`h-8 w-8 opacity-80 ${stats.high > 0 ? "text-destructive" : "text-muted-foreground"}`} />
+                  <AlertTriangle className={cn("h-8 w-8 opacity-80", stats.high > 0 ? "text-destructive" : "text-muted-foreground")} />
                 </div>
               </CardContent>
             </Card>
 
-            <Card className={`${stats.medium > 0 ? "bg-amber-500/10" : "bg-secondary/30"}`}>
+            <Card className={cn("transition-colors", stats.medium > 0 ? "bg-amber-500/10" : "bg-secondary/30")}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">中风险</p>
-                    <p className={`text-2xl font-bold ${stats.medium > 0 ? "text-amber-500" : ""}`}>{stats.medium}</p>
+                    <p className={cn("text-2xl font-bold", stats.medium > 0 && "text-amber-500")}>{stats.medium}</p>
                   </div>
-                  <Bell className={`h-8 w-8 opacity-80 ${stats.medium > 0 ? "text-amber-500" : "text-muted-foreground"}`} />
+                  <Bell className={cn("h-8 w-8 opacity-80", stats.medium > 0 ? "text-amber-500" : "text-muted-foreground")} />
                 </div>
               </CardContent>
             </Card>
 
-            <Card className={`${stats.low > 0 ? "bg-green-500/10" : "bg-secondary/30"}`}>
+            <Card className={cn("transition-colors", stats.low > 0 ? "bg-green-500/10" : "bg-secondary/30")}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">低风险</p>
-                    <p className={`text-2xl font-bold ${stats.low > 0 ? "text-green-500" : ""}`}>{stats.low}</p>
+                    <p className={cn("text-2xl font-bold", stats.low > 0 && "text-green-500")}>{stats.low}</p>
                   </div>
-                  <CheckCircle className={`h-8 w-8 opacity-80 ${stats.low > 0 ? "text-green-500" : "text-muted-foreground"}`} />
+                  <CheckCircle className={cn("h-8 w-8 opacity-80", stats.low > 0 ? "text-green-500" : "text-muted-foreground")} />
                 </div>
               </CardContent>
             </Card>
@@ -491,26 +410,22 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
 
         {/* 警报列表 */}
         {loading ? (
-          <div className="flex justify-center items-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
           </div>
         ) : error ? (
-          <div className="text-center py-8">
-            <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-2" />
+          <div className="py-8 text-center">
+            <AlertTriangle className="w-8 h-8 mx-auto mb-2 text-destructive" />
             <p className="text-muted-foreground">{error}</p>
             <Button className="mt-4" onClick={handleRefresh}>
               重试
             </Button>
           </div>
         ) : filteredAlerts.length === 0 ? (
-          <div className="text-center py-12">
-            <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4 opacity-80" />
-            <h3 className="text-lg font-medium mb-2">暂无警报</h3>
-            <p className="text-muted-foreground">
-              {stats.total > 0
-                ? "没有符合当前筛选条件的警报"
-                : "您的投资组合目前没有任何风险警报"}
-            </p>
+          <div className="py-12 text-center">
+            <CheckCircle className="w-12 h-12 mx-auto mb-4 text-green-500 opacity-80" />
+            <h3 className="mb-2 text-lg font-medium">暂无警报</h3>
+            <p className="text-muted-foreground">{stats.total > 0 ? "没有符合当前筛选条件的警报" : "您的投资组合目前没有任何风险警报"}</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -520,38 +435,34 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
 
               return (
                 <Card key={alert.id} className="overflow-hidden">
-                  <div className={`h-1 ${severityConfig.color}`} />
+                  <div className={cn("h-1", severityConfig.color)} />
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
-                          <Badge className={severityConfig.color}>
-                            <div className="flex items-center gap-1">
-                              {severityConfig.icon}
-                              <span>{severityConfig.label}</span>
-                            </div>
+                          <Badge variant={severityConfig.color} className="flex items-center gap-1">
+                            {severityConfig.icon}
+                            <span>{severityConfig.label}</span>
                           </Badge>
-                          <Badge className="flex items-center gap-1 bg-secondary">
+                          <Badge variant="secondary" className="flex items-center gap-1">
                             {typeConfig.icon}
                             <span>{typeConfig.label}</span>
                           </Badge>
-                          <span className="text-xs text-muted-foreground ml-auto">
-                            {formatTimestamp(alert.timestamp)}
-                          </span>
+                          <span className="ml-auto text-xs text-muted-foreground">{formatTimestamp(alert.timestamp)}</span>
                         </div>
 
-                        <h4 className="font-medium mb-1">{alert.message}</h4>
+                        <h4 className="mb-1 font-medium">{alert.message}</h4>
 
                         <div className="flex flex-wrap gap-2 mt-2">
-                          <Badge className="text-xs bg-secondary">
+                          <Badge variant="secondary" className="text-xs">
                             协议: {alert.protocol}
                           </Badge>
-                          <Badge className="text-xs bg-secondary">
+                          <Badge variant="secondary" className="text-xs">
                             资产: {alert.asset}
                           </Badge>
                         </div>
 
-                        {alert.details && alert.details.recommendation && (
+                        {alert.details?.recommendation && (
                           <div className="mt-3 text-sm text-muted-foreground">
                             <span className="font-medium">建议: </span>
                             {alert.details.recommendation}

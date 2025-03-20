@@ -2,9 +2,10 @@
 
 import React from "react";
 import { Portfolio, MarketPrediction } from "../services/api";
-import { AlertTriangle, Shield, TrendingDown, Zap, BarChart3, DollarSign, Percent, ChartBar, Target, Wallet } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
-import { Badge } from "./ui/badge";
+import { AlertTriangle, Shield, TrendingDown, Zap, BarChart3, DollarSign, Percent, ChartBar, Target, Wallet, Loader2 } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 interface Position {
   protocol: string;
@@ -15,10 +16,13 @@ interface Position {
 }
 
 interface RiskMonitorProps {
-  portfolio: Portfolio | null;
+  portfolio: Portfolio;
+  analyzing: boolean;
+  completed: boolean;
+  onAnalyze: () => Promise<void>;
 }
 
-const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
+const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, analyzing, completed, onAnalyze }) => {
   if (!portfolio) {
     return (
       <Card>
@@ -60,22 +64,26 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
     const factors = [];
 
     // 检查高杠杆头寸
-    const highLeveragePositions = portfolio.positions.filter(pos => pos.leverage && pos.leverage > 2);
+    const highLeveragePositions = portfolio.positions.filter((pos) => pos.leverage && pos.leverage > 2);
     if (highLeveragePositions.length > 0) {
       factors.push({
         name: "高杠杆头寸",
         description: `${highLeveragePositions.length}个头寸使用了超过2倍的杠杆`,
         severity: "high",
-        icon: <Zap className="h-4 w-4" />,
+        icon: <Zap className="w-4 h-4" />,
       });
     }
 
     // 检查资产集中度
     const totalValue = portfolio.total_value;
-    const largePositions = portfolio.positions.filter(pos => {
+    const largePositions = portfolio.positions.filter((pos) => {
+      if (!pos.amount) return false;
+
       const asset = pos.asset.split("/")[0];
       const marketAnalysis = portfolio.market_analysis[asset];
-      const value = pos.amount * (marketAnalysis?.current_price || 0);
+      const currentPrice = marketAnalysis?.current_price ?? 0;
+      const value = pos.amount * currentPrice;
+
       return value / totalValue > 0.3; // 单一资产超过30%
     });
 
@@ -84,12 +92,12 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
         name: "资产集中度高",
         description: `${largePositions.length}个资产占比超过30%`,
         severity: "medium",
-        icon: <Target className="h-4 w-4" />,
+        icon: <Target className="w-4 h-4" />,
       });
     }
 
     // 检查高波动性资产
-    const volatileAssets = portfolio.positions.filter(pos => {
+    const volatileAssets = portfolio.positions.filter((pos) => {
       const asset = pos.asset.split("/")[0];
       const marketAnalysis = portfolio.market_analysis[asset];
       return marketAnalysis?.volatility_30d && marketAnalysis.volatility_30d > 0.1; // 30天波动率超过10%
@@ -100,7 +108,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
         name: "高波动性资产",
         description: `${volatileAssets.length}个资产30天波动率超过10%`,
         severity: "medium",
-        icon: <BarChart3 className="h-4 w-4" />,
+        icon: <BarChart3 className="w-4 h-4" />,
       });
     }
 
@@ -110,7 +118,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
         name: "风险较低",
         description: "当前投资组合风险较低",
         severity: "low",
-        icon: <Shield className="h-4 w-4" />,
+        icon: <Shield className="w-4 h-4" />,
       });
     }
 
@@ -130,16 +138,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
       <CardContent>
         <div className="mb-6">
           <div className="w-full bg-muted/30 rounded-full h-2.5 mb-2">
-            <div
-              className={`h-2.5 rounded-full ${
-                color === "destructive"
-                  ? "bg-destructive"
-                  : color === "warning"
-                    ? "bg-warning"
-                    : "bg-success"
-              }`}
-              style={{ width: `${riskScore * 100}%` }}
-            />
+            <div className={`h-2.5 rounded-full ${color === "destructive" ? "bg-destructive" : color === "warning" ? "bg-warning" : "bg-success"}`} style={{ width: `${riskScore * 100}%` }} />
           </div>
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>低风险</span>
@@ -149,31 +148,20 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
         </div>
 
         <div className="space-y-4">
-          <h3 className="text-sm font-medium">风险因素</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium">风险因素</h3>
+            <Button onClick={onAnalyze} disabled={analyzing} variant="outline" size="sm" className="gap-2">
+              {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
+              {analyzing ? "分析中..." : completed ? "更新分析" : "开始分析"}
+            </Button>
+          </div>
           {riskFactors.map((factor, index) => (
-            <div
-              key={index}
-              className={`p-3 rounded-lg border ${
-                factor.severity === "high"
-                  ? "border-destructive/50 bg-destructive/10"
-                  : factor.severity === "medium"
-                    ? "border-warning/50 bg-warning/10"
-                    : "border-success/50 bg-success/10"
-              }`}
-            >
+            <div key={index} className={`p-3 rounded-lg border ${factor.severity === "high" ? "border-destructive/50 bg-destructive/10" : factor.severity === "medium" ? "border-warning/50 bg-warning/10" : "border-success/50 bg-success/10"}`}>
               <div className="flex items-start gap-3">
-                <div className={`p-1.5 rounded-full ${
-                  factor.severity === "high"
-                    ? "bg-destructive/20 text-destructive"
-                    : factor.severity === "medium"
-                      ? "bg-warning/20 text-warning"
-                      : "bg-success/20 text-success"
-                }`}>
-                  {factor.icon}
-                </div>
+                <div className={`p-1.5 rounded-full ${factor.severity === "high" ? "bg-destructive/20 text-destructive" : factor.severity === "medium" ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}`}>{factor.icon}</div>
                 <div>
-                  <h4 className="font-medium text-sm">{factor.name}</h4>
-                  <p className="text-xs text-muted-foreground mt-1">{factor.description}</p>
+                  <h4 className="text-sm font-medium">{factor.name}</h4>
+                  <p className="mt-1 text-xs text-muted-foreground">{factor.description}</p>
                 </div>
               </div>
             </div>
@@ -181,7 +169,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio }) => {
         </div>
 
         <div className="mt-6">
-          <h3 className="text-sm font-medium mb-3">优化建议</h3>
+          <h3 className="mb-3 text-sm font-medium">优化建议</h3>
           <ul className="space-y-2 text-sm">
             {portfolio.recommendations.map((recommendation, index) => (
               <li key={index} className="flex items-start gap-2">

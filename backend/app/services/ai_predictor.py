@@ -1423,13 +1423,19 @@ class AiPredictor:
         分析资产相关性风险
 
         Args:
-            data: 包含资产列表和权重的数据，格式为 {"assets": ["BTC", "ETH", ...], "weights": {"BTC": 0.4, "ETH": 0.3, ...}}
+            data: 包含资产列表和权重的数据，格式为
+                 {"assets": ["BTC", "ETH", ...],
+                  "weights": {"BTC": 0.4, "ETH": 0.3, ...},
+                  "correlation_type": "asset_correlation"|"investment_type_correlation"|"protocol_correlation"}
 
         Returns:
             Dict: 相关性风险分析结果
         """
         try:
-            self.logger.info("开始分析资产相关性风险")
+            # 获取相关性分析类型，默认为资产相关性
+            correlation_type = data.get("correlation_type", "asset_correlation")
+
+            self.logger.info(f"开始分析相关性风险，类型: {correlation_type}")
 
             # 提取资产列表和权重
             assets = data.get("assets", [])
@@ -1438,10 +1444,20 @@ class AiPredictor:
             if not assets or len(assets) < 2:
                 return {
                     "risk_score": 50,
-                    "description": "无法分析资产相关性风险，资产数量不足",
+                    "description": "无法分析相关性风险，资产数量不足",
                     "trend": "稳定",
                     "data_points": [],
                 }
+
+            # 根据不同的相关性类型提供不同的分析描述
+            type_descriptions = {
+                "asset_correlation": "资产间相关性",
+                "investment_type_correlation": "投资类型相关性",
+                "protocol_correlation": "协议间相关性",
+                "correlation_risk": "整体相关性",
+            }
+
+            analysis_description = type_descriptions.get(correlation_type, "相关性")
 
             # 模拟相关性矩阵（实际应用中应该使用真实的历史数据计算相关性）
             # 这里使用一个简化的模型，假设大多数加密资产之间有中高度相关性
@@ -1450,15 +1466,27 @@ class AiPredictor:
             avg_correlation = 0
             correlation_count = 0
 
+            # 为不同类型的相关性分析设置不同的相关系数基准
+            correlation_base = 0.5  # 默认基准
+            correlation_range = 0.4  # 默认范围
+
+            if correlation_type == "investment_type_correlation":
+                correlation_base = 0.4  # 投资类型间相关性较低
+                correlation_range = 0.3
+            elif correlation_type == "protocol_correlation":
+                correlation_base = 0.6  # 协议间相关性较高
+                correlation_range = 0.3
+
             # 生成相关性矩阵
             for i in range(len(assets)):
                 for j in range(i + 1, len(assets)):
                     asset1 = assets[i]
                     asset2 = assets[j]
 
-                    # 模拟相关系数（实际应该基于历史价格数据计算）
-                    # 这里假设大多数加密资产之间的相关性在0.5-0.9之间
-                    correlation = 0.5 + np.random.random() * 0.4
+                    # 根据相关性类型调整相关系数计算
+                    correlation = (
+                        correlation_base + np.random.random() * correlation_range
+                    )
 
                     # 存储相关系数
                     if asset1 not in correlation_matrix:
@@ -1469,13 +1497,17 @@ class AiPredictor:
                     avg_correlation += correlation
                     correlation_count += 1
 
-                    # 检查高相关性对
+                    # 标记高相关性资产对
                     if correlation > 0.7:
                         high_correlation_pairs.append(
                             {
-                                "asset1": asset1,
-                                "asset2": asset2,
+                                "asset_pair": f"{asset1}-{asset2}",
                                 "correlation": correlation,
+                                "weight": (
+                                    weights.get(asset1, 1 / len(assets))
+                                    + weights.get(asset2, 1 / len(assets))
+                                )
+                                / 2,
                             }
                         )
 
@@ -1483,46 +1515,63 @@ class AiPredictor:
             if correlation_count > 0:
                 avg_correlation = avg_correlation / correlation_count
             else:
-                avg_correlation = 0
+                avg_correlation = 0.5  # 默认值
 
-            # 计算风险评分
-            correlation_score = min(100, avg_correlation * 100)
+            # 基于相关性分析计算风险分数
+            # 相关性越高，风险分数越高
+            correlation_score = avg_correlation * 100
 
             # 生成描述
             if correlation_score > 75:
-                description = "投资组合中资产高度相关，缺乏多样性保护"
+                description = (
+                    f"投资组合中{analysis_description}高度相关，缺乏多样性保护"
+                )
                 trend = "上升"
             elif correlation_score > 50:
-                description = "投资组合中资产相关性较高，多样化效果有限"
+                description = f"投资组合中{analysis_description}较高，多样化效果有限"
                 trend = "稳定"
             elif correlation_score > 25:
-                description = "投资组合中资产相关性适中，有一定多样化效果"
+                description = f"投资组合中{analysis_description}适中，有一定多样化效果"
                 trend = "稳定"
             else:
-                description = "投资组合中资产相关性低，多样化效果良好"
+                description = f"投资组合中{analysis_description}低，多样化效果良好"
                 trend = "下降"
 
             # 添加高相关性对的信息
             if high_correlation_pairs:
-                description += f"，发现{len(high_correlation_pairs)}对高相关性资产"
+                description += f"，存在{len(high_correlation_pairs)}对高相关性资产"
 
-            # 构建数据点
-            data_points = [
+            # 创建数据点
+            data_points = []
+
+            # 添加高相关性对
+            for pair in high_correlation_pairs:
+                data_points.append(pair)
+
+            # 添加平均相关系数
+            data_points.append(
                 {
-                    "asset_pair": f"{pair['asset1']}-{pair['asset2']}",
-                    "correlation": pair["correlation"],
+                    "avg_correlation": avg_correlation,
+                    "correlation_score": correlation_score,
+                    "high_correlation_pairs_count": len(high_correlation_pairs),
+                    "correlation_type": correlation_type,
                 }
-                for pair in high_correlation_pairs
-            ]
-            data_points.append({"avg_correlation": avg_correlation})
+            )
 
-            return {
+            # 构建结果
+            result = {
                 "risk_score": correlation_score,
                 "description": description,
                 "trend": trend,
                 "data_points": data_points,
                 "correlation_matrix": correlation_matrix,
+                "correlation_type": correlation_type,
             }
+
+            self.logger.info(
+                f"{correlation_type}风险分析完成: 评分={correlation_score:.2f}"
+            )
+            return result
         except Exception as e:
             self.logger.error(f"分析资产相关性风险时出错: {str(e)}")
             return {

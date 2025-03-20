@@ -2,16 +2,94 @@
 
 import React from "react";
 import { Portfolio } from "../services/api";
-import { PieChart } from "react-minimal-pie-chart";
-import { TrendingUp, Wallet, BarChart3, Percent, ChartBar, Target, DollarSign, ArrowUpDown } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
-import { Badge } from "./ui/badge";
+import { TrendingUp, Wallet, BarChart3, Percent, ChartBar, Target, DollarSign, ArrowUpDown, Loader2 } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
+
+// 使用简单的自定义饼图组件
+const SimplePieChart: React.FC<{
+  data: Array<{
+    title: string;
+    value: number;
+    color: string;
+  }>;
+  total: number;
+}> = ({ data, total }) => {
+  const totalValue = total || data.reduce((sum, item) => sum + item.value, 0);
+
+  return (
+    <div className="relative w-full h-full">
+      <svg viewBox="0 0 100 100" className="w-full h-full transform -rotate-90">
+        {data.map((item, index) => {
+          const previousItems = data.slice(0, index);
+          const startAngle = (previousItems.reduce((sum, prev) => sum + prev.value, 0) / totalValue) * 360;
+          const angle = (item.value / totalValue) * 360;
+
+          const x1 = 50 + 40 * Math.cos((startAngle * Math.PI) / 180);
+          const y1 = 50 + 40 * Math.sin((startAngle * Math.PI) / 180);
+          const x2 = 50 + 40 * Math.cos(((startAngle + angle) * Math.PI) / 180);
+          const y2 = 50 + 40 * Math.sin(((startAngle + angle) * Math.PI) / 180);
+
+          const largeArcFlag = angle > 180 ? 1 : 0;
+
+          const pathData = [`M 50 50`, `L ${x1} ${y1}`, `A 40 40 0 ${largeArcFlag} 1 ${x2} ${y2}`, `L 50 50`].join(" ");
+
+          return <path key={item.title} d={pathData} fill={item.color} stroke="white" strokeWidth="0.5" />;
+        })}
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+        {data.map((item) => {
+          const percentage = (item.value / totalValue) * 100;
+          if (percentage > 5) {
+            return (
+              <div key={item.title} className="text-xs font-medium text-white" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>
+                {item.title}
+                <br />
+                {percentage.toFixed(1)}%
+              </div>
+            );
+          }
+          return null;
+        })}
+      </div>
+    </div>
+  );
+};
 
 interface PortfolioOverviewProps {
   portfolio: Portfolio | null;
+  loading?: boolean;
+  error?: string | null;
 }
 
-const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
+const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loading, error }) => {
+  if (loading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>投资组合概览</CardTitle>
+          <CardDescription>加载中...</CardDescription>
+        </CardHeader>
+        <CardContent className="flex items-center justify-center py-8">
+          <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>投资组合概览</CardTitle>
+          <CardDescription className="text-destructive">{error}</CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
   if (!portfolio) {
     return (
       <Card>
@@ -26,9 +104,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
   // 计算每个协议的总价值
   const protocolValues = portfolio.positions.reduce((acc, pos) => {
     // 获取资产符号，优先使用tokenList
-    const assetSymbol = pos.tokenList && pos.tokenList.length > 0
-      ? pos.tokenList[0].tokenSymbol.split("/")[0]
-      : pos.asset.split("/")[0];
+    const assetSymbol = pos.tokenList && pos.tokenList.length > 0 ? pos.tokenList[0].tokenSymbol.split("/")[0] : pos.asset.split("/")[0];
 
     const marketAnalysis = portfolio.market_analysis[assetSymbol];
 
@@ -67,9 +143,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
   // 计算资产类型分布
   const assetTypeDistribution = portfolio.positions.reduce((acc, pos) => {
     // 获取资产符号，优先使用tokenList
-    const assetSymbol = pos.tokenList && pos.tokenList.length > 0
-      ? pos.tokenList[0].tokenSymbol.split("/")[0]
-      : pos.asset.split("/")[0];
+    const assetSymbol = pos.tokenList && pos.tokenList.length > 0 ? pos.tokenList[0].tokenSymbol.split("/")[0] : pos.asset.split("/")[0];
 
     const marketAnalysis = portfolio.market_analysis[assetSymbol];
 
@@ -113,7 +187,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
 
   // 计算APY趋势
   const calculateAPYTrend = () => {
-    const apys = portfolio.positions.map(pos => pos.apy || 0);
+    const apys = portfolio.positions.map((pos) => pos.apy || 0);
     const avgAPY = apys.reduce((sum, apy) => sum + apy, 0) / apys.length;
 
     if (avgAPY > 15) return "高";
@@ -123,10 +197,8 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
 
   // 计算杠杆使用情况
   const calculateLeverageUsage = () => {
-    const leveragedPositions = portfolio.positions.filter(pos => pos.leverage && pos.leverage > 1);
-    const avgLeverage = leveragedPositions.length > 0
-      ? leveragedPositions.reduce((sum, pos) => sum + (pos.leverage || 1), 0) / leveragedPositions.length
-      : 1;
+    const leveragedPositions = portfolio.positions.filter((pos) => pos.leverage && pos.leverage > 1);
+    const avgLeverage = leveragedPositions.length > 0 ? leveragedPositions.reduce((sum, pos) => sum + (pos.leverage || 1), 0) / leveragedPositions.length : 1;
 
     if (avgLeverage > 2) return "高";
     if (avgLeverage > 1.5) return "中";
@@ -135,13 +207,13 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
 
   // 计算多样性得分
   const calculateDiversityScore = () => {
-    const protocols = new Set(portfolio.positions.map(pos => pos.protocol)).size;
-    const assets = new Set(portfolio.positions.map(pos => pos.asset)).size;
+    const protocols = new Set(portfolio.positions.map((pos) => pos.protocol)).size;
+    const assets = new Set(portfolio.positions.map((pos) => pos.asset)).size;
 
     const protocolScore = Math.min(protocols / 3, 1); // 最多3个协议为满分
     const assetScore = Math.min(assets / 5, 1); // 最多5个资产为满分
 
-    const score = (protocolScore + assetScore) / 2 * 100;
+    const score = ((protocolScore + assetScore) / 2) * 100;
 
     if (score > 70) return "高";
     if (score > 40) return "中";
@@ -149,11 +221,11 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
   };
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('zh-CN', {
-      style: 'currency',
-      currency: 'USD',
+    return new Intl.NumberFormat("zh-CN", {
+      style: "currency",
+      currency: "USD",
       minimumFractionDigits: 2,
-      maximumFractionDigits: 2
+      maximumFractionDigits: 2,
     }).format(value);
   };
 
@@ -169,79 +241,57 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
     <Card>
       <CardHeader>
         <CardTitle>投资组合概览</CardTitle>
-        <CardDescription>
-          总资产价值: {formatCurrency(portfolio.total_value)}
-        </CardDescription>
+        <CardDescription>总资产价值: {formatCurrency(portfolio?.total_value || 0)}</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div>
-            <h3 className="text-lg font-medium mb-4">资产分布</h3>
-            <div className="w-full aspect-square max-w-[250px] mx-auto">
+            <h3 className="mb-4 text-lg font-medium">资产分布</h3>
+            <div className="w-full aspect-square max-w-[300px] mx-auto relative bg-slate-900 rounded-full">
               {pieData.length > 0 ? (
-                <PieChart
-                  data={pieData}
-                  lineWidth={40}
-                  paddingAngle={2}
-                  rounded
-                  label={({ dataEntry }) =>
-                    dataEntry.value > portfolio.total_value * 0.05 ? dataEntry.title : ''
-                  }
-                  labelStyle={{
-                    fontSize: '5px',
-                    fontWeight: 'bold',
-                    fill: '#fff',
-                  }}
-                  labelPosition={70}
-                />
+                <SimplePieChart data={pieData} total={portfolio?.total_value || 0} />
               ) : (
-                <div className="flex items-center justify-center h-full bg-muted/20 rounded-full">
+                <div className="flex items-center justify-center h-full rounded-full bg-muted/20">
                   <p className="text-muted-foreground">暂无数据</p>
                 </div>
               )}
             </div>
           </div>
           <div>
-            <h3 className="text-lg font-medium mb-4">投资组合指标</h3>
+            <h3 className="mb-4 text-lg font-medium">投资组合指标</h3>
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
-                  <div className="mr-2 p-2 bg-primary/10 rounded-full">
-                    <Percent className="h-5 w-5 text-primary" />
+                  <div className="p-2 mr-2 rounded-full bg-primary/20">
+                    <Percent className="w-5 h-5 text-primary" />
                   </div>
-                  <span>平均收益率</span>
+                  <span className="text-sm font-medium">平均收益率</span>
                 </div>
                 <div className="flex items-center">
-                  <span className="mr-2">{formatPercentage(totalAPY)}</span>
-                  <Badge variant={apyTrend === "高" ? "success" : apyTrend === "中" ? "warning" : "outline"}>
-                    {apyTrend}
-                  </Badge>
+                  <span className="mr-2 text-sm">{formatPercentage(totalAPY)}</span>
+                  <Badge variant={apyTrend === "高" ? "destructive" : apyTrend === "中" ? "secondary" : "outline"}>{apyTrend}</Badge>
                 </div>
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
-                  <div className="mr-2 p-2 bg-secondary/10 rounded-full">
-                    <Target className="h-5 w-5 text-secondary" />
+                  <div className="p-2 mr-2 rounded-full bg-secondary/20">
+                    <Target className="w-5 h-5 text-secondary" />
                   </div>
-                  <span>多样性</span>
+                  <span className="text-sm font-medium">杠杆使用</span>
                 </div>
                 <div className="flex items-center">
-                  <Badge variant={diversityScore === "高" ? "success" : diversityScore === "中" ? "warning" : "destructive"}>
-                    {diversityScore}
-                  </Badge>
+                  <Badge variant={leverageUsage === "高" ? "destructive" : leverageUsage === "中" ? "secondary" : "outline"}>{leverageUsage}</Badge>
                 </div>
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
-                  <div className="mr-2 p-2 bg-accent/10 rounded-full">
-                    <ArrowUpDown className="h-5 w-5 text-accent" />
+                  <div className="p-2 mr-2 rounded-full bg-primary/20">
+                    <BarChart3 className="w-5 h-5 text-primary" />
                   </div>
-                  <span>杠杆使用</span>
+                  <span className="text-sm font-medium">多样性得分</span>
                 </div>
                 <div className="flex items-center">
-                  <Badge variant={leverageUsage === "低" ? "success" : leverageUsage === "中" ? "warning" : "destructive"}>
-                    {leverageUsage}
-                  </Badge>
+                  <Badge variant={diversityScore === "高" ? "destructive" : diversityScore === "中" ? "secondary" : "outline"}>{diversityScore}</Badge>
                 </div>
               </div>
             </div>
@@ -249,25 +299,23 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
         </div>
 
         <div className="mt-6">
-          <h3 className="text-lg font-medium mb-4">资产列表</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left py-2 font-medium">资产</th>
-                  <th className="text-left py-2 font-medium">协议</th>
-                  <th className="text-left py-2 font-medium">类型</th>
-                  <th className="text-right py-2 font-medium">数量</th>
-                  <th className="text-right py-2 font-medium">价值</th>
-                  <th className="text-right py-2 font-medium">收益率</th>
-                </tr>
-              </thead>
-              <tbody>
+          <h3 className="mb-4 text-lg font-medium">资产列表</h3>
+          <div className="border rounded-md">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>资产</TableHead>
+                  <TableHead>协议</TableHead>
+                  <TableHead>类型</TableHead>
+                  <TableHead className="text-right">数量</TableHead>
+                  <TableHead className="text-right">价值</TableHead>
+                  <TableHead className="text-right">收益率</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {portfolio.positions.map((position, index) => {
                   // 获取资产符号，优先使用tokenList
-                  const assetSymbol = position.tokenList && position.tokenList.length > 0
-                    ? position.tokenList[0].tokenSymbol.split("/")[0]
-                    : position.asset.split("/")[0];
+                  const assetSymbol = position.tokenList && position.tokenList.length > 0 ? position.tokenList[0].tokenSymbol.split("/")[0] : position.asset.split("/")[0];
 
                   const marketAnalysis = portfolio.market_analysis[assetSymbol];
 
@@ -294,31 +342,21 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio }) => {
                   else if (position.invest_type === 6) investType = "借贷";
 
                   // 获取显示的资产名称
-                  const displayAsset = position.tokenList && position.tokenList.length > 0
-                    ? position.tokenList[0].tokenSymbol
-                    : position.asset;
+                  const displayAsset = position.tokenList && position.tokenList.length > 0 ? position.tokenList[0].tokenSymbol : position.asset;
 
                   return (
-                    <tr key={index} className="border-b hover:bg-muted/20">
-                      <td className="py-2">{displayAsset}</td>
-                      <td className="py-2">{position.protocol}</td>
-                      <td className="py-2">{investType}</td>
-                      <td className="py-2 text-right">{displayAmount}</td>
-                      <td className="py-2 text-right">{formatCurrency(value)}</td>
-                      <td className="py-2 text-right">
-                        {position.apy ? (
-                          <span className={position.apy > 0 ? "text-success" : "text-destructive"}>
-                            {formatPercentage(position.apy)}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </td>
-                    </tr>
+                    <TableRow key={index}>
+                      <TableCell>{displayAsset}</TableCell>
+                      <TableCell>{position.protocol}</TableCell>
+                      <TableCell>{investType}</TableCell>
+                      <TableCell className="text-right">{displayAmount}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(value)}</TableCell>
+                      <TableCell className="text-right">{position.apy ? <span className={cn(position.apy > 0 ? "text-green-500" : "text-red-500")}>{formatPercentage(position.apy)}</span> : <span className="text-muted-foreground">-</span>}</TableCell>
+                    </TableRow>
                   );
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         </div>
       </CardContent>

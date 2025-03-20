@@ -2,10 +2,10 @@
 
 import React, { useState, useEffect } from "react";
 import { apiService } from "../services/api";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Button } from "./ui/button";
-import { Badge } from "./ui/badge";
 import { Loader2, CheckCircle, XCircle } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 export const ApiTest: React.FC = () => {
   const [apiStatus, setApiStatus] = useState<"loading" | "connected" | "error">("loading");
@@ -42,7 +42,7 @@ export const ApiTest: React.FC = () => {
       const data = await apiService.getProtocols();
       return {
         success: data.protocols && data.protocols.length > 0,
-        message: `获取到${data.protocols.length}个协议`
+        message: `获取到${data.protocols.length}个协议`,
       };
     });
 
@@ -57,7 +57,7 @@ export const ApiTest: React.FC = () => {
       const data = await apiService.getMarketData("ETH");
       return {
         success: !!data,
-        message: `ETH价格: $${data.price}`
+        message: `ETH价格: $${data.price}`,
       };
     });
 
@@ -67,22 +67,22 @@ export const ApiTest: React.FC = () => {
   const testEndpoint = async (name: string, testFn: () => Promise<{ success: boolean; message: string }>) => {
     try {
       const result = await testFn();
-      setTestResults(prev => [
+      setTestResults((prev) => [
         ...prev,
         {
           endpoint: name,
           status: result.success ? "success" : "error",
-          message: result.message
-        }
+          message: result.message,
+        },
       ]);
     } catch (error) {
-      setTestResults(prev => [
+      setTestResults((prev) => [
         ...prev,
         {
           endpoint: name,
           status: "error",
-          message: error instanceof Error ? error.message : "未知错误"
-        }
+          message: error instanceof Error ? error.message : "未知错误",
+        },
       ]);
     }
   };
@@ -94,19 +94,19 @@ export const ApiTest: React.FC = () => {
           API连接测试
           {apiStatus === "loading" && (
             <Badge variant="outline" className="flex items-center gap-1">
-              <Loader2 className="h-3 w-3 animate-spin" />
+              <Loader2 className="w-3 h-3 animate-spin" />
               检查中
             </Badge>
           )}
           {apiStatus === "connected" && (
-            <Badge variant="success" className="flex items-center gap-1 bg-green-500">
-              <CheckCircle className="h-3 w-3" />
+            <Badge variant="default" className="flex items-center gap-1 bg-green-500">
+              <CheckCircle className="w-3 h-3" />
               已连接
             </Badge>
           )}
           {apiStatus === "error" && (
             <Badge variant="destructive" className="flex items-center gap-1">
-              <XCircle className="h-3 w-3" />
+              <XCircle className="w-3 h-3" />
               连接失败
             </Badge>
           )}
@@ -114,16 +114,10 @@ export const ApiTest: React.FC = () => {
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <p className="text-sm text-muted-foreground">
-              测试前端与后端API的连接状态
-            </p>
-            <Button
-              onClick={runApiTests}
-              disabled={isRunning || apiStatus === "loading"}
-              size="sm"
-            >
-              {isRunning && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">测试前端与后端API的连接状态</p>
+            <Button onClick={runApiTests} disabled={isRunning || apiStatus === "loading"} size="sm">
+              {isRunning && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               运行测试
             </Button>
           </div>
@@ -133,18 +127,12 @@ export const ApiTest: React.FC = () => {
               <h3 className="text-sm font-medium">测试结果:</h3>
               <div className="space-y-2">
                 {testResults.map((result, index) => (
-                  <div key={index} className="flex items-center justify-between text-sm border-b pb-2">
+                  <div key={index} className="flex items-center justify-between pb-2 text-sm border-b">
                     <div className="flex items-center gap-2">
-                      {result.status === "success" ? (
-                        <CheckCircle className="h-4 w-4 text-green-500" />
-                      ) : (
-                        <XCircle className="h-4 w-4 text-red-500" />
-                      )}
+                      {result.status === "success" ? <CheckCircle className="w-4 h-4 text-green-500" /> : <XCircle className="w-4 h-4 text-red-500" />}
                       <span>{result.endpoint}</span>
                     </div>
-                    <span className={result.status === "success" ? "text-green-500" : "text-red-500"}>
-                      {result.message}
-                    </span>
+                    <span className={result.status === "success" ? "text-green-500" : "text-red-500"}>{result.message}</span>
                   </div>
                 ))}
               </div>

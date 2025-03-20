@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.endpoints import portfolio, market, protocol, wallet, demo
+from app.api.endpoints import market, protocol, wallet, demo
 from app.core.config import settings
 
 

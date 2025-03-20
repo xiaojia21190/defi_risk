@@ -1,3 +1,19 @@
+# 处理Windows平台下的事件循环问题
+import platform
+
+
+if platform.system() == "Windows":
+    import asyncio
+
+    try:
+        # 尝试使用SelectorEventLoop
+        import asyncio
+
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        print("Windows平台：已设置SelectorEventLoop策略，解决aiodns兼容性问题")
+    except Exception as e:
+        print(f"设置Windows事件循环失败: {e}")
+
 from typing import Dict, List, Any, Optional
 import aiohttp
 import json
@@ -5,7 +21,6 @@ import os
 import logging
 from datetime import datetime
 import uuid
-import asyncio
 from app.models.domain.ai import AiAnalysis, AiPrediction, AiInsight, AiRequest
 from app.core.config import settings
 
@@ -78,29 +93,30 @@ class AiService:
         self, analysis_type: str, context: Dict[str, Any], parameters: Dict[str, Any]
     ) -> Dict[str, Any]:
         """构建AI请求"""
-        # 根据分析类型构建提示
-        prompt = self._get_prompt_template(analysis_type)
+        try:
+            # 根据分析类型构建提示
+            prompt = self._get_prompt_template(analysis_type)
 
-        # 将上下文和参数转换为字符串格式
-        context_str = json.dumps(context, ensure_ascii=False, indent=2)
-        parameters_str = json.dumps(parameters, ensure_ascii=False, indent=2)
+            # 将上下文和参数转换为字符串格式，确保正确的JSON格式
+            context_str = json.dumps(context, ensure_ascii=False, indent=2)
+            parameters_str = json.dumps(parameters, ensure_ascii=False, indent=2)
 
-        # 填充提示模板
-        prompt = prompt.format(context=context_str, parameters=parameters_str)
+            # 填充提示模板
+            prompt = prompt.format(context=context_str, parameters=parameters_str)
 
-        return {
-            "model": self.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "你是一个专业的DeFi风险分析AI助手，擅长分析市场趋势、协议风险和投资策略。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-            "response_format": {"type": "json_object"},
-        }
+            return {
+                "model": self.model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "你是一个专业的DeFi风险分析AI助手，擅长分析市场趋势、协议风险和投资策略。请始终返回有效的JSON格式数据。",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+            }
+        except Exception as e:
+            logger.error(f"构建AI请求时出错: {str(e)}")
+            raise Exception(f"构建AI请求失败: {str(e)}")
 
     async def _call_ai_api(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
         """调用AI API"""
@@ -136,36 +152,72 @@ class AiService:
         self, analysis_type: str, response_data: Dict[str, Any]
     ) -> AiAnalysis:
         """解析AI响应"""
-        # 提取预测
-        predictions = []
-        for pred_data in response_data.get("predictions", []):
-            predictions.append(
-                AiPrediction(
-                    target=pred_data.get("target", ""),
-                    timeframe=pred_data.get("timeframe", ""),
-                    value=pred_data.get("value", 0.0),
-                    probability=pred_data.get("probability", 0.0),
-                    range=pred_data.get("range", [0.0, 0.0]),
-                )
+        try:
+            if not isinstance(response_data, dict):
+                logger.error(f"AI响应格式错误: {response_data}")
+                return self._create_error_analysis(analysis_type, "AI响应格式错误")
+
+            # 提取预测
+            predictions = []
+            for pred_data in response_data.get("predictions", []):
+                try:
+                    # 确保range是有效的元组
+                    range_data = pred_data.get("range", [0.0, 0.0])
+                    if (
+                        not isinstance(range_data, (list, tuple))
+                        or len(range_data) != 2
+                    ):
+                        range_data = [0.0, 0.0]
+
+                    predictions.append(
+                        AiPrediction(
+                            target=str(pred_data.get("target", "")),
+                            timeframe=str(pred_data.get("timeframe", "")),
+                            value=float(pred_data.get("value", 0.0)),
+                            probability=float(pred_data.get("probability", 0.0)),
+                            range=(float(range_data[0]), float(range_data[1])),
+                        )
+                    )
+                except (ValueError, TypeError, IndexError) as e:
+                    logger.error(f"解析预测数据时出错: {str(e)}, 数据: {pred_data}")
+                    continue
+
+            # 提取洞察
+            insights = []
+            for insight in response_data.get("insights", []):
+                if isinstance(insight, str):
+                    insights.append(insight)
+                elif isinstance(insight, dict) and "content" in insight:
+                    insights.append(str(insight["content"]))
+                else:
+                    logger.warning(f"跳过无效的洞察数据: {insight}")
+
+            # 提取建议
+            recommendations = []
+            for rec in response_data.get("recommendations", []):
+                if isinstance(rec, str):
+                    recommendations.append(rec)
+                elif isinstance(rec, dict) and "content" in rec:
+                    recommendations.append(str(rec["content"]))
+                else:
+                    logger.warning(f"跳过无效的建议数据: {rec}")
+
+            # 创建分析结果
+            return AiAnalysis(
+                id=str(uuid.uuid4()),
+                analysis_type=analysis_type,
+                timestamp=datetime.utcnow(),
+                confidence=float(response_data.get("confidence", 0.0)),
+                predictions=predictions,
+                insights=insights,
+                recommendations=recommendations,
+                supporting_data=response_data.get("supporting_data", {}),
             )
-
-        # 提取洞察
-        insights = response_data.get("insights", [])
-
-        # 提取建议
-        recommendations = response_data.get("recommendations", [])
-
-        # 创建分析结果
-        return AiAnalysis(
-            id=str(uuid.uuid4()),
-            analysis_type=analysis_type,
-            timestamp=datetime.utcnow(),
-            confidence=response_data.get("confidence", 0.0),
-            predictions=predictions,
-            insights=insights,
-            recommendations=recommendations,
-            supporting_data=response_data.get("supporting_data", {}),
-        )
+        except Exception as e:
+            logger.error(f"解析AI响应时出错: {str(e)}")
+            return self._create_error_analysis(
+                analysis_type, f"解析AI响应失败: {str(e)}"
+            )
 
     def _get_prompt_template(self, analysis_type: str) -> str:
         """获取提示模板"""
@@ -180,49 +232,36 @@ class AiService:
 {parameters}
 
 请提供以下格式的JSON响应:
-1. 未来价格预测（24小时和7天）
-2. 市场洞察（至少3点）
-3. 投资建议（至少3点）
-4. 支持数据（技术指标和情绪分析）
+1. 总体置信度 (0-1)
+2. 预测列表 (包含目标、时间范围、预测值和概率)
+3. 市场洞察 (字符串列表)
+4. 投资建议 (字符串列表)
 
-响应格式示例:
-```json
-{
+要求返回如下JSON格式(注意这只是示例):
+{{
   "confidence": 0.85,
   "predictions": [
-    {
+    {{
       "target": "price",
       "timeframe": "24h",
       "value": 3650.75,
-      "probability": 0.75,
-      "range": [3550.25, 3750.25]
-    }
+      "probability": 0.75
+    }}
   ],
   "insights": [
-    "ETH价格正处于上升趋势，技术指标显示强劲的买入信号",
-    "市场情绪积极，机构投资者持仓增加",
-    "短期内可能面临阻力位3700美元"
+    "市场趋势分析显示上升动能减弱",
+    "交易量持续下降",
+    "短期可能出现回调"
   ],
   "recommendations": [
-    "考虑在3550-3600区间增加ETH持仓",
-    "设置止损在3450以防市场反转",
-    "关注美联储政策变化可能带来的波动"
-  ],
-  "supporting_data": {
-    "technical_indicators": {
-      "trend_strength": 0.75,
-      "support_levels": [3400, 3300, 3200],
-      "resistance_levels": [3700, 3850, 4000]
-    },
-    "sentiment_analysis": {
-      "overall": 0.65,
-      "social_media": 0.70,
-      "news": 0.60
-    }
-  }
-}
-```
-            """,
+    "建议保持观望",
+    "等待回调后再考虑入场",
+    "关注重要支撑位"
+  ]
+}}
+
+请确保返回的是有效的JSON格式。
+""",
             "protocol_risk": """
 请分析以下协议的风险:
 
@@ -580,124 +619,186 @@ class AiService:
 
         logger.info(f"开始AI预测器分析: {analysis_type}")
 
+        # 定义分析类型到方法的映射
+        ANALYSIS_METHOD_MAPPING = {
+            "protocol_risk": "analyze_defi_protocol_risk",
+            "market_trend": "analyze_market_trend",
+            "portfolio_risk": "analyze_portfolio_risk",
+            "concentration_risk": "analyze_concentration_risk",
+            "correlation_risk": "analyze_correlation_risk",
+            "market_risk_recommendations": "generate_market_risk_recommendations",
+            "market_risk_monitoring_points": "generate_market_risk_monitoring_points",
+        }
+
+        # 定义相关性分析类型集合
+        CORRELATION_ANALYSIS_TYPES = {
+            "correlation_risk",
+            "asset_correlation",
+            "investment_type_correlation",
+            "protocol_correlation",
+        }
+
         try:
             # 导入AI预测器
             from app.services.ai_predictor import AiPredictor
 
             predictor = AiPredictor()
 
-            # 根据分析类型调用不同的分析方法
-            if analysis_type == "protocol_risk":
-                result = predictor.analyze_defi_protocol_risk(data)
-            elif analysis_type == "market_trend":
-                result = predictor.analyze_market_trend(data)
-            elif analysis_type == "portfolio_risk":
-                result = predictor.analyze_portfolio_risk(data)
-            elif analysis_type == "concentration_risk":
-                result = predictor.analyze_concentration_risk(data)
-            elif analysis_type == "correlation_risk":
-                result = predictor.analyze_correlation_risk(data)
-            elif analysis_type == "market_risk_recommendations":
-                result = predictor.generate_market_risk_recommendations(data)
-            elif analysis_type == "market_risk_monitoring_points":
-                result = predictor.generate_market_risk_monitoring_points(data)
-            # 添加对其他分析类型的支持，映射到现有方法
-            elif analysis_type == "asset_correlation":
-                result = predictor.analyze_correlation_risk(data)
-            elif analysis_type == "investment_type_correlation":
-                result = predictor.analyze_correlation_risk(data)
-            elif analysis_type == "protocol_correlation":
-                result = predictor.analyze_correlation_risk(data)
-            elif analysis_type == "protocol_history":
-                # 如果没有专门的方法，使用通用风险分析
-                if hasattr(predictor, "analyze_defi_protocol_risk"):
-                    result = predictor.analyze_defi_protocol_risk(data)
-                else:
-                    # 返回一个基本的风险分析结果
-                    result = {
-                        "risk_score": 50,
-                        "description": f"协议历史风险分析",
-                        "trend": "稳定",
-                        "data_points": [],
-                    }
-            else:
-                # 如果没有特定的分析方法，尝试使用通用分析
-                if hasattr(predictor, "analyze_generic") and callable(
-                    getattr(predictor, "analyze_generic")
+            result = None
+
+            # 检查是否是相关性分析
+            if analysis_type in CORRELATION_ANALYSIS_TYPES:
+                # 将分析类型传递给数据
+                correlation_data = data.copy()
+                correlation_data["correlation_type"] = analysis_type
+                result = predictor.analyze_correlation_risk(correlation_data)
+
+            # 检查是否有直接映射的方法
+            elif analysis_type in ANALYSIS_METHOD_MAPPING:
+                method_name = ANALYSIS_METHOD_MAPPING[analysis_type]
+                if hasattr(predictor, method_name) and callable(
+                    getattr(predictor, method_name)
                 ):
-                    result = predictor.analyze_generic(analysis_type, data)
+                    method = getattr(predictor, method_name)
+                    result = method(data)
+
+            # 处理协议历史分析
+            elif analysis_type == "protocol_history":
+                if hasattr(predictor, "analyze_defi_protocol_risk"):
+                    # 添加分析类型标记
+                    protocol_data = data.copy()
+                    protocol_data["analysis_focus"] = "history"
+                    result = predictor.analyze_defi_protocol_risk(protocol_data)
                 else:
-                    # 如果没有通用分析方法，尝试使用OpenAI API
-                    return await self._analyze_with_openai(
-                        analysis_type, data, parameters
-                    )
+                    result = self._get_default_result(analysis_type)
+
+            # 尝试使用通用分析
+            elif hasattr(predictor, "analyze_generic") and callable(
+                getattr(predictor, "analyze_generic")
+            ):
+                result = predictor.analyze_generic(analysis_type, data)
+
+            # 如果没有合适的方法，使用OpenAI API
+            else:
+                return await self._analyze_with_openai(analysis_type, data, parameters)
 
             logger.info(f"AI预测器分析完成: {analysis_type}")
 
-            # 将结果转换为AiAnalysis格式
-            insights = []
-            recommendations = []
-            monitoring_points = []
-            risk_score = None
+            # 处理分析结果
+            return self._process_predictor_result(analysis_type, result)
 
-            # 提取风险评分
-            if "risk_score" in result:
-                risk_score = result["risk_score"]
-
-            # 提取洞察
-            if "insights" in result:
-                insights = result["insights"]
-            elif "risk_metrics" in result:
-                for key, value in result["risk_metrics"].items():
-                    if isinstance(value, (int, float)):
-                        insights.append(f"{key}: {value:.2f}")
-                    else:
-                        insights.append(f"{key}: {value}")
-            elif "description" in result:
-                insights.append(result["description"])
-
-            # 提取建议
-            if "recommendations" in result:
-                recommendations = result["recommendations"]
-
-            # 提取监控点
-            if "monitoring_points" in result:
-                monitoring_points = result["monitoring_points"]
-
-            # 创建分析结果
-            analysis = AiAnalysis(
-                id=str(uuid.uuid4()),
-                analysis_type=analysis_type,
-                timestamp=datetime.utcnow(),
-                confidence=result.get("confidence", 0.0),
-                predictions=[],
-                insights=insights,
-                recommendations=recommendations,
-                monitoring_points=monitoring_points,
-                supporting_data=result,
-            )
-
-            return analysis
         except Exception as e:
-            logger.error(f"AI预测器分析失败: {str(e)}")
+            error_message = f"AI预测器分析失败: {str(e)}"
+            logger.error(error_message)
+
             # 尝试使用OpenAI API作为备选
             try:
                 logger.info(f"尝试使用OpenAI API进行分析: {analysis_type}")
                 return await self._analyze_with_openai(analysis_type, data, parameters)
             except Exception as e2:
+                # 记录两个错误
                 logger.error(f"OpenAI API分析也失败: {str(e2)}")
-                # 返回空分析结果
-                return AiAnalysis(
-                    id=str(uuid.uuid4()),
-                    analysis_type=analysis_type,
-                    timestamp=datetime.utcnow(),
-                    confidence=0.0,
-                    predictions=[],
-                    insights=[f"分析失败: {str(e)}"],
-                    recommendations=[],
-                    monitoring_points=[],
-                    supporting_data={},
+                # 返回包含两个错误的分析结果
+                return self._create_error_analysis(
+                    analysis_type, f"AI预测器错误: {str(e)}; OpenAI API错误: {str(e2)}"
                 )
+
+    def _process_predictor_result(
+        self, analysis_type: str, result: Dict[str, Any]
+    ) -> AiAnalysis:
+        """
+        处理AI预测器的结果，统一格式
+
+        Args:
+            analysis_type: 分析类型
+            result: 预测器返回的结果
+
+        Returns:
+            AiAnalysis: 格式化的分析结果
+        """
+        insights = []
+        recommendations = []
+        monitoring_points = []
+
+        # 提取风险评分
+        risk_score = result.get("risk_score")
+
+        # 提取洞察
+        if "insights" in result:
+            insights = result["insights"]
+        elif "risk_metrics" in result:
+            for key, value in result["risk_metrics"].items():
+                if isinstance(value, (int, float)):
+                    insights.append(f"{key}: {value:.2f}")
+                else:
+                    insights.append(f"{key}: {value}")
+        elif "description" in result:
+            insights.append(result["description"])
+
+        # 提取建议
+        if "recommendations" in result:
+            recommendations = result["recommendations"]
+
+        # 提取监控点
+        if "monitoring_points" in result:
+            monitoring_points = result["monitoring_points"]
+
+        # 创建分析结果
+        return AiAnalysis(
+            id=str(uuid.uuid4()),
+            analysis_type=analysis_type,
+            timestamp=datetime.utcnow(),
+            confidence=result.get("confidence", 0.0),
+            predictions=[],
+            insights=insights,
+            recommendations=recommendations,
+            monitoring_points=monitoring_points,
+            supporting_data=result,
+        )
+
+    def _create_error_analysis(
+        self, analysis_type: str, error_message: str
+    ) -> AiAnalysis:
+        """
+        创建错误分析结果
+
+        Args:
+            analysis_type: 分析类型
+            error_message: 错误信息
+
+        Returns:
+            AiAnalysis: 错误分析结果
+        """
+        return AiAnalysis(
+            id=str(uuid.uuid4()),
+            analysis_type=analysis_type,
+            timestamp=datetime.utcnow(),
+            confidence=0.0,
+            predictions=[],
+            insights=[f"分析失败: {error_message}"],
+            recommendations=[],
+            monitoring_points=[],
+            supporting_data={},
+        )
+
+    def _get_default_result(self, analysis_type: str) -> Dict[str, Any]:
+        """
+        获取默认分析结果
+
+        Args:
+            analysis_type: 分析类型
+
+        Returns:
+            Dict: 默认分析结果
+        """
+        return {
+            "risk_score": 50,
+            "description": f"{analysis_type}分析 (默认结果)",
+            "trend": "稳定",
+            "data_points": [],
+            "recommendations": [f"建议收集更多{analysis_type}数据以获得更准确分析"],
+            "monitoring_points": [f"监控{analysis_type}相关指标的变化"],
+        }
 
     async def _analyze_with_openai(
         self,

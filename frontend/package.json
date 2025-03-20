@@ -9,13 +9,10 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@radix-ui/react-select": "^2.1.6",
-    "@radix-ui/react-switch": "^1.1.3",
-    "@radix-ui/react-tooltip": "^1.1.8",
     "@tanstack/react-query": "^5.67.2",
     "@types/recharts": "^1.8.29",
-    "class-variance-authority": "^0.7.0",
-    "clsx": "^2.1.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "lucide-react": "^0.479.0",
     "next": "15.2.1",
     "react": "^19.0.0",
@@ -23,18 +20,19 @@
     "react-error-boundary": "^5.0.0",
     "react-minimal-pie-chart": "^9.1.0",
     "recharts": "^2.15.1",
-    "tailwind-merge": "^2.2.1",
+    "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "viem": "^2.23.9",
     "wagmi": "^2.14.12"
   },
   "devDependencies": {
+    "@shadcn/ui": "^0.0.4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "autoprefixer": "^10.4.18",
-    "postcss": "^8.4.35",
-    "tailwindcss": "^4",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.1",
     "typescript": "^5"
   }
 }
