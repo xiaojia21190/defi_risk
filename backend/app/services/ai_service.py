@@ -695,16 +695,28 @@ class AiService:
 
             # 如果没有合适的方法，使用OpenAI API
             else:
-                return self._analyze_with_openai(analysis_type, data, parameters)
+                # 将AiAnalysis转换为字典
+                ai_analysis = await self._analyze_with_openai(
+                    analysis_type, data, parameters
+                )
+                return ai_analysis.supporting_data
 
             logger.info(f"AI预测器分析完成: {analysis_type}")
 
-            # 处理分析结果
-            return self._process_predictor_result(analysis_type, result)
+            # 处理分析结果，但不返回AiAnalysis对象，直接返回字典
+            analysis = self._process_predictor_result(analysis_type, result)
+            return analysis.supporting_data
 
         except Exception as e:
             error_message = f"AI预测器分析失败: {str(e)}"
             logger.error(error_message)
+            # 返回带有错误信息的字典
+            return {
+                "error": error_message,
+                "risk_score": 0,
+                "confidence": 0.0,
+                "recommendations": ["无法完成分析，请检查数据"],
+            }
 
     def _process_predictor_result(
         self, analysis_type: str, result: Dict[str, Any]

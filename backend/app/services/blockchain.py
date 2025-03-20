@@ -1173,6 +1173,8 @@ class BlockchainService:
 
             if protocol == "Pendle V2":
                 protocol = "Pendle"
+            if protocol == "Aethir":
+                protocol = "aethir"
             protocol = self.defi_llama_client.get_protocol(protocol)
             self.historical_data_cache.set(cache_key, protocol, cache_interval)
             return protocol
@@ -1202,6 +1204,9 @@ class BlockchainService:
 
             if protocol == "Pendle V2":
                 protocol = "Pendle"
+
+            if protocol == "Aethir":
+                protocol = "aethir"
 
             # 这里应该调用DeFiLlama或类似的API
             tvl = self.defi_llama_client.get_protocol_current_tvl(protocol)

@@ -1006,7 +1006,7 @@ class RiskEngine:
         )
 
     async def analyze_portfolio_risk(
-        self, positions: List[Dict[str, Any]]
+        self, positions: List[Dict[str, Any]], wallet_address: str
     ) -> Dict[str, Any]:
         """
         分析投资组合风险（包装器方法）
@@ -1039,7 +1039,7 @@ class RiskEngine:
             # 准备投资组合数据
             portfolio_data = {
                 "positions": positions,
-                "wallet_address": "unknown",  # 可以从positions中提取如果有的话
+                "wallet_address": wallet_address,  # 可以从positions中提取如果有的话
             }
 
             # 使用核心方法进行分析

@@ -183,7 +183,9 @@ async def analyze_wallet_risk(
         positions = await blockchain_service.get_all_positions(wallet_address)
 
         # 使用风险引擎分析投资组合风险
-        risk_analysis = await risk_engine.analyze_portfolio_risk(positions)
+        risk_analysis = await risk_engine.analyze_portfolio_risk(
+            positions, wallet_address
+        )
 
         # 获取AI洞察
         ai_insights = await ai_service.get_portfolio_insights(
