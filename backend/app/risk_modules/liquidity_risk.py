@@ -117,34 +117,66 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                 self.logger.warning("区块链服务未初始化，无法获取资产流动性数据")
                 return None
 
-            # 计算总价值
-            total_value = sum(pos.get("amount", 0) for pos in positions)
-            if total_value == 0:
-                return None
-
-            # 提取资产列表和权重
+            # 处理嵌套的positions结构
             assets = {}
-            for pos in positions:
-                # 尝试从tokenList获取更精确的代币信息
-                if pos.get("tokenList"):
-                    for token in pos.get("tokenList", []):
-                        token_symbol = token.get("tokenSymbol", "")
-                        if token_symbol:
+            total_value = 0
+
+            # 遍历协议positions
+            for protocol_position in positions:
+                inner_positions = protocol_position.get("positions", [])
+
+                # 遍历每个协议中的具体资产positions
+                for pos in inner_positions:
+                    position_amount = pos.get("amount", 0)
+                    total_value += position_amount
+
+                    # 优先从tokenList获取更精确的代币信息
+                    if pos.get("tokenList"):
+                        # 使用基类方法过滤代币列表
+                        filtered_tokens = self.filter_token_list(
+                            pos.get("tokenList", [])
+                        )
+
+                        for token in filtered_tokens:
+                            token_symbol = token.get("tokenSymbol", "")
+                            if not token_symbol:
+                                continue
+
+                            # 计算代币价值
+                            if token.get("currencyAmount"):
+                                token_value = float(token.get("currencyAmount", "0"))
+                            else:
+                                # 如果没有明确的价值，按比例分配
+                                token_value = (
+                                    position_amount / len(filtered_tokens)
+                                    if filtered_tokens
+                                    else 0
+                                )
+
+                            # 累加到资产映射中
                             if token_symbol not in assets:
                                 assets[token_symbol] = 0
-                            # 使用代币在池中的比例分配价值
-                            token_value = pos.get("amount", 0) * (
-                                1 / len(pos.get("tokenList", []))
-                            )
                             assets[token_symbol] += token_value
-                else:
-                    # 如果没有tokenList，使用资产名称
-                    asset = pos.get("asset", "Unknown").split("/")[
-                        0
-                    ]  # 处理流动性池资产格式
-                    if asset not in assets:
-                        assets[asset] = 0
-                    assets[asset] += pos.get("amount", 0)
+                    else:
+                        # 如果没有tokenList，使用资产名称
+                        asset = pos.get("asset", "Unknown").split("/")[
+                            0
+                        ]  # 处理流动性池资产格式
+
+                        # 使用基类方法检查是否应排除该资产
+                        if self.is_excluded_token(asset):
+                            self.logger.info(
+                                f"排除资产{asset}，因为它是被排除的资产类型"
+                            )
+                            continue
+
+                        if asset not in assets:
+                            assets[asset] = 0
+                        assets[asset] += position_amount
+
+            if total_value == 0:
+                self.logger.warning("投资组合总价值为0，无法分析资产流动性风险")
+                return None
 
             # 尝试使用AI服务进行资产流动性分析
             if self.ai_service:
@@ -271,8 +303,8 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                 description=description,
                 trend=trend,
                 data_points=assets_data,
-                metadata={"assets": assets},
             )
+
         except Exception as e:
             self.logger.error(f"分析资产流动性风险时出错: {str(e)}")
             return None
@@ -288,17 +320,24 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
 
             # 按协议分组
             protocol_values = {}
-            for pos in positions:
-                protocol = pos.get("protocol", "Unknown")
-                amount = pos.get("amount", 0)
+
+            # 处理嵌套的positions结构
+            for protocol_position in positions:
+                protocol = protocol_position.get("protocol", "Unknown")
+                inner_positions = protocol_position.get("positions", [])
 
                 if protocol not in protocol_values:
                     protocol_values[protocol] = 0
-                protocol_values[protocol] += amount
+
+                # 累加该协议下所有position的金额
+                for pos in inner_positions:
+                    amount = pos.get("amount", 0)
+                    protocol_values[protocol] += amount
 
             # 计算总价值
             total_value = sum(protocol_values.values())
             if total_value == 0:
+                self.logger.warning("投资组合总价值为0，无法分析协议流动性风险")
                 return None
 
             # 尝试使用AI服务进行协议流动性分析
@@ -428,7 +467,6 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                 description=description,
                 trend=trend,
                 data_points=protocols_data,
-                metadata={"protocols": protocol_values},
             )
         except Exception as e:
             self.logger.error(f"分析协议流动性风险时出错: {str(e)}")
@@ -443,24 +481,31 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                 self.logger.warning("区块链服务未初始化，无法获取投资类型流动性数据")
                 return None
 
-            # 计算总价值
-            total_value = sum(pos.get("amount", 0) for pos in positions)
-            if total_value == 0:
-                return None
-
-            # 按投资类型分组
+            # 处理嵌套的positions结构
             investment_type_values = {}
-            for pos in positions:
-                invest_type = pos.get("invest_type", 0)
-                invest_type_name = pos.get("invest_type_name", "未知类型")
-                amount = pos.get("amount", 0)
+            total_value = 0
 
-                if invest_type not in investment_type_values:
-                    investment_type_values[invest_type] = {
-                        "amount": 0,
-                        "name": invest_type_name,
-                    }
-                investment_type_values[invest_type]["amount"] += amount
+            # 遍历协议positions
+            for protocol_position in positions:
+                inner_positions = protocol_position.get("positions", [])
+
+                # 遍历每个协议中的具体资产positions
+                for pos in inner_positions:
+                    invest_type = pos.get("invest_type", 0)
+                    invest_type_name = pos.get("invest_type_name", "未知类型")
+                    amount = pos.get("amount", 0)
+                    total_value += amount
+
+                    if invest_type not in investment_type_values:
+                        investment_type_values[invest_type] = {
+                            "amount": 0,
+                            "name": invest_type_name,
+                        }
+                    investment_type_values[invest_type]["amount"] += amount
+
+            if total_value == 0:
+                self.logger.warning("投资组合总价值为0，无法分析投资类型流动性风险")
+                return None
 
             # 尝试使用AI服务进行投资类型流动性分析
             if self.ai_service:
@@ -580,16 +625,25 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
     ) -> Optional[RiskFactor]:
         """分析流动性池风险"""
         try:
-            # 筛选出流动性池类型的头寸
-            lp_positions = [
-                pos
-                for pos in positions
-                if pos.get("invest_type") == 2
-                or "LP" in pos.get("asset", "")
-                or "/" in pos.get("asset", "")
-            ]
+            # 处理嵌套的positions结构，筛选出流动性池类型的头寸
+            lp_positions = []
+
+            # 遍历协议positions
+            for protocol_position in positions:
+                protocol = protocol_position.get("protocol", "Unknown")
+                inner_positions = protocol_position.get("positions", [])
+
+                # 遍历每个协议中的具体资产positions
+                for pos in inner_positions:
+                    # 复制必要的字段，添加protocol信息（如果pos中没有）
+                    lp_pos = pos.copy()
+                    if "protocol" not in lp_pos:
+                        lp_pos["protocol"] = protocol
+
+                    lp_positions.append(lp_pos)
 
             if not lp_positions:
+                self.logger.info("未检测到头寸，跳过流动性池风险分析")
                 return None
 
             # 计算流动性池总价值
@@ -597,6 +651,7 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
 
             # 如果总价值为0，返回None
             if total_lp_value == 0:
+                self.logger.warning("检测到的流动性池总价值为0，无法分析流动性池风险")
                 return None
 
             # 尝试使用AI服务进行流动性池风险分析
@@ -613,19 +668,37 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                         # 提取代币列表
                         token_list = pos.get("tokenList", [])
                         tokens = []
+                        valid_tokens = []  # 用于风险计算的有效代币
+
                         if token_list:
                             for token in token_list:
                                 token_symbol = token.get("tokenSymbol", "")
-                                tokens.append(token_symbol)
+                                tokens.append(token_symbol)  # 保留所有代币用于显示
+
+                                # 使用基类方法检查是否应排除该代币
+                                if self.is_excluded_token(token_symbol):
+                                    self.logger.info(
+                                        f"风险计算中排除代币{token_symbol}，因为它是被排除的代币类型"
+                                    )
+                                    continue
+
+                                valid_tokens.append(token_symbol)
                         else:
                             # 尝试从资产名称解析
                             tokens = asset.split("/")
+                            # 使用基类方法过滤代币
+                            valid_tokens = [
+                                token
+                                for token in tokens
+                                if not self.is_excluded_token(token)
+                            ]
 
                         pools_data.append(
                             {
                                 "protocol": protocol,
                                 "asset": asset,
-                                "tokens": tokens,
+                                "tokens": tokens,  # 显示所有代币，包括yt和pt
+                                "valid_tokens": valid_tokens,  # 仅用于风险计算的代币
                                 "weight": weight,
                                 "amount": amount,
                             }
@@ -635,6 +708,18 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                         "liquidity_pools": pools_data,
                         "analysis_type": "liquidity_pool_risk",
                     }
+
+                    # 确保AI服务使用valid_tokens进行分析
+                    # 创建一个新的数据副本，将tokens替换为valid_tokens用于分析
+                    ai_pools_data = []
+                    for pool in pools_data:
+                        ai_pool = pool.copy()
+                        ai_pool["tokens"] = pool[
+                            "valid_tokens"
+                        ]  # 用有效代币替换所有代币
+                        ai_pools_data.append(ai_pool)
+
+                    ai_input_data["liquidity_pools"] = ai_pools_data
 
                     # 使用AI服务进行分析
                     ai_analysis = await self.ai_service.analyze_with_predictor(
@@ -685,10 +770,20 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                     stablecoin_count = 0
                     volatile_count = 0
                     tokens = []
+                    valid_tokens = []  # 用于风险计算的有效代币
 
                     for token in token_list:
                         token_symbol = token.get("tokenSymbol", "")
-                        tokens.append(token_symbol)
+                        tokens.append(token_symbol)  # 保留所有代币用于显示
+
+                        # 使用基类方法检查是否应排除该代币
+                        if self.is_excluded_token(token_symbol):
+                            self.logger.info(
+                                f"风险计算中排除代币{token_symbol}，因为它是被排除的代币类型"
+                            )
+                            continue
+
+                        valid_tokens.append(token_symbol)
 
                         # 判断是否为稳定币
                         if token_symbol in [
@@ -704,36 +799,47 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                         else:
                             volatile_count += 1
 
-                    # 根据代币组合评估风险
-                    if stablecoin_count > 0 and volatile_count == 0:
-                        # 纯稳定币池风险较低
-                        pool_risk = 20
-                    elif stablecoin_count > 0 and volatile_count > 0:
-                        # 稳定币+波动币混合池风险中等
-                        pool_risk = 50
-                    elif volatile_count > 1:
-                        # 多种波动币池风险较高
-                        pool_risk = 70
+                    # 根据代币组合评估风险，只使用有效代币
+                    if len(valid_tokens) > 0:  # 确保有有效代币
+                        if stablecoin_count > 0 and volatile_count == 0:
+                            # 纯稳定币池风险较低
+                            pool_risk = 20
+                        elif stablecoin_count > 0 and volatile_count > 0:
+                            # 稳定币+波动币混合池风险中等
+                            pool_risk = 50
+                        elif volatile_count > 1:
+                            # 多种波动币池风险较高
+                            pool_risk = 70
+                    # 没有有效代币时使用默认风险
 
-                    # 添加代币信息
+                    # 添加代币信息，显示所有代币但在metadata中指明有效代币
                     pool_risks.append(
                         {
                             "protocol": protocol,
                             "asset": asset,
                             "tokens": tokens,
+                            "valid_tokens": valid_tokens,
                             "risk": pool_risk,
                             "weight": weight,
                             "amount": amount,
-                            "token_count": len(token_list),
+                            "token_count": len(valid_tokens),  # 使用有效代币数量
                         }
                     )
                 else:
-                    # 没有代币列表，尝试从资产名称解析
-                    tokens = asset.split("/")
+                    # 如果没有tokenList，尝试从资产名称解析
+                    all_tokens = asset.split("/")
+                    tokens = all_tokens  # 保留所有代币用于显示
+
+                    # 使用基类方法过滤代币
+                    valid_tokens = [
+                        token
+                        for token in all_tokens
+                        if not self.is_excluded_token(token)
+                    ]
 
                     # 判断是否为稳定币池
                     stablecoin_count = 0
-                    for token in tokens:
+                    for token in valid_tokens:  # 只考虑有效代币
                         if token in [
                             "USDT",
                             "USDC",
@@ -745,8 +851,8 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                         ]:
                             stablecoin_count += 1
 
-                    if len(tokens) > 1:
-                        if stablecoin_count == len(tokens):
+                    if len(valid_tokens) > 1:  # 确保有多个有效代币
+                        if stablecoin_count == len(valid_tokens):
                             # 纯稳定币池风险较低
                             pool_risk = 20
                         elif stablecoin_count > 0:
@@ -761,10 +867,11 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                             "protocol": protocol,
                             "asset": asset,
                             "tokens": tokens,
+                            "valid_tokens": valid_tokens,
                             "risk": pool_risk,
                             "weight": weight,
                             "amount": amount,
-                            "token_count": len(tokens),
+                            "token_count": len(valid_tokens),  # 使用有效代币数量
                         }
                     )
 

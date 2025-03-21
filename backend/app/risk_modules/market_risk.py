@@ -148,44 +148,92 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
     async def _analyze_concentration_risk(
         self, positions: List[Dict[str, Any]]
     ) -> Optional[RiskFactor]:
-        """分析资产集中度风险"""
+        """分析市场集中度风险"""
         try:
-            # 计算总价值
-            total_value = sum(pos.get("amount", 0) for pos in positions)
-
-            if total_value == 0:
+            # 使用区块链服务获取资产数据
+            if not self.blockchain_service:
+                self.logger.warning("区块链服务未初始化，无法获取资产数据")
                 return None
 
-            # 按资产分组
-            assets = {}
-            for pos in positions:
-                # 尝试从tokenList获取更精确的代币信息
-                if pos.get("tokenList"):
-                    for token in pos.get("tokenList", []):
-                        token_symbol = token.get("tokenSymbol", "")
-                        if token_symbol:
+            # 按资产和协议分组
+            assets = {}  # 资产 -> 金额映射
+            protocols = {}  # 协议 -> 金额映射
+            total_value = 0
+
+            # 处理嵌套的positions结构
+            for protocol_position in positions:
+                protocol = protocol_position.get("protocol", "Unknown")
+                inner_positions = protocol_position.get("positions", [])
+
+                if protocol not in protocols:
+                    protocols[protocol] = 0
+
+                # 遍历每个协议中的具体资产positions
+                for pos in inner_positions:
+                    position_amount = pos.get("amount", 0)
+                    protocols[protocol] += position_amount
+                    total_value += position_amount
+
+                    # 优先从tokenList获取更精确的代币信息
+                    if pos.get("tokenList"):
+                        # 使用基类方法过滤代币列表
+                        filtered_tokens = self.filter_token_list(
+                            pos.get("tokenList", [])
+                        )
+
+                        for token in filtered_tokens:
+                            token_symbol = token.get("tokenSymbol", "")
+                            if not token_symbol:
+                                continue
+
+                            # 计算代币价值
+                            if token.get("currencyAmount"):
+                                token_value = float(token.get("currencyAmount", "0"))
+                            else:
+                                # 如果没有明确的价值，按比例分配
+                                token_value = (
+                                    position_amount / len(filtered_tokens)
+                                    if filtered_tokens
+                                    else 0
+                                )
+
+                            # 累加到资产映射中
                             if token_symbol not in assets:
                                 assets[token_symbol] = 0
-                            # 使用代币在池中的比例分配价值
-                            token_value = pos.get("amount", 0) * (
-                                1 / len(pos.get("tokenList", []))
-                            )
                             assets[token_symbol] += token_value
-                else:
-                    # 如果没有tokenList，使用资产名称
-                    asset = pos.get("asset", "unknown")
-                    if asset not in assets:
-                        assets[asset] = 0
-                    assets[asset] += pos.get("amount", 0)
+                    else:
+                        # 如果没有tokenList，使用资产名称
+                        asset = pos.get("asset", "Unknown").split("/")[
+                            0
+                        ]  # 处理流动性池资产格式
 
-            # 尝试使用AI服务进行资产集中度分析
+                        # 使用基类方法检查是否应排除该资产
+                        if self.is_excluded_token(asset):
+                            self.logger.info(
+                                f"排除资产{asset}，因为它是被排除的资产类型"
+                            )
+                            continue
+
+                        if asset not in assets:
+                            assets[asset] = 0
+                        assets[asset] += position_amount
+
+            if total_value == 0:
+                self.logger.warning("投资组合总价值为0，无法分析市场集中度风险")
+                return None
+
+            # 尝试使用AI服务进行集中度分析
             if self.ai_service:
                 try:
                     # 准备AI分析的数据
                     ai_input_data = {
                         "assets": {
-                            asset: amount / total_value
-                            for asset, amount in assets.items()
+                            asset: value / total_value
+                            for asset, value in assets.items()
+                        },
+                        "protocols": {
+                            protocol: value / total_value
+                            for protocol, value in protocols.items()
                         },
                         "analysis_type": "concentration_risk",
                     }
@@ -198,79 +246,119 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                     # 提取AI分析结果
                     if ai_analysis and "risk_score" in ai_analysis:
                         risk_score = ai_analysis.get("risk_score", 50)
-                        description = ai_analysis.get("description", "资产集中度分析")
+                        description = ai_analysis.get("description", "市场集中度分析")
                         trend = ai_analysis.get("trend", "稳定")
                         data_points = ai_analysis.get("data_points", [])
 
                         return self.create_risk_factor(
                             risk_type=RiskType.MARKET.value,
-                            factor_name="资产集中度风险",
+                            factor_name="市场集中度风险",
                             score=risk_score,
-                            weight=0.4,
+                            weight=0.3,
                             description=description,
                             trend=trend,
                             data_points=data_points,
                             metadata={
-                                "assets": assets,
+                                "asset_weights": {
+                                    asset: value / total_value
+                                    for asset, value in assets.items()
+                                },
+                                "protocol_weights": {
+                                    protocol: value / total_value
+                                    for protocol, value in protocols.items()
+                                },
                                 "ai_analysis": ai_analysis,
                             },
                         )
                 except Exception as e:
-                    self.logger.error(f"使用AI分析资产集中度风险时出错: {str(e)}")
-                    self.logger.info("将使用传统方法进行资产集中度风险分析")
+                    self.logger.error(f"使用AI分析市场集中度风险时出错: {str(e)}")
                     # 如果AI分析失败，继续使用传统方法
-            else:
-                self.logger.info("AI服务不可用，使用传统方法进行资产集中度风险分析")
 
             # 如果AI分析失败或不可用，使用传统方法
-            # 计算最大资产占比
-            max_asset = max(assets.items(), key=lambda x: x[1])
-            max_concentration = max_asset[1] / total_value
-
-            # 计算赫芬达尔-赫希曼指数 (HHI)
-            hhi = sum((amount / total_value) ** 2 for amount in assets.values()) * 10000
-
-            # 根据集中度评分
-            if max_concentration > 0.7 or hhi > 6000:
-                score = 80  # 高风险
-                description = f"投资组合过于集中在{max_asset[0]}，占比{max_concentration:.1%}，HHI={hhi:.0f}"
-                trend = "上升"
-            elif max_concentration > 0.5 or hhi > 3000:
-                score = 60  # 中高风险
-                description = f"投资组合在{max_asset[0]}上的集中度较高，占比{max_concentration:.1%}，HHI={hhi:.0f}"
-                trend = "稳定"
-            elif max_concentration > 0.3 or hhi > 1500:
-                score = 40  # 中等风险
-                description = f"投资组合在{max_asset[0]}上有一定集中度，占比{max_concentration:.1%}，HHI={hhi:.0f}"
-                trend = "稳定"
+            # 计算资产集中度（赫芬达尔指数）
+            if assets:
+                asset_weights = [value / total_value for value in assets.values()]
+                asset_hhi = sum(weight**2 for weight in asset_weights)
             else:
-                score = 20  # 低风险
-                description = f"投资组合分散良好，最大资产{max_asset[0]}占比{max_concentration:.1%}，HHI={hhi:.0f}"
+                asset_hhi = 0
+
+            # 计算协议集中度
+            if protocols:
+                protocol_weights = [value / total_value for value in protocols.values()]
+                protocol_hhi = sum(weight**2 for weight in protocol_weights)
+            else:
+                protocol_hhi = 0
+
+            # 综合集中度
+            concentration_score = max(asset_hhi, protocol_hhi) * 100
+
+            # 调整到0-100范围
+            if concentration_score > 100:
+                concentration_score = 100
+            elif concentration_score < 0:
+                concentration_score = 0
+
+            # 根据分数判断风险级别
+            if concentration_score > 70:  # 高集中度
+                description = "投资组合高度集中，存在显著的集中度风险"
+                trend = "上升"
+            elif concentration_score > 40:  # 中等集中度
+                description = "投资组合集中度中等，存在一定的集中度风险"
+                trend = "稳定"
+            else:  # 低集中度
+                description = "投资组合分散良好，集中度风险较低"
                 trend = "下降"
 
-            # 构建数据点
+            # 创建数据点
             data_points = [
-                {
-                    "asset": asset,
-                    "amount": amount,
-                    "percentage": amount / total_value,
-                    "is_max_asset": asset == max_asset[0],
-                }
-                for asset, amount in assets.items()
+                {"name": "资产集中度HHI", "value": asset_hhi},
+                {"name": "协议集中度HHI", "value": protocol_hhi},
             ]
+
+            # 添加排名前三的资产和协议数据
+            sorted_assets = sorted(assets.items(), key=lambda x: x[1], reverse=True)[:3]
+            sorted_protocols = sorted(
+                protocols.items(), key=lambda x: x[1], reverse=True
+            )[:3]
+
+            for asset, amount in sorted_assets:
+                data_points.append(
+                    {
+                        "name": "主要资产",
+                        "asset": asset,
+                        "value": amount / total_value,
+                        "amount": amount,
+                    }
+                )
+
+            for protocol, amount in sorted_protocols:
+                data_points.append(
+                    {
+                        "name": "主要协议",
+                        "protocol": protocol,
+                        "value": amount / total_value,
+                        "amount": amount,
+                    }
+                )
 
             return self.create_risk_factor(
                 risk_type=RiskType.MARKET.value,
-                factor_name="资产集中度风险",
-                score=score,
-                weight=0.4,
+                factor_name="市场集中度风险",
+                score=concentration_score,
+                weight=0.3,
                 description=description,
                 trend=trend,
                 data_points=data_points,
-                metadata={"hhi": hhi, "max_concentration": max_concentration},
+                metadata={
+                    "assets": assets,
+                    "protocols": protocols,
+                    "asset_hhi": asset_hhi,
+                    "protocol_hhi": protocol_hhi,
+                    "total_value": total_value,
+                },
             )
         except Exception as e:
-            self.logger.error(f"分析资产集中度风险时出错: {str(e)}")
+            self.logger.error(f"分析市场集中度风险时出错: {str(e)}")
             return None
 
     async def _analyze_volatility_risk(
@@ -283,51 +371,87 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                 self.logger.warning("区块链服务未初始化，无法获取资产波动性数据")
                 return None
 
-            # 提取资产列表
-            assets = []
-            asset_values = {}
-            for pos in positions:
-                asset = pos.get("asset", "Unknown").split("/")[
-                    0
-                ]  # 处理流动性池资产格式
-                if asset not in assets:
-                    assets.append(asset)
-                    asset_values[asset] = 0
-                asset_values[asset] += pos.get("amount", 0)
+            # 提取资产列表和权重
+            assets = {}
+            total_value = 0
+
+            # 处理嵌套的positions结构
+            for protocol_position in positions:
+                inner_positions = protocol_position.get("positions", [])
+
+                # 遍历每个协议中的具体资产positions
+                for pos in inner_positions:
+                    position_amount = pos.get("amount", 0)
+                    total_value += position_amount
+
+                    # 优先从tokenList获取更精确的代币信息
+                    if pos.get("tokenList"):
+                        # 使用基类方法过滤代币列表
+                        filtered_tokens = self.filter_token_list(
+                            pos.get("tokenList", [])
+                        )
+
+                        for token in filtered_tokens:
+                            token_symbol = token.get("tokenSymbol", "")
+                            if not token_symbol:
+                                continue
+
+                            # 计算代币价值
+                            if token.get("currencyAmount"):
+                                token_value = float(token.get("currencyAmount", "0"))
+                            else:
+                                # 如果没有明确的价值，按比例分配
+                                token_value = (
+                                    position_amount / len(filtered_tokens)
+                                    if filtered_tokens
+                                    else 0
+                                )
+
+                            # 累加到资产映射中
+                            if token_symbol not in assets:
+                                assets[token_symbol] = 0
+                            assets[token_symbol] += token_value
+                    else:
+                        # 如果没有tokenList，使用资产名称
+                        asset = pos.get("asset", "Unknown").split("/")[
+                            0
+                        ]  # 处理流动性池资产格式
+
+                        # 使用基类方法检查是否应排除该资产
+                        if self.is_excluded_token(asset):
+                            self.logger.info(
+                                f"排除资产{asset}，因为它是被排除的资产类型"
+                            )
+                            continue
+
+                        if asset not in assets:
+                            assets[asset] = 0
+                        assets[asset] += position_amount
+
+            if not assets:
+                self.logger.warning("没有检测到任何资产，无法分析波动性风险")
+                return None
 
             # 获取每个资产的24小时波动性数据
             volatility_data = {}
-            total_value = sum(asset_values.values())
 
             for asset in assets:
-                # 尝试从tokenList中获取更精确的代币符号
-                token_symbol = asset
-                for pos in positions:
-                    if pos.get("asset") == asset and pos.get("tokenList"):
-                        for token in pos.get("tokenList", []):
-                            if token.get("tokenSymbol"):
-                                token_symbol = token.get("tokenSymbol")
-                                break
-                        break
-
                 # 获取24小时数据
-                data_24h = await self.blockchain_service._get_24h_data(token_symbol)
+                data_24h = await self.blockchain_service._get_24h_data(asset)
 
                 if data_24h:
                     volatility = data_24h.get("volatility", 0)
                     volatility_data[asset] = {
                         "volatility": volatility,
                         "weight": (
-                            asset_values[asset] / total_value if total_value > 0 else 0
+                            assets[asset] / total_value if total_value > 0 else 0
                         ),
                         "price_change_percent": data_24h.get("price_change_percent", 0),
                     }
                 else:
                     # 如果没有获取到数据，使用历史数据估算波动性
                     historical_data = (
-                        await self.blockchain_service.get_asset_historical_data(
-                            token_symbol
-                        )
+                        await self.blockchain_service.get_asset_historical_data(asset)
                     )
                     if historical_data is not None and not historical_data.empty:
                         # 计算价格波动率
@@ -343,12 +467,16 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                     volatility_data[asset] = {
                         "volatility": volatility,
                         "weight": (
-                            asset_values[asset] / total_value if total_value > 0 else 0
+                            assets[asset] / total_value if total_value > 0 else 0
                         ),
                         "price_change_percent": 0,
                     }
 
             # 计算加权平均波动性
+            if not volatility_data:
+                self.logger.warning("无法获取任何资产的波动性数据")
+                return None
+
             weighted_volatility = sum(
                 data["volatility"] * data["weight"] for data in volatility_data.values()
             )
@@ -409,195 +537,353 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
     ) -> Optional[RiskFactor]:
         """分析市场趋势风险"""
         try:
-            # 如果没有头寸，返回None
-            if not positions:
+            # 使用区块链服务获取资产数据
+            if not self.blockchain_service:
+                self.logger.warning("区块链服务未初始化，无法获取资产趋势数据")
                 return None
 
-            # 提取资产
-            assets = set()
-            for pos in positions:
-                asset = pos.get("asset", "").split("/")[0]
-                if asset:
-                    assets.add(asset)
+            # 提取资产列表和权重
+            assets = {}
+            total_value = 0
 
-            # 如果没有资产，返回None
+            # 处理嵌套的positions结构
+            for protocol_position in positions:
+                inner_positions = protocol_position.get("positions", [])
+
+                # 遍历每个协议中的具体资产positions
+                for pos in inner_positions:
+                    position_amount = pos.get("amount", 0)
+                    total_value += position_amount
+
+                    # 优先从tokenList获取更精确的代币信息
+                    if pos.get("tokenList"):
+                        # 使用基类方法过滤代币列表
+                        filtered_tokens = self.filter_token_list(
+                            pos.get("tokenList", [])
+                        )
+
+                        for token in filtered_tokens:
+                            token_symbol = token.get("tokenSymbol", "")
+                            if not token_symbol:
+                                continue
+
+                            # 计算代币价值
+                            if token.get("currencyAmount"):
+                                token_value = float(token.get("currencyAmount", "0"))
+                            else:
+                                # 如果没有明确的价值，按比例分配
+                                token_value = (
+                                    position_amount / len(filtered_tokens)
+                                    if filtered_tokens
+                                    else 0
+                                )
+
+                            # 累加到资产映射中
+                            if token_symbol not in assets:
+                                assets[token_symbol] = 0
+                            assets[token_symbol] += token_value
+                    else:
+                        # 如果没有tokenList，使用资产名称
+                        asset = pos.get("asset", "Unknown").split("/")[
+                            0
+                        ]  # 处理流动性池资产格式
+
+                        # 使用基类方法检查是否应排除该资产
+                        if self.is_excluded_token(asset):
+                            self.logger.info(
+                                f"排除资产{asset}，因为它是被排除的资产类型"
+                            )
+                            continue
+
+                        if asset not in assets:
+                            assets[asset] = 0
+                        assets[asset] += position_amount
+
             if not assets:
+                self.logger.warning("未检测到任何资产，无法分析市场趋势风险")
                 return None
 
-            # 计算总体趋势风险
-            trend_risk_score = 0
-            asset_trends = {}
+            if total_value == 0:
+                self.logger.warning("投资组合总价值为0，无法分析市场趋势风险")
+                return None
 
-            # 使用AI预测器分析每个资产的市场趋势
-            if self.ai_predictor:
-                self.logger.info(f"使用AI预测器分析{len(assets)}个资产的市场趋势")
-                for asset in assets:
-                    try:
-                        # 使用AI预测器分析市场趋势
-                        trend_analysis = await self.ai_predictor.analyze_market_trend(
-                            asset=asset
-                        )
+            # 获取市场趋势数据
+            market_trends = {}
+            weighted_trend_score = 0
+            total_weight = 0
 
-                        # 提取趋势信息
-                        trend = trend_analysis.get("trend", "neutral")
-                        trend_strength = trend_analysis.get(
-                            "trend_strength", "moderate"
-                        )
-                        risk_level = trend_analysis.get("risk_level", "MEDIUM")
+            # 对资产按价值排序，只分析占比较大的资产
+            sorted_assets = sorted(
+                [(asset, value) for asset, value in assets.items()],
+                key=lambda x: x[1],
+                reverse=True,
+            )
 
-                        # 计算趋势风险评分
-                        if trend == "bearish":
-                            if trend_strength == "strong":
-                                asset_score = 80
-                            elif trend_strength == "moderate":
-                                asset_score = 60
-                            else:
-                                asset_score = 40
-                        elif trend == "bullish":
-                            if trend_strength == "strong":
-                                asset_score = 20
-                            elif trend_strength == "moderate":
-                                asset_score = 30
-                            else:
-                                asset_score = 40
-                        else:  # neutral
-                            asset_score = 50
+            # 只分析总价值占比前80%的资产或者前10个资产
+            top_assets = []
+            cumulative_value = 0
 
-                        # 保存资产趋势信息
-                        asset_trends[asset] = {
-                            "trend": trend,
-                            "strength": trend_strength,
-                            "risk_level": risk_level,
-                            "score": asset_score,
+            for asset, value in sorted_assets:
+                top_assets.append(asset)
+                cumulative_value += value
+                if cumulative_value / total_value > 0.8 or len(top_assets) >= 10:
+                    break
+
+            # 获取主要资产的趋势数据
+            for asset in top_assets:
+                weight = assets[asset] / total_value
+                try:
+                    # 获取资产的市场趋势数据
+                    token_data = await self.blockchain_service.get_token_trend(asset)
+                    if token_data:
+                        # 计算趋势分数：正面趋势为低风险，负面趋势为高风险
+                        trend_direction = token_data.get("trend_direction", 0)
+                        trend_strength = token_data.get("trend_strength", 0.5)
+
+                        # 趋势分数，0为最佳(上升趋势)，100为最差(下降趋势)
+                        if trend_direction > 0:  # 上升趋势
+                            trend_score = 30 * (
+                                1 - trend_strength
+                            )  # 较强上升趋势得分更低
+                        elif trend_direction < 0:  # 下降趋势
+                            trend_score = (
+                                70 + 30 * trend_strength
+                            )  # 较强下降趋势得分更高
+                        else:  # 横盘
+                            trend_score = 50
+
+                        market_trends[asset] = {
+                            "trend_direction": trend_direction,
+                            "trend_strength": trend_strength,
+                            "trend_score": trend_score,
+                            "price_change_1d": token_data.get("price_change_1d", 0),
+                            "price_change_7d": token_data.get("price_change_7d", 0),
+                            "price_change_30d": token_data.get("price_change_30d", 0),
+                            "weight": weight,
                         }
 
-                        # 累加趋势风险评分
-                        trend_risk_score += asset_score
-                        self.logger.debug(
-                            f"资产{asset}的趋势分析结果: {trend} ({trend_strength}), 风险评分: {asset_score}"
-                        )
-                    except Exception as e:
-                        self.logger.error(f"分析{asset}市场趋势时出错: {str(e)}")
-                        # 使用默认评分
-                        asset_trends[asset] = {
-                            "trend": "neutral",
-                            "strength": "moderate",
-                            "risk_level": "MEDIUM",
-                            "score": 50,
-                        }
-                        trend_risk_score += 50
-                        self.logger.debug(
-                            f"资产{asset}使用默认趋势分析结果: neutral (moderate), 风险评分: 50"
-                        )
-            else:
-                self.logger.info("AI预测器不可用，使用默认市场趋势分析")
-                # 如果AI预测器不可用，为每个资产使用默认评分
-                for asset in assets:
-                    asset_trends[asset] = {
-                        "trend": "neutral",
-                        "strength": "moderate",
-                        "risk_level": "MEDIUM",
-                        "score": 50,
+                        # 累加加权趋势分数
+                        weighted_trend_score += trend_score * weight
+                        total_weight += weight
+                except Exception as e:
+                    self.logger.warning(f"获取{asset}趋势数据时出错: {str(e)}")
+
+            # 如果没有获取到任何趋势数据
+            if total_weight == 0:
+                self.logger.warning(
+                    "未能获取到任何资产的趋势数据，无法分析市场趋势风险"
+                )
+                return None
+
+            # 尝试使用AI服务进行趋势风险分析
+            if self.ai_service:
+                try:
+                    # 准备AI分析的数据
+                    ai_input_data = {
+                        "assets": {
+                            asset: {
+                                "weight": assets[asset] / total_value,
+                                "trend_data": market_trends.get(asset, {}),
+                            }
+                            for asset in top_assets
+                        },
+                        "analysis_type": "trend_risk",
                     }
-                    trend_risk_score += 50
 
-            # 计算平均趋势风险评分
-            if assets:
-                trend_risk_score /= len(assets)
+                    # 使用AI服务进行分析
+                    ai_analysis = await self.ai_service.analyze_with_predictor(
+                        analysis_type="trend_risk", data=ai_input_data
+                    )
 
-            # 生成描述
-            if trend_risk_score > 70:
-                description = "投资组合中的资产整体呈现强烈下跌趋势，市场风险较高"
+                    # 提取AI分析结果
+                    if ai_analysis and "risk_score" in ai_analysis:
+                        risk_score = ai_analysis.get("risk_score", 50)
+                        description = ai_analysis.get("description", "市场趋势分析")
+                        trend = ai_analysis.get("trend", "稳定")
+                        data_points = ai_analysis.get("data_points", [])
+
+                        return self.create_risk_factor(
+                            risk_type=RiskType.MARKET.value,
+                            factor_name="市场趋势风险",
+                            score=risk_score,
+                            weight=0.2,
+                            description=description,
+                            trend=trend,
+                            data_points=data_points,
+                            metadata={
+                                "market_trends": market_trends,
+                                "ai_analysis": ai_analysis,
+                            },
+                        )
+                except Exception as e:
+                    self.logger.error(f"使用AI分析市场趋势风险时出错: {str(e)}")
+                    # 如果AI分析失败，继续使用传统方法
+
+            # 如果AI分析失败或不可用，使用传统方法
+            # 计算最终的趋势风险分数
+            final_trend_score = weighted_trend_score / total_weight
+
+            # 根据趋势分数判断风险
+            if final_trend_score > 80:
+                description = "多数主要资产呈强烈下降趋势，市场趋势风险极高"
                 trend = "上升"
-            elif trend_risk_score > 50:
-                description = "投资组合中的资产整体呈现轻微下跌趋势，市场风险中等"
+            elif final_trend_score > 65:
+                description = "多数主要资产呈下降趋势，市场趋势风险较高"
+                trend = "上升"
+            elif final_trend_score > 55:
+                description = "部分主要资产呈下降趋势，市场趋势风险中等偏高"
                 trend = "稳定"
-            elif trend_risk_score > 30:
-                description = "投资组合中的资产整体呈现轻微上涨趋势，市场风险中等"
+            elif final_trend_score > 45:
+                description = "主要资产趋势混合，市场趋势风险中等"
                 trend = "稳定"
+            elif final_trend_score > 35:
+                description = "部分主要资产呈上升趋势，市场趋势风险中等偏低"
+                trend = "稳定"
+            elif final_trend_score > 20:
+                description = "多数主要资产呈上升趋势，市场趋势风险较低"
+                trend = "下降"
             else:
-                description = "投资组合中的资产整体呈现强烈上涨趋势，市场风险较低"
+                description = "多数主要资产呈强烈上升趋势，市场趋势风险极低"
                 trend = "下降"
 
+            # 创建数据点
+            data_points = [
+                {
+                    "name": "整体趋势风险",
+                    "value": final_trend_score,
+                    "description": "整体市场趋势风险评分，越高风险越大",
+                }
+            ]
+
+            # 添加主要资产的趋势数据
+            for asset, data in market_trends.items():
+                if data["weight"] > 0.05:  # 只添加权重超过5%的资产
+                    data_points.append(
+                        {
+                            "name": "资产趋势",
+                            "asset": asset,
+                            "trend_score": data["trend_score"],
+                            "price_change_7d": data.get("price_change_7d", 0),
+                            "weight": data["weight"],
+                        }
+                    )
+
             return self.create_risk_factor(
-                risk_type="MARKET",
-                factor_name="市场趋势",
-                score=trend_risk_score,
-                weight=0.3,
+                risk_type=RiskType.MARKET.value,
+                factor_name="市场趋势风险",
+                score=final_trend_score,
+                weight=0.2,
                 description=description,
                 trend=trend,
-                data_points=[
-                    {"asset": asset, **data} for asset, data in asset_trends.items()
-                ],
+                data_points=data_points,
+                metadata={"market_trends": market_trends},
             )
-
         except Exception as e:
             self.logger.error(f"分析市场趋势风险时出错: {str(e)}")
-            # 返回默认风险因子
-            return self.create_risk_factor(
-                risk_type="MARKET",
-                factor_name="市场趋势",
-                score=50,  # 默认中等风险
-                weight=0.3,
-                description="市场趋势分析失败，使用默认中等风险评分",
-                trend="稳定",
-                data_points=[],
-            )
+            return None
 
     async def _analyze_correlation_risk(
         self, positions: List[Dict[str, Any]]
     ) -> Optional[RiskFactor]:
         """分析市场相关性风险"""
         try:
+            # 使用区块链服务获取资产数据
             if not self.blockchain_service:
                 self.logger.warning("区块链服务未初始化，无法获取资产相关性数据")
                 return None
 
-            # 提取资产列表
-            assets = []
-            asset_values = {}
-            for pos in positions:
-                # 尝试从tokenList获取更精确的代币信息
-                if pos.get("tokenList"):
-                    for token in pos.get("tokenList", []):
-                        token_symbol = token.get("tokenSymbol", "")
-                        if token_symbol and token_symbol not in assets:
-                            assets.append(token_symbol)
-                            asset_values[token_symbol] = 0
-                        if token_symbol:
-                            # 使用代币在池中的比例分配价值
-                            token_value = pos.get("amount", 0) * (
-                                1 / len(pos.get("tokenList", []))
-                            )
-                            asset_values[token_symbol] = (
-                                asset_values.get(token_symbol, 0) + token_value
-                            )
-                else:
-                    # 如果没有tokenList，使用资产名称
-                    asset = pos.get("asset", "Unknown").split("/")[
-                        0
-                    ]  # 处理流动性池资产格式
-                    if asset not in assets:
-                        assets.append(asset)
-                        asset_values[asset] = 0
-                    asset_values[asset] += pos.get("amount", 0)
+            # 提取资产列表和权重
+            assets = {}
+            total_value = 0
 
-            # 如果资产数量少于2，无法计算相关性
+            # 处理嵌套的positions结构
+            for protocol_position in positions:
+                inner_positions = protocol_position.get("positions", [])
+
+                # 遍历每个协议中的具体资产positions
+                for pos in inner_positions:
+                    position_amount = pos.get("amount", 0)
+                    total_value += position_amount
+
+                    # 优先从tokenList获取更精确的代币信息
+                    if pos.get("tokenList"):
+                        # 使用基类方法过滤代币列表
+                        filtered_tokens = self.filter_token_list(
+                            pos.get("tokenList", [])
+                        )
+
+                        for token in filtered_tokens:
+                            token_symbol = token.get("tokenSymbol", "")
+                            if not token_symbol:
+                                continue
+
+                            # 计算代币价值
+                            if token.get("currencyAmount"):
+                                token_value = float(token.get("currencyAmount", "0"))
+                            else:
+                                # 如果没有明确的价值，按比例分配
+                                token_value = (
+                                    position_amount / len(filtered_tokens)
+                                    if filtered_tokens
+                                    else 0
+                                )
+
+                            # 累加到资产映射中
+                            if token_symbol not in assets:
+                                assets[token_symbol] = 0
+                            assets[token_symbol] += token_value
+                    else:
+                        # 如果没有tokenList，使用资产名称
+                        asset = pos.get("asset", "Unknown").split("/")[
+                            0
+                        ]  # 处理流动性池资产格式
+
+                        # 使用基类方法检查是否应排除该资产
+                        if self.is_excluded_token(asset):
+                            self.logger.info(
+                                f"排除资产{asset}，因为它是被排除的资产类型"
+                            )
+                            continue
+
+                        if asset not in assets:
+                            assets[asset] = 0
+                        assets[asset] += position_amount
+
+            # 如果检测到的资产少于2种，无法计算相关性
             if len(assets) < 2:
+                self.logger.warning("检测到的资产少于2种，无法进行相关性分析")
                 return None
 
-            # 尝试使用AI服务进行资产相关性分析
+            if total_value == 0:
+                self.logger.warning("投资组合总价值为0，无法分析市场相关性风险")
+                return None
+
+            # 尝试使用AI服务进行相关性分析
             if self.ai_service:
                 try:
-                    self.logger.info(f"使用AI服务分析{len(assets)}个资产的相关性风险")
                     # 准备AI分析的数据
-                    total_value = sum(asset_values.values())
+                    asset_weights = {
+                        asset: amount / total_value for asset, amount in assets.items()
+                    }
+
+                    # 获取资产历史价格数据
+                    asset_price_data = {}
+                    for asset in assets:
+                        try:
+                            historical_prices = await self.blockchain_service.get_token_historical_prices(
+                                asset, days=30
+                            )
+                            if historical_prices:
+                                asset_price_data[asset] = historical_prices
+                        except Exception as e:
+                            self.logger.warning(
+                                f"获取{asset}历史价格数据时出错: {str(e)}"
+                            )
+
                     ai_input_data = {
-                        "assets": list(assets),
-                        "weights": {
-                            asset: (value / total_value if total_value > 0 else 0)
-                            for asset, value in asset_values.items()
-                        },
+                        "assets": list(assets.keys()),
+                        "weights": asset_weights,
+                        "price_data": asset_price_data,
                         "analysis_type": "correlation_risk",
                     }
 
@@ -609,14 +895,13 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                     # 提取AI分析结果
                     if ai_analysis and "risk_score" in ai_analysis:
                         risk_score = ai_analysis.get("risk_score", 50)
-                        description = ai_analysis.get("description", "资产相关性分析")
+                        description = ai_analysis.get("description", "市场相关性分析")
                         trend = ai_analysis.get("trend", "稳定")
                         data_points = ai_analysis.get("data_points", [])
 
-                        self.logger.info(f"AI相关性分析完成，风险评分: {risk_score}")
                         return self.create_risk_factor(
                             risk_type=RiskType.MARKET.value,
-                            factor_name="资产相关性风险",
+                            factor_name="市场相关性风险",
                             score=risk_score,
                             weight=0.2,
                             description=description,
@@ -624,141 +909,76 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                             data_points=data_points,
                             metadata={
                                 "assets": assets,
+                                "asset_weights": asset_weights,
+                                "price_data": asset_price_data,
                                 "ai_analysis": ai_analysis,
                             },
                         )
-                    else:
-                        self.logger.warning("AI相关性分析结果不完整，将使用传统方法")
                 except Exception as e:
-                    self.logger.error(f"使用AI分析资产相关性风险时出错: {str(e)}")
-                    self.logger.info("将使用传统方法进行资产相关性风险分析")
+                    self.logger.error(f"使用AI分析市场相关性风险时出错: {str(e)}")
                     # 如果AI分析失败，继续使用传统方法
-            else:
-                self.logger.info("AI服务不可用，使用传统方法进行资产相关性风险分析")
 
-            # 如果AI分析失败或不可用，尝试使用区块链服务获取历史数据计算相关性
-            correlation_matrix = {}
-            high_correlation_pairs = []
-            avg_correlation = 0
-            correlation_count = 0
+            # 如果AI分析失败或不可用，使用传统方法
+            # 简单评估相关性风险
+            # 如果主要资产（占比>20%）个数小于2
+            significant_assets = sum(
+                1 for amount in assets.values() if amount / total_value > 0.2
+            )
 
-            # 获取历史价格数据并计算相关性
-            for i in range(len(assets)):
-                for j in range(i + 1, len(assets)):
-                    asset1 = assets[i]
-                    asset2 = assets[j]
-
-                    try:
-                        # 获取资产1的历史数据
-                        historical_data1 = (
-                            await self.blockchain_service.get_asset_historical_data(
-                                asset1
-                            )
-                        )
-                        # 获取资产2的历史数据
-                        historical_data2 = (
-                            await self.blockchain_service.get_asset_historical_data(
-                                asset2
-                            )
-                        )
-
-                        if (
-                            historical_data1 is not None
-                            and not historical_data1.empty
-                            and historical_data2 is not None
-                            and not historical_data2.empty
-                        ):
-                            # 确保两个数据集有相同的日期
-                            common_dates = set(historical_data1.index).intersection(
-                                set(historical_data2.index)
-                            )
-                            if len(common_dates) > 5:  # 至少需要5个共同的数据点
-                                # 提取共同日期的价格数据
-                                prices1 = [
-                                    historical_data1.loc[date, "price"]
-                                    for date in common_dates
-                                ]
-                                prices2 = [
-                                    historical_data2.loc[date, "price"]
-                                    for date in common_dates
-                                ]
-
-                                # 计算相关系数
-                                correlation = np.corrcoef(prices1, prices2)[0, 1]
-
-                                # 存储相关系数
-                                if asset1 not in correlation_matrix:
-                                    correlation_matrix[asset1] = {}
-                                correlation_matrix[asset1][asset2] = correlation
-
-                                # 累加相关系数
-                                avg_correlation += abs(correlation)
-                                correlation_count += 1
-
-                                # 检查高相关性对
-                                if abs(correlation) > 0.7:
-                                    high_correlation_pairs.append(
-                                        {
-                                            "asset1": asset1,
-                                            "asset2": asset2,
-                                            "correlation": correlation,
-                                        }
-                                    )
-                    except Exception as e:
-                        self.logger.error(
-                            f"计算{asset1}和{asset2}的相关性时出错: {str(e)}"
-                        )
-
-            # 如果没有计算出任何相关系数，使用默认评分
-            if correlation_count == 0:
-                correlation_score = 50  # 默认中等风险
-                description = "无法计算资产间的相关性，使用默认中等风险评分"
+            if significant_assets <= 1:
+                score = 30  # 低相关性风险
+                description = "投资组合中无多个主要资产，相关性风险较低"
                 trend = "稳定"
             else:
-                # 计算平均相关系数
-                avg_correlation = avg_correlation / correlation_count
+                # 获取主要资产类型（如货币、DeFi代币等）
+                asset_types = set()
+                for asset in [a for a, v in assets.items() if v / total_value > 0.2]:
+                    asset_type = "未知"
+                    try:
+                        token_info = await self.blockchain_service.get_token_info(asset)
+                        if token_info:
+                            asset_type = token_info.get("category", "未知")
+                    except Exception:
+                        pass
+                    asset_types.add(asset_type)
 
-                # 根据平均相关系数计算风险评分 (0-100)
-                # 相关性越高，风险越大
-                correlation_score = min(100, avg_correlation * 100)
-
-                # 生成描述
-                if correlation_score > 75:
-                    description = "投资组合中资产高度相关，缺乏多样性保护"
+                if len(asset_types) <= 1:
+                    score = 70  # 高相关性风险
+                    description = (
+                        f"主要资产属于同一类别({list(asset_types)[0]})，相关性风险较高"
+                    )
                     trend = "上升"
-                elif correlation_score > 50:
-                    description = "投资组合中资产相关性较高，多样化效果有限"
-                    trend = "稳定"
-                elif correlation_score > 25:
-                    description = "投资组合中资产相关性适中，有一定多样化效果"
-                    trend = "稳定"
                 else:
-                    description = "投资组合中资产相关性低，多样化效果良好"
-                    trend = "下降"
+                    score = 40  # 中等相关性风险
+                    description = "主要资产分布于不同类别，存在一定相关性风险"
+                    trend = "稳定"
 
-                # 添加高相关性对的信息
-                if high_correlation_pairs:
-                    description += f"，发现{len(high_correlation_pairs)}对高相关性资产"
-
-            # 构建数据点
-            data_points = [
-                {
-                    "asset_pair": f"{pair['asset1']}-{pair['asset2']}",
-                    "correlation": pair["correlation"],
-                }
-                for pair in high_correlation_pairs
-            ]
-            data_points.append({"avg_correlation": avg_correlation})
+            data_points = []
+            for asset, amount in assets.items():
+                weight = amount / total_value
+                if weight > 0.1:  # 只显示占比超过10%的资产
+                    data_points.append(
+                        {
+                            "name": "主要资产",
+                            "asset": asset,
+                            "weight": weight,
+                            "amount": amount,
+                        }
+                    )
 
             return self.create_risk_factor(
                 risk_type=RiskType.MARKET.value,
-                factor_name="资产相关性风险",
-                score=correlation_score,
+                factor_name="市场相关性风险",
+                score=score,
                 weight=0.2,
                 description=description,
                 trend=trend,
                 data_points=data_points,
-                metadata={"correlation_matrix": correlation_matrix},
+                metadata={
+                    "assets": assets,
+                    "significant_assets": significant_assets,
+                    "total_value": total_value,
+                },
             )
         except Exception as e:
             self.logger.error(f"分析市场相关性风险时出错: {str(e)}")

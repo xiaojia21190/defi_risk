@@ -185,3 +185,57 @@ class RiskAnalyzerBase(ABC):
             data_points=data_points,
             metadata=metadata,
         )
+
+    def is_excluded_token(self, token_symbol: str) -> bool:
+        """
+        检查代币是否应该被排除在风险计算之外
+
+        Args:
+            token_symbol: 代币符号
+
+        Returns:
+            如果代币应该被排除则返回True，否则返回False
+        """
+        if not token_symbol:
+            return True
+
+        # 将代币符号转换为小写进行检查
+        token_symbol_lower = token_symbol.lower()
+
+        # 检查是否为yt代币或pt代币
+        if "yt" in token_symbol_lower or "pt" in token_symbol_lower:
+            self.logger.info(f"排除代币{token_symbol}，因为它是yt或pt代币")
+            return True
+
+        return False
+
+    def filter_token_list(
+        self, token_list: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        过滤代币列表，排除不应参与风险计算的代币
+
+        Args:
+            token_list: 代币列表
+
+        Returns:
+            过滤后的代币列表
+        """
+        if not token_list:
+            return []
+
+        filtered_tokens = []
+        for token in token_list:
+            # 忽略奖励代币
+            if token.get("tokenType") == "reward":
+                continue
+
+            token_symbol = token.get("tokenSymbol", "")
+
+            # 检查是否应排除该代币
+            if self.is_excluded_token(token_symbol):
+                continue
+
+            filtered_tokens.append(token)
+
+        return filtered_tokens

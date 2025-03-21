@@ -8,7 +8,10 @@ from app.risk_modules.protocol_risk import ProtocolRiskAnalyzer
 from app.risk_modules.liquidity_risk import LiquidityRiskAnalyzer
 from app.risk_modules.correlation_risk import CorrelationRiskAnalyzer
 from app.risk_modules.smart_contract_risk import SmartContractRiskAnalyzer
+from app.services.ai_predictor import AiPredictor
+from app.services.ai_service import AiService
 from app.services.blockchain import BlockchainService
+from app.services.risk_engine import RiskEngine
 
 __all__ = [
     "RiskAnalyzerBase",
@@ -21,7 +24,9 @@ __all__ = [
 ]
 
 
-def create_risk_analyzers(blockchain_service=None, ai_service=None, ai_predictor=None):
+def create_risk_analyzers(
+    blockchain_service=None, ai_service=None, ai_predictor=None, risk_engine=None
+):
     """
     创建所有风险分析器实例
 
@@ -33,9 +38,19 @@ def create_risk_analyzers(blockchain_service=None, ai_service=None, ai_predictor
     Returns:
         Dict: 包含所有风险分析器实例的字典
     """
+
+    if ai_predictor is None:
+        ai_predictor = AiPredictor()
+
+    if ai_service is None:
+        ai_service = AiService()
+
     # 如果没有提供区块链服务，创建一个
     if blockchain_service is None:
         blockchain_service = BlockchainService()
+
+    if risk_engine is None:
+        risk_engine = RiskEngine()
 
     # 创建各风险分析器实例
     market_risk = MarketRiskAnalyzer(
@@ -48,6 +63,7 @@ def create_risk_analyzers(blockchain_service=None, ai_service=None, ai_predictor
         blockchain_service=blockchain_service,
         ai_service=ai_service,
         ai_predictor=ai_predictor,
+        risk_engine=risk_engine,
     )
 
     liquidity_risk = LiquidityRiskAnalyzer(

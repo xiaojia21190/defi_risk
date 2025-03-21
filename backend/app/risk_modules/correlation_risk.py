@@ -116,43 +116,91 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
 
             # 提取资产列表和权重
             assets = {}
-            for pos in positions:
-                # 尝试从tokenList获取更精确的代币信息
-                if pos.get("tokenList"):
-                    for token in pos.get("tokenList", []):
-                        token_symbol = token.get("tokenSymbol", "")
-                        if token_symbol:
-                            if token_symbol not in assets:
-                                assets[token_symbol] = 0
-                            # 使用代币在池中的比例分配价值
-                            token_value = pos.get("amount", 0) * (
-                                1 / len(pos.get("tokenList", []))
-                            )
-                            assets[token_symbol] += token_value
-                else:
-                    # 如果没有tokenList，使用资产名称
-                    asset = pos.get("asset", "Unknown").split("/")[
-                        0
-                    ]  # 处理流动性池资产格式
-                    if asset not in assets:
-                        assets[asset] = 0
-                    assets[asset] += pos.get("amount", 0)
+            reward_assets = {}  # 单独跟踪奖励代币
+            total_value = 0
 
-            # 如果资产数量少于2，无法计算相关性
+            # 处理嵌套的positions结构
+            for protocol_position in positions:
+                inner_positions = protocol_position.get("positions", [])
+
+                # 遍历每个协议中的具体资产positions
+                for pos in inner_positions:
+                    position_amount = pos.get("amount", 0)
+                    total_value += position_amount
+
+                    # 优先从tokenList获取更精确的代币信息
+                    if pos.get("tokenList"):
+                        # 计算非奖励代币且非排除代币的数量
+                        regular_tokens = self.filter_token_list(
+                            pos.get("tokenList", [])
+                        )
+                        regular_token_count = len(regular_tokens) or 1  # 避免除以零
+
+                        for token in pos.get("tokenList", []):
+                            token_symbol = token.get("tokenSymbol", "")
+                            if not token_symbol:
+                                continue
+
+                            # 排除应该被排除的代币不参与相关性分析
+                            if self.is_excluded_token(token_symbol):
+                                self.logger.info(
+                                    f"相关性分析中排除代币{token_symbol}，因为它是被排除的代币类型"
+                                )
+                                continue
+
+                            # 使用代币实际金额(currencyAmount)而不是平均分配，如果可用
+                            token_value = 0
+                            if (
+                                token.get("currencyAmount")
+                                and float(token.get("currencyAmount", 0)) > 0
+                            ):
+                                try:
+                                    token_value = float(token.get("currencyAmount", 0))
+                                except (ValueError, TypeError):
+                                    # 如果无法转换为float，使用估计值
+                                    token_value = position_amount / regular_token_count
+                            else:
+                                token_value = position_amount / regular_token_count
+
+                            # 根据代币类型分别处理
+                            if token.get("tokenType") == "reward":
+                                if token_symbol not in reward_assets:
+                                    reward_assets[token_symbol] = 0
+                                reward_assets[token_symbol] += token_value
+                            else:
+                                if token_symbol not in assets:
+                                    assets[token_symbol] = 0
+                                assets[token_symbol] += token_value
+                    else:
+                        # 如果没有tokenList，使用资产名称
+                        asset = pos.get("asset", "Unknown").split("/")[
+                            0
+                        ]  # 处理流动性池资产格式
+
+                        # 排除应该被排除的资产
+                        if self.is_excluded_token(asset):
+                            self.logger.info(
+                                f"相关性分析中排除资产{asset}，因为它是被排除的资产类型"
+                            )
+                            continue
+
+                        if asset not in assets:
+                            assets[asset] = 0
+                        assets[asset] += position_amount
+
+            # 如果资产不足，无法进行相关性分析
             if len(assets) < 2:
+                self.logger.warning("检测到的非奖励资产少于2个，无法进行相关性分析")
                 return None
 
-            # 计算总价值
-            total_value = sum(assets.values())
-
-            # 尝试使用AI服务进行相关性分析
+            # 尝试使用AI服务进行资产相关性分析
             if self.ai_service:
                 try:
                     # 准备AI分析的数据
                     ai_input_data = {
                         "assets": list(assets.keys()),
                         "weights": {
-                            asset: (value / total_value)
+                            asset: (value / total_value if total_value > 0 else 0)
                             for asset, value in assets.items()
                         },
                         "analysis_type": "asset_correlation",
@@ -160,7 +208,7 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
 
                     # 使用AI服务进行分析
                     ai_analysis = await self.ai_service.analyze_with_predictor(
-                        analysis_type="correlation_risk", data=ai_input_data
+                        analysis_type="asset_correlation", data=ai_input_data
                     )
 
                     # 提取AI分析结果
@@ -174,12 +222,13 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
                             risk_type=RiskType.CORRELATION.value,
                             factor_name="资产相关性风险",
                             score=risk_score,
-                            weight=0.3,
+                            weight=0.4,
                             description=description,
                             trend=trend,
                             data_points=data_points,
                             metadata={
                                 "assets": assets,
+                                "reward_assets": reward_assets,
                                 "ai_analysis": ai_analysis,
                             },
                         )
@@ -187,155 +236,176 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
                     self.logger.error(f"使用AI分析资产相关性风险时出错: {str(e)}")
                     # 如果AI分析失败，继续使用传统方法
 
-            # 获取资产历史数据并计算相关性
-            asset_pairs = []
+            # 如果AI分析失败或不可用，使用区块链服务获取历史数据计算相关性
+            # 获取所有资产对的相关性数据
+            asset_list = list(assets.keys())
             correlation_matrix = {}
+            high_correlation_pairs = []
+            num_stablecoin_pairs = 0
 
-            # 获取每个资产的历史数据
-            asset_historical_data = {}
-            for asset in assets.keys():
-                historical_data = (
-                    await self.blockchain_service.get_asset_historical_data(asset)
-                )
-                if historical_data is not None and not historical_data.empty:
-                    asset_historical_data[asset] = historical_data
+            for i in range(len(asset_list)):
+                for j in range(i + 1, len(asset_list)):
+                    asset1 = asset_list[i]
+                    asset2 = asset_list[j]
 
-            # 计算资产对之间的相关性
-            for i, asset1 in enumerate(assets.keys()):
-                correlation_matrix[asset1] = {}
-                for j, asset2 in enumerate(assets.keys()):
-                    if i >= j:  # 只计算上三角矩阵
-                        continue
+                    # 如果两个资产都是稳定币，跳过计算（它们应该高度相关）
+                    if self._is_stablecoin(asset1) and self._is_stablecoin(asset2):
+                        # 将稳定币对的相关性设为1.0
+                        correlation = 1.0
+                        num_stablecoin_pairs += 1
+                    else:
+                        # 计算两个资产之间的相关性
+                        correlation = await self._estimate_asset_correlation(
+                            asset1, asset2
+                        )
 
-                    # 计算相关性
-                    correlation = 0
-
-                    # 如果两个资产都有历史数据，计算实际相关性
-                    if (
-                        asset1 in asset_historical_data
-                        and asset2 in asset_historical_data
-                    ):
-                        df1 = asset_historical_data[asset1]
-                        df2 = asset_historical_data[asset2]
-
-                        # 确保两个数据集有相同的时间索引
-                        if not df1.empty and not df2.empty:
-                            # 合并数据集
-                            merged = pd.merge(
-                                df1[["timestamp", "price"]],
-                                df2[["timestamp", "price"]],
-                                on="timestamp",
-                                how="inner",
-                                suffixes=("_1", "_2"),
-                            )
-
-                            if len(merged) > 1:
-                                # 计算相关系数
-                                correlation = np.corrcoef(
-                                    merged["price_1"].values, merged["price_2"].values
-                                )[0, 1]
-
-                    # 如果无法计算实际相关性，使用估计值
-                    if correlation == 0:
-                        correlation = self._estimate_asset_correlation(asset1, asset2)
-
-                    # 存储相关性
+                    # 存储相关性数据
+                    if asset1 not in correlation_matrix:
+                        correlation_matrix[asset1] = {}
                     correlation_matrix[asset1][asset2] = correlation
 
-                    # 添加资产对信息
-                    weight1 = assets[asset1] / total_value if total_value > 0 else 0
-                    weight2 = assets[asset2] / total_value if total_value > 0 else 0
+                    # 记录高相关性对（绝对值超过0.7的相关性被视为高）
+                    if abs(correlation) > 0.7:
+                        high_correlation_pairs.append(
+                            {
+                                "asset1": asset1,
+                                "asset2": asset2,
+                                "correlation": correlation,
+                            }
+                        )
 
-                    asset_pairs.append(
-                        {
-                            "asset1": asset1,
-                            "asset2": asset2,
-                            "correlation": correlation,
-                            "weight1": weight1,
-                            "weight2": weight2,
-                            "combined_weight": weight1 + weight2,
-                        }
-                    )
+            # 计算高相关性对数量和总对数
+            num_high_corr_pairs = len(high_correlation_pairs)
+            total_pairs = (len(asset_list) * (len(asset_list) - 1)) / 2
 
-            # 如果没有资产对，返回None
-            if not asset_pairs:
-                return None
-
-            # 计算加权平均相关性
-            weighted_correlation = sum(
-                pair["correlation"] * pair["combined_weight"] for pair in asset_pairs
-            ) / sum(pair["combined_weight"] for pair in asset_pairs)
-
-            # 计算高相关性资产对的比例
-            high_correlation_pairs = [
-                pair for pair in asset_pairs if pair["correlation"] > 0.7
-            ]
-            high_correlation_ratio = (
-                len(high_correlation_pairs) / len(asset_pairs) if asset_pairs else 0
+            # 排除稳定币对之间的关系
+            adjusted_total_pairs = (
+                total_pairs - num_stablecoin_pairs
+                if total_pairs > num_stablecoin_pairs
+                else 1
             )
 
-            # 计算风险评分 (0-100)
-            # 相关性越高，风险越大
-            risk_score = weighted_correlation * 100
+            # 计算高相关性对的百分比
+            high_corr_percentage = (
+                num_high_corr_pairs / adjusted_total_pairs
+                if adjusted_total_pairs > 0
+                else 0
+            )
 
-            # 构建描述
-            if risk_score > 70:
-                description = "资产相关性极高，投资组合多样化程度低，系统性风险显著"
-                trend = "上升"
-            elif risk_score > 50:
-                description = "资产相关性较高，投资组合多样化不足，存在一定系统性风险"
-                trend = "上升"
-            elif risk_score > 30:
-                description = "资产相关性中等，投资组合多样化适中，系统性风险可控"
-                trend = "稳定"
-            else:
-                description = "资产相关性较低，投资组合多样化程度高，系统性风险较小"
-                trend = "下降"
-
-            # 添加高相关性资产对信息
-            if high_correlation_pairs:
-                description += (
-                    f"，有{len(high_correlation_pairs)}对资产高度相关（>0.7）"
-                )
-
-            # 构建数据点
+            # 创建数据点
             data_points = []
-            for pair in asset_pairs:
+            for pair in high_correlation_pairs:
                 data_points.append(
                     {
-                        "asset1": pair["asset1"],
-                        "asset2": pair["asset2"],
-                        "correlation": pair["correlation"],
-                        "weight1": pair["weight1"],
-                        "weight2": pair["weight2"],
-                        "combined_weight": pair["combined_weight"],
+                        "asset_pair": f"{pair['asset1']}-{pair['asset2']}",
+                        "correlation": round(pair["correlation"], 2),
                     }
                 )
+
+            # 根据高相关性对的百分比计算相关性风险评分
+            if high_corr_percentage >= 0.75:
+                correlation_score = 80  # 高风险
+                description = f"投资组合中{num_high_corr_pairs}对资产({high_corr_percentage:.1%})高度相关，多样化效果差"
+                trend = "上升"
+            elif high_corr_percentage >= 0.5:
+                correlation_score = 60  # 中高风险
+                description = f"投资组合中{num_high_corr_pairs}对资产({high_corr_percentage:.1%})高度相关，多样化效果有限"
+                trend = "稳定"
+            elif high_corr_percentage >= 0.25:
+                correlation_score = 40  # 中低风险
+                description = f"投资组合中{num_high_corr_pairs}对资产({high_corr_percentage:.1%})高度相关，仍有多样化空间"
+                trend = "稳定"
+            else:
+                correlation_score = 20  # 低风险
+                description = f"投资组合中只有{num_high_corr_pairs}对资产({high_corr_percentage:.1%})高度相关，多样化效果好"
+                trend = "下降"
 
             return self.create_risk_factor(
                 risk_type=RiskType.CORRELATION.value,
                 factor_name="资产相关性风险",
-                score=risk_score,
-                weight=0.3,
+                score=correlation_score,
+                weight=0.4,
                 description=description,
                 trend=trend,
                 data_points=data_points,
                 metadata={
-                    "assets": assets,
                     "correlation_matrix": correlation_matrix,
+                    "high_correlation_pairs": high_correlation_pairs,
+                    "assets": assets,
+                    "reward_assets": reward_assets,
                 },
             )
         except Exception as e:
             self.logger.error(f"分析资产相关性风险时出错: {str(e)}")
             return None
 
-    def _estimate_asset_correlation(self, asset1: str, asset2: str) -> float:
-        """估计两个资产之间的相关性"""
-        # 这里应该调用AI预测器或区块链服务获取实际的相关性数据
-        # 现在使用模拟数据
+    async def _estimate_asset_correlation(self, asset1: str, asset2: str) -> float:
+        """估计两个资产之间的相关性，优先使用AI服务"""
+        # 标准化资产名称
+        asset1_upper = asset1.upper()
+        asset2_upper = asset2.upper()
+
+        # 尝试使用AI服务获取相关性
+        if self.ai_service:
+            try:
+                # 准备AI分析的数据
+                ai_input_data = {
+                    "assets": [asset1_upper, asset2_upper],  # 修改为assets列表
+                    "weights": {asset1_upper: 0.5, asset2_upper: 0.5},  # 添加权重信息
+                    "analysis_type": "asset_pair_correlation",  # 分析子类型
+                    "pair_analysis": True,  # 标识这是一个资产对分析
+                }
+
+                # 使用AI服务进行分析
+                ai_result = await self.ai_service.analyze_with_predictor(
+                    analysis_type="asset_correlation",  # 使用现有的分析类型
+                    data=ai_input_data,
+                )
+
+                # 提取相关性结果
+                if ai_result and "correlation_matrix" in ai_result:
+                    # 从相关性矩阵中提取这两个资产的相关性
+                    if (
+                        isinstance(ai_result["correlation_matrix"], dict)
+                        and asset1_upper in ai_result["correlation_matrix"]
+                    ):
+                        correlation = (
+                            ai_result["correlation_matrix"]
+                            .get(asset1_upper, {})
+                            .get(asset2_upper)
+                        )
+                        if correlation is not None:
+                            self.logger.info(
+                                f"使用AI估计资产 {asset1} 和 {asset2} 的相关性: {correlation:.2f}"
+                            )
+                            return float(correlation)
+
+                    # 如果没有找到特定的相关性数据，但有平均相关性
+                    if "avg_correlation" in ai_result:
+                        correlation = float(ai_result["avg_correlation"])
+                        self.logger.info(
+                            f"使用AI估计资产 {asset1} 和 {asset2} 的平均相关性: {correlation:.2f}"
+                        )
+                        return correlation
+
+                # 如果在correlation_matrix中找不到，尝试在其他可能的字段中查找
+                if ai_result and "correlation" in ai_result:
+                    correlation = float(ai_result["correlation"])
+                    self.logger.info(
+                        f"使用AI估计资产 {asset1} 和 {asset2} 的相关性: {correlation:.2f}"
+                    )
+                    return correlation
+
+                self.logger.warning(f"AI返回的结果中没有找到相关性数据: {ai_result}")
+            except Exception as e:
+                self.logger.warning(
+                    f"使用AI估计资产相关性时出错: {str(e)}，将使用后备方法"
+                )
+
+        # 如果AI调用失败或未配置AI服务，使用后备方法
 
         # 检查是否为稳定币
-        if self._is_stablecoin(asset1) and self._is_stablecoin(asset2):
+        if self._is_stablecoin(asset1_upper) and self._is_stablecoin(asset2_upper):
             return 0.95  # 稳定币之间高度相关
 
         # 预定义的相关性数据
@@ -352,12 +422,12 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
             ("UNI", "AAVE"): 0.75,
         }
 
-        # 标准化资产名称
-        asset1 = asset1.upper()
-        asset2 = asset2.upper()
-
         # 查找相关性
-        key = (asset1, asset2) if asset1 < asset2 else (asset2, asset1)
+        key = (
+            (asset1_upper, asset2_upper)
+            if asset1_upper < asset2_upper
+            else (asset2_upper, asset1_upper)
+        )
         if key in correlations:
             return correlations[key]
 
@@ -384,246 +454,287 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
         self, positions: List[Dict[str, Any]]
     ) -> Optional[RiskFactor]:
         """分析协议相关性风险"""
-        # 按协议分组
-        protocols = {}
-        for pos in positions:
-            protocol = pos.get("protocol", "Unknown")
-            if protocol not in protocols:
-                protocols[protocol] = 0
-            protocols[protocol] += pos.get("amount", 0)
+        try:
+            # 处理嵌套的positions结构
+            protocols = {}
+            total_value = 0
 
-        # 如果协议数量少于2，无法计算相关性
-        if len(protocols) < 2:
-            return None
+            # 遍历协议positions
+            for protocol_position in positions:
+                protocol = protocol_position.get("protocol", "Unknown")
+                inner_positions = protocol_position.get("positions", [])
 
-        # 计算协议集中度
-        total_value = sum(protocols.values())
-        if total_value == 0:
-            return None
+                if protocol not in protocols:
+                    protocols[protocol] = 0
 
-        # 尝试使用AI服务进行协议相关性分析
-        if self.ai_service:
-            try:
-                # 准备AI分析的数据
-                ai_input_data = {
-                    "protocols": list(protocols.keys()),
-                    "weights": {
-                        protocol: (value / total_value)
-                        for protocol, value in protocols.items()
-                    },
-                    "analysis_type": "protocol_correlation",
-                }
+                # 累加该协议下所有position的金额
+                for pos in inner_positions:
+                    amount = pos.get("amount", 0)
+                    protocols[protocol] += amount
+                    total_value += amount
 
-                # 使用AI服务进行分析
-                ai_analysis = await self.ai_service.analyze_with_predictor(
-                    analysis_type="protocol_correlation", data=ai_input_data
+            # 如果协议数量少于2，无法计算相关性
+            if len(protocols) < 2:
+                self.logger.warning("检测到的协议少于2个，无法进行协议相关性分析")
+                return None
+
+            # 计算协议集中度
+            if total_value == 0:
+                self.logger.warning("投资组合总价值为0，无法分析协议相关性风险")
+                return None
+
+            # 尝试使用AI服务进行协议相关性分析
+            if self.ai_service:
+                try:
+                    # 准备AI分析的数据
+                    ai_input_data = {
+                        "protocols": list(protocols.keys()),
+                        "weights": {
+                            protocol: (value / total_value)
+                            for protocol, value in protocols.items()
+                        },
+                        "analysis_type": "protocol_correlation",
+                    }
+
+                    # 使用AI服务进行分析
+                    ai_analysis = await self.ai_service.analyze_with_predictor(
+                        analysis_type="protocol_correlation", data=ai_input_data
+                    )
+
+                    # 提取AI分析结果
+                    if ai_analysis and "risk_score" in ai_analysis:
+                        risk_score = ai_analysis.get("risk_score", 50)
+                        description = ai_analysis.get("description", "协议相关性分析")
+                        trend = ai_analysis.get("trend", "稳定")
+                        data_points = ai_analysis.get("data_points", [])
+
+                        return self.create_risk_factor(
+                            risk_type=RiskType.CORRELATION.value,
+                            factor_name="协议相关性风险",
+                            score=risk_score,
+                            weight=0.3,
+                            description=description,
+                            trend=trend,
+                            data_points=data_points,
+                            metadata={
+                                "protocols": protocols,
+                                "ai_analysis": ai_analysis,
+                            },
+                        )
+                except Exception as e:
+                    self.logger.error(f"使用AI分析协议相关性风险时出错: {str(e)}")
+                    # 如果AI分析失败，继续使用传统方法
+
+            # 计算赫芬达尔指数 (HHI)
+            hhi = sum((v / total_value) ** 2 for v in protocols.values())
+
+            # 根据HHI评估风险
+            if hhi > 0.5:
+                score = 80  # 高风险
+                description = "投资组合高度集中在少数几个协议，增加了相关性风险"
+                trend = "上升"
+            elif hhi > 0.3:
+                score = 60  # 中高风险
+                description = "投资组合在协议分布上较为集中，存在一定相关性风险"
+                trend = "稳定"
+            elif hhi > 0.2:
+                score = 40  # 中等风险
+                description = "投资组合在协议分布上相对分散，相关性风险适中"
+                trend = "稳定"
+            else:
+                score = 20  # 低风险
+                description = "投资组合在协议分布上高度分散，相关性风险较低"
+                trend = "下降"
+
+            # 构建数据点
+            data_points = [
+                {
+                    "name": "赫芬达尔指数(HHI)",
+                    "value": hhi,
+                    "description": "衡量协议集中度的指标，值越高表示集中度越高",
+                },
+            ]
+
+            # 添加协议分布数据
+            for protocol, amount in protocols.items():
+                weight = amount / total_value
+                data_points.append(
+                    {
+                        "name": "协议权重",
+                        "protocol": protocol,
+                        "value": weight,
+                        "amount": amount,
+                    }
                 )
 
-                # 提取AI分析结果
-                if ai_analysis and "risk_score" in ai_analysis:
-                    risk_score = ai_analysis.get("risk_score", 50)
-                    description = ai_analysis.get("description", "协议相关性分析")
-                    trend = ai_analysis.get("trend", "稳定")
-                    data_points = ai_analysis.get("data_points", [])
-
-                    return self.create_risk_factor(
-                        risk_type=RiskType.CORRELATION.value,
-                        factor_name="协议相关性风险",
-                        score=risk_score,
-                        weight=0.3,
-                        description=description,
-                        trend=trend,
-                        data_points=data_points,
-                        metadata={
-                            "protocols": protocols,
-                            "ai_analysis": ai_analysis,
-                        },
-                    )
-            except Exception as e:
-                self.logger.error(f"使用AI分析协议相关性风险时出错: {str(e)}")
-                # 如果AI分析失败，继续使用传统方法
-
-        # 计算赫芬达尔指数 (HHI)
-        hhi = sum((v / total_value) ** 2 for v in protocols.values())
-
-        # 根据HHI评估风险
-        if hhi > 0.5:
-            score = 80  # 高风险
-            description = "投资组合高度集中在少数几个协议，增加了相关性风险"
-            trend = "上升"
-        elif hhi > 0.3:
-            score = 60  # 中高风险
-            description = "投资组合在协议分布上较为集中，存在一定相关性风险"
-            trend = "稳定"
-        elif hhi > 0.2:
-            score = 40  # 中等风险
-            description = "投资组合在协议分布上相对分散，相关性风险适中"
-            trend = "稳定"
-        else:
-            score = 20  # 低风险
-            description = "投资组合在协议分布上高度分散，相关性风险较低"
-            trend = "下降"
-
-        # 构建数据点
-        data_points = [
-            {
-                "name": "赫芬达尔指数(HHI)",
-                "value": hhi,
-                "description": "衡量协议集中度的指标，值越高表示集中度越高",
-            },
-        ]
-
-        # 添加协议分布数据
-        for protocol, amount in protocols.items():
-            weight = amount / total_value
-            data_points.append(
-                {
-                    "name": "协议权重",
-                    "protocol": protocol,
-                    "value": weight,
-                    "amount": amount,
-                }
+            return self.create_risk_factor(
+                risk_type=RiskType.CORRELATION.value,
+                factor_name="协议相关性风险",
+                score=score,
+                weight=0.3,
+                description=description,
+                trend=trend,
+                data_points=data_points,
+                metadata={"protocols": protocols, "hhi": hhi},
             )
-
-        return self.create_risk_factor(
-            risk_type=RiskType.CORRELATION.value,
-            factor_name="协议相关性风险",
-            score=score,
-            weight=0.3,
-            description=description,
-            trend=trend,
-            data_points=data_points,
-            metadata={"protocols": protocols, "hhi": hhi},
-        )
+        except Exception as e:
+            self.logger.error(f"分析协议相关性风险时出错: {str(e)}")
+            return None
 
     async def _analyze_investment_type_correlation(
         self, positions: List[Dict[str, Any]]
     ) -> Optional[RiskFactor]:
         """分析投资类型相关性风险"""
-        # 按投资类型分组
-        investment_types = {}
-        for pos in positions:
-            invest_type = pos.get("invest_type", 0)
-            invest_type_name = pos.get("invest_type_name", "未知类型")
-            if invest_type not in investment_types:
-                investment_types[invest_type] = {"name": invest_type_name, "amount": 0}
-            investment_types[invest_type]["amount"] += pos.get("amount", 0)
+        try:
+            # 处理嵌套的positions结构
+            investment_types = {}
+            total_value = 0
 
-        # 如果投资类型数量少于2，无法计算相关性
-        if len(investment_types) < 2:
-            return None
+            # 遍历协议positions
+            for protocol_position in positions:
+                inner_positions = protocol_position.get("positions", [])
 
-        # 计算投资类型集中度
-        total_value = sum(data["amount"] for data in investment_types.values())
-        if total_value == 0:
-            return None
+                # 遍历每个协议中的具体资产positions
+                for pos in inner_positions:
+                    invest_type = pos.get("invest_type", 0)
+                    invest_type_name = pos.get("invest_type_name", "未知类型")
+                    amount = pos.get("amount", 0)
+                    total_value += amount
 
-        # 尝试使用AI服务进行投资类型相关性分析
-        if self.ai_service:
-            try:
-                # 准备AI分析的数据
-                ai_input_data = {
-                    "investment_types": {
-                        str(k): {"name": v["name"], "weight": v["amount"] / total_value}
-                        for k, v in investment_types.items()
-                    },
-                    "analysis_type": "investment_type_correlation",
-                }
+                    if invest_type not in investment_types:
+                        investment_types[invest_type] = {
+                            "name": invest_type_name,
+                            "amount": 0,
+                        }
+                    investment_types[invest_type]["amount"] += amount
 
-                # 使用AI服务进行分析
-                ai_analysis = await self.ai_service.analyze_with_predictor(
-                    analysis_type="investment_type_correlation", data=ai_input_data
+            # 如果投资类型数量少于2，无法计算相关性
+            if len(investment_types) < 2:
+                self.logger.warning(
+                    "检测到的投资类型少于2种，无法进行投资类型相关性分析"
                 )
+                return None
 
-                # 提取AI分析结果
-                if ai_analysis and "risk_score" in ai_analysis:
-                    risk_score = ai_analysis.get("risk_score", 50)
-                    description = ai_analysis.get("description", "投资类型相关性分析")
-                    trend = ai_analysis.get("trend", "稳定")
-                    data_points = ai_analysis.get("data_points", [])
+            # 计算投资类型集中度
+            if total_value == 0:
+                self.logger.warning("投资组合总价值为0，无法分析投资类型相关性风险")
+                return None
 
-                    return self.create_risk_factor(
-                        risk_type=RiskType.CORRELATION.value,
-                        factor_name="投资类型相关性风险",
-                        score=risk_score,
-                        weight=0.2,
-                        description=description,
-                        trend=trend,
-                        data_points=data_points,
-                        metadata={
-                            "investment_types": investment_types,
-                            "ai_analysis": ai_analysis,
+            # 尝试使用AI服务进行投资类型相关性分析
+            if self.ai_service:
+                try:
+                    # 准备AI分析的数据
+                    ai_input_data = {
+                        "investment_types": {
+                            str(k): {
+                                "name": v["name"],
+                                "weight": v["amount"] / total_value,
+                            }
+                            for k, v in investment_types.items()
                         },
+                        "analysis_type": "investment_type_correlation",
+                    }
+
+                    # 使用AI服务进行分析
+                    ai_analysis = await self.ai_service.analyze_with_predictor(
+                        analysis_type="investment_type_correlation", data=ai_input_data
                     )
-            except Exception as e:
-                self.logger.error(f"使用AI分析投资类型相关性风险时出错: {str(e)}")
-                # 如果AI分析失败，继续使用传统方法
 
-        # 计算赫芬达尔指数 (HHI)
-        hhi = sum(
-            (data["amount"] / total_value) ** 2 for data in investment_types.values()
-        )
+                    # 提取AI分析结果
+                    if ai_analysis and "risk_score" in ai_analysis:
+                        risk_score = ai_analysis.get("risk_score", 50)
+                        description = ai_analysis.get(
+                            "description", "投资类型相关性分析"
+                        )
+                        trend = ai_analysis.get("trend", "稳定")
+                        data_points = ai_analysis.get("data_points", [])
 
-        # 根据HHI评估风险
-        if hhi > 0.5:
-            score = 80  # 高风险
-            description = "投资组合高度集中在少数几种投资类型，增加了相关性风险"
-            trend = "上升"
-        elif hhi > 0.3:
-            score = 60  # 中高风险
-            description = "投资组合在投资类型分布上较为集中，存在一定相关性风险"
-            trend = "稳定"
-        elif hhi > 0.2:
-            score = 40  # 中等风险
-            description = "投资组合在投资类型分布上相对分散，相关性风险适中"
-            trend = "稳定"
-        else:
-            score = 20  # 低风险
-            description = "投资组合在投资类型分布上高度分散，相关性风险较低"
-            trend = "下降"
+                        return self.create_risk_factor(
+                            risk_type=RiskType.CORRELATION.value,
+                            factor_name="投资类型相关性风险",
+                            score=risk_score,
+                            weight=0.2,
+                            description=description,
+                            trend=trend,
+                            data_points=data_points,
+                            metadata={
+                                "investment_types": investment_types,
+                                "ai_analysis": ai_analysis,
+                            },
+                        )
+                except Exception as e:
+                    self.logger.error(f"使用AI分析投资类型相关性风险时出错: {str(e)}")
+                    # 如果AI分析失败，继续使用传统方法
 
-        # 构建数据点
-        data_points = [
-            {
-                "name": "赫芬达尔指数(HHI)",
-                "value": hhi,
-                "description": "衡量投资类型集中度的指标，值越高表示集中度越高",
-            },
-        ]
-
-        # 添加投资类型分布数据
-        for invest_type, data in investment_types.items():
-            weight = data["amount"] / total_value
-            data_points.append(
-                {
-                    "name": "投资类型权重",
-                    "invest_type": invest_type,
-                    "invest_type_name": data["name"],
-                    "value": weight,
-                    "amount": data["amount"],
-                }
+            # 计算赫芬达尔指数 (HHI)
+            hhi = sum(
+                (data["amount"] / total_value) ** 2
+                for data in investment_types.values()
             )
 
-        return self.create_risk_factor(
-            risk_type=RiskType.CORRELATION.value,
-            factor_name="投资类型相关性风险",
-            score=score,
-            weight=0.2,
-            description=description,
-            trend=trend,
-            data_points=data_points,
-            metadata={
-                "investment_types": {
-                    str(k): {
-                        "name": v["name"],
-                        "amount": v["amount"],
-                        "percentage": v["amount"] / total_value,
-                    }
-                    for k, v in investment_types.items()
+            # 根据HHI评估风险
+            if hhi > 0.5:
+                score = 80  # 高风险
+                description = "投资组合高度集中在少数几种投资类型，增加了相关性风险"
+                trend = "上升"
+            elif hhi > 0.3:
+                score = 60  # 中高风险
+                description = "投资组合在投资类型分布上较为集中，存在一定相关性风险"
+                trend = "稳定"
+            elif hhi > 0.2:
+                score = 40  # 中等风险
+                description = "投资组合在投资类型分布上相对分散，相关性风险适中"
+                trend = "稳定"
+            else:
+                score = 20  # 低风险
+                description = "投资组合在投资类型分布上高度分散，相关性风险较低"
+                trend = "下降"
+
+            # 构建数据点
+            data_points = [
+                {
+                    "name": "赫芬达尔指数(HHI)",
+                    "value": hhi,
+                    "description": "衡量投资类型集中度的指标，值越高表示集中度越高",
                 },
-                "hhi": hhi,
-            },
-        )
+            ]
+
+            # 添加投资类型分布数据
+            for invest_type, data in investment_types.items():
+                weight = data["amount"] / total_value
+                data_points.append(
+                    {
+                        "name": "投资类型权重",
+                        "invest_type": invest_type,
+                        "invest_type_name": data["name"],
+                        "value": weight,
+                        "amount": data["amount"],
+                    }
+                )
+
+            return self.create_risk_factor(
+                risk_type=RiskType.CORRELATION.value,
+                factor_name="投资类型相关性风险",
+                score=score,
+                weight=0.2,
+                description=description,
+                trend=trend,
+                data_points=data_points,
+                metadata={
+                    "investment_types": {
+                        str(k): {
+                            "name": v["name"],
+                            "amount": v["amount"],
+                            "percentage": v["amount"] / total_value,
+                        }
+                        for k, v in investment_types.items()
+                    },
+                    "hhi": hhi,
+                },
+            )
+        except Exception as e:
+            self.logger.error(f"分析投资类型相关性风险时出错: {str(e)}")
+            return None
 
     async def get_recommendations(self, risk_factors: List[RiskFactor]) -> List[str]:
         """

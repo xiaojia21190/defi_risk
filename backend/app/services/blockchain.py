@@ -21,7 +21,12 @@ from web3 import Web3
 from app.core.config import settings
 from dataclasses import dataclass
 from cachetools import TTLCache
-from app.models.domain.risk import RiskAnalysisResult, RiskMetrics, RiskAnalysis
+from app.models.domain.risk import (
+    RiskAnalysisResult,
+    RiskMetrics,
+    RiskAnalysis,
+    RiskFactor,
+)
 
 
 logger = logging.getLogger("defi_risk.blockchain_service")
@@ -776,6 +781,44 @@ class BlockchainService:
                                                         "network": network,
                                                     }
                                                 )
+                                            rewardDefitokeninfo = invest_token.get(
+                                                "rewardDefiTokenInfo", []
+                                            )[0]
+                                            baseDefiTokenInfos = (
+                                                rewardDefitokeninfo.get(
+                                                    "baseDefiTokenInfos", []
+                                                )
+                                            )
+                                            for reward in baseDefiTokenInfos:
+                                                tokenSymbol = reward.get(
+                                                    "tokenSymbol", ""
+                                                )
+                                                tokenLogo = reward.get("tokenLogo", "")
+                                                coinAmount = reward.get(
+                                                    "coinAmount", ""
+                                                )
+                                                currencyAmount = reward.get(
+                                                    "currencyAmount", ""
+                                                )
+                                                tokenPrecision = reward.get(
+                                                    "tokenPrecision", ""
+                                                )
+                                                tokenAddress = reward.get(
+                                                    "tokenAddress", ""
+                                                )
+                                                network = reward.get("network", "")
+                                                position.tokenList.append(
+                                                    {
+                                                        "tokenSymbol": tokenSymbol,
+                                                        "tokenType": "reward",
+                                                        "tokenLogo": tokenLogo,
+                                                        "coinAmount": coinAmount,
+                                                        "currencyAmount": currencyAmount,
+                                                        "tokenPrecision": tokenPrecision,
+                                                        "tokenAddress": tokenAddress,
+                                                        "network": network,
+                                                    }
+                                                )
 
                                         # 更新平台资产统计
                                         if invest_type == 6:  # 借贷
@@ -907,21 +950,6 @@ class BlockchainService:
 
         # 直接调用CoinGecko方法
         return await self._get_coingecko_24h_data(asset)
-
-        # 以下代码已弃用
-        # try:
-        #     # 尝试从CoinGecko获取数据
-        #     coingecko_data = await self._get_coingecko_24h_data(asset)
-        #     if coingecko_data is not None:
-        #         self.logger.info(f"使用CoinGecko获取{asset}的24小时数据")
-        #         return coingecko_data
-        # except Exception as e:
-        #     self.logger.warning(
-        #         f"从CoinGecko获取{asset}的24小时数据失败: {e}，尝试使用Binance数据"
-        #     )
-
-        # 以下注释掉的代码是原来的Binance数据获取逻辑，现已不再使用
-        # ... 更多注释掉的代码 ...
 
     def _normalize_asset_symbol(self, asset: str) -> str:
         """
@@ -2359,3 +2387,138 @@ class BlockchainService:
             recommendations.append("处于下降趋势，建议谨慎操作")
 
         return recommendations
+
+    async def get_defi_safety_rating(
+        self, protocol_name: str, chain_id: str = None
+    ) -> Dict[str, Any]:
+        """获取DeFi Safety评级数据，支持版本和链筛选"""
+        try:
+            url = f"https://www.defisafety.com/api/pqrs?status=Active&title={protocol_name}"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        if not result.get("data") or len(result["data"]) == 0:
+                            return {
+                                "pqr_score": 0,
+                                "risk_assessment": "Not Found",
+                                "source": "DeFi Safety",
+                            }
+
+                        # 找到最匹配的协议版本
+                        protocol_data = None
+
+                        # 如果提供了链ID，优先匹配该链上最新版本
+                        if chain_id:
+                            for item in result["data"]:
+                                for chain_info in item.get("chain", []):
+                                    if chain_info.get("chainID") == chain_id:
+                                        if (
+                                            not protocol_data
+                                            or item["date"] > protocol_data["date"]
+                                        ):
+                                            protocol_data = item
+
+                        # 如果没找到匹配链的协议或未提供链ID，选择最新版本
+                        if not protocol_data:
+                            protocol_data = max(
+                                result["data"], key=lambda x: x.get("date", "")
+                            )
+
+                        return {
+                            "pqr_score": protocol_data.get("finalScore", 0),
+                            "protocol_version": protocol_data.get("title", "")
+                            .replace(protocol_name, "")
+                            .strip(),
+                            "risk_assessment": (
+                                "Low"
+                                if protocol_data.get("finalScore", 0) >= 80
+                                else (
+                                    "Medium"
+                                    if protocol_data.get("finalScore", 0) >= 60
+                                    else "High"
+                                )
+                            ),
+                            "last_updated": protocol_data.get("date"),
+                            "supported_chains": [
+                                chain["name"]
+                                for chain in protocol_data.get("chain", [])
+                            ],
+                            "categories": protocol_data.get("categories", []),
+                            "source": "DeFi Safety",
+                            "url": protocol_data.get("url", ""),
+                        }
+
+                    return {
+                        "pqr_score": 0,
+                        "risk_assessment": "API Error",
+                        "source": "DeFi Safety",
+                    }
+        except Exception as e:
+            logger.error(f"获取DeFi Safety数据失败: {str(e)}")
+            return {"pqr_score": 0, "risk_assessment": "Error", "source": "DeFi Safety"}
+
+    async def analyze_protocol_security(
+        self, protocol_name: str, chain_id: str = None
+    ) -> RiskFactor:
+        """分析协议安全风险，集成DeFi Safety数据"""
+        try:
+            # 获取DeFi Safety评级
+            defi_safety_data = await self.get_defi_safety_rating(
+                protocol_name, chain_id
+            )
+
+            # 基础风险评分 - DeFi Safety评分越高风险越低
+            if defi_safety_data and defi_safety_data["pqr_score"] > 0:
+                # 将DeFi Safety满分100转换为风险评分(100为无风险)
+                base_risk_score = 100 - defi_safety_data["pqr_score"]
+
+                # 数据新鲜度调整(数据越新可信度越高)
+                from datetime import datetime
+
+                data_age = (
+                    datetime.now()
+                    - datetime.strptime(defi_safety_data["last_updated"], "%Y-%m-%d")
+                ).days
+                freshness_factor = min(
+                    1.0, max(0.7, 1 - (data_age / 365))
+                )  # 数据超过1年老化到70%权重
+
+                # 评分可信度调整
+                confidence = 0.9 if defi_safety_data["pqr_score"] > 0 else 0.5
+
+                # 构建风险描述
+                description = f"{protocol_name} 安全评分: {defi_safety_data['pqr_score']}/100 ({defi_safety_data['risk_assessment']})"
+
+                # 如果有版本信息，添加到描述
+                if defi_safety_data.get("protocol_version"):
+                    description += f", 版本: {defi_safety_data['protocol_version']}"
+
+                description += f", 最后更新: {defi_safety_data['last_updated']}"
+
+                # 添加数据来源参考
+                description += f" (来源: DeFi Safety)"
+
+                # 生成风险因子
+                return self.create_risk_factor(
+                    risk_type="SMART_CONTRACT",
+                    factor_name="智能合约安全性",
+                    score=base_risk_score,
+                    confidence=confidence * freshness_factor,
+                    weight=0.4,
+                    description=description,
+                    trend="稳定",
+                    data_points=[
+                        {
+                            "protocol": protocol_name,
+                            "safety_score": defi_safety_data["pqr_score"],
+                            "risk_score": base_risk_score,
+                            "last_updated": defi_safety_data["last_updated"],
+                            "source": "DeFi Safety",
+                        }
+                    ],
+                    metadata=defi_safety_data,
+                )
+        except Exception as e:
+            logger.error(f"分析协议安全风险时出错: {str(e)}")
+            # 使用后备方法...

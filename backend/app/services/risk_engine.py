@@ -59,6 +59,10 @@ class RiskEngine:
         if hasattr(analyzer, "blockchain_service") and self.blockchain_service:
             analyzer.blockchain_service = self.blockchain_service
 
+        # 设置对RiskEngine的引用，以便分析器可以调用RiskEngine的方法
+        if hasattr(analyzer, "risk_engine"):
+            analyzer.risk_engine = self
+
         self.risk_analyzers[risk_type] = analyzer
 
     async def analyze_wallet_risk(self, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -608,55 +612,109 @@ class RiskEngine:
     async def _analyze_protocol_security(self, protocol: str) -> Optional[RiskFactor]:
         """分析协议安全风险"""
         try:
-            # 使用AI预测器分析协议风险
+            # 初始化数据收集对象
+            protocol_data = {
+                "protocol_metadata": {"name": protocol},
+                "basic_analysis": {},
+                "historical_tvl": [],
+                "chain_distribution": {},
+            }
+
+            # 获取DeFi Safety评分（如果区块链服务可用）
+            defi_safety_factor = None
+            if self.blockchain_service:
+                try:
+                    # 直接调用blockchain_service的analyze_protocol_security方法获取DeFi Safety数据
+                    defi_safety_factor = (
+                        await self.blockchain_service.analyze_protocol_security(
+                            protocol
+                        )
+                    )
+
+                    # 获取协议TVL
+                    tvl = await self.blockchain_service.get_protocol_tvl(protocol)
+                    protocol_data["basic_analysis"]["tvl"] = tvl
+
+                    # 获取协议历史TVL
+                    historical_tvl = (
+                        await self.blockchain_service.get_protocol_historical_tvl(
+                            protocol
+                        )
+                    )
+                    protocol_data["historical_tvl"] = historical_tvl
+
+                    # 获取协议审计状态
+                    audit_status = (
+                        await self.blockchain_service.get_protocol_audit_status(
+                            protocol
+                        )
+                    )
+                    protocol_data["basic_analysis"]["audit_status"] = audit_status
+                except Exception as e:
+                    self.logger.error(f"获取协议安全数据时出错: {str(e)}")
+
+            # 使用AI预测器分析风险（如果可用）
+            ai_analysis = None
             if self.ai_predictor:
-                protocol_data = {
-                    "protocol_metadata": {"name": protocol},
-                    "basic_analysis": {},
-                    "historical_tvl": [],
-                    "chain_distribution": {},
+                try:
+                    # 使用AI预测器分析
+                    ai_analysis = self.ai_predictor.analyze_defi_protocol_risk(
+                        protocol_data
+                    )
+                except Exception as e:
+                    self.logger.error(f"使用AI预测器分析协议风险时出错: {str(e)}")
+
+            # 生成最终风险分析结果
+            if defi_safety_factor and ai_analysis:
+                # 如果两种方法都可用，结合二者的分析结果
+                # AI分析的权重0.6，DeFi Safety的权重0.4
+                ai_score = ai_analysis.get("risk_metrics", {}).get("security_risk", 50)
+                defi_safety_score = defi_safety_factor.score
+
+                final_score = ai_score * 0.6 + defi_safety_score * 0.4
+
+                # 合并描述
+                description = f"{protocol}协议安全风险评分: {final_score:.1f}。"
+                description += f"DeFi Safety评分: {defi_safety_factor.data_points[0].get('pqr_score', 'N/A') if defi_safety_factor.data_points else 'N/A'}。"
+                if "recommendations" in ai_analysis and ai_analysis["recommendations"]:
+                    description += f" AI建议: {ai_analysis['recommendations'][0]}"
+
+                # 创建合并后的风险因子
+                merged_data_points = []
+                if defi_safety_factor.data_points:
+                    merged_data_points.extend(defi_safety_factor.data_points)
+                if ai_analysis and "data_points" in ai_analysis:
+                    merged_data_points.extend(ai_analysis["data_points"])
+
+                # 创建合并的元数据
+                merged_metadata = {
+                    "ai_analysis": ai_analysis,
+                    "defi_safety": defi_safety_factor.metadata,
                 }
 
-                # 如果有区块链服务，获取更多数据
-                if self.blockchain_service:
-                    try:
-                        # 获取协议TVL
-                        tvl = await self.blockchain_service.get_protocol_tvl(protocol)
-                        protocol_data["basic_analysis"]["tvl"] = tvl
-
-                        # 获取协议历史TVL
-                        historical_tvl = (
-                            await self.blockchain_service.get_protocol_historical_tvl(
-                                protocol
-                            )
-                        )
-                        protocol_data["historical_tvl"] = historical_tvl
-
-                        # 获取协议审计状态
-                        audit_status = (
-                            await self.blockchain_service.get_protocol_audit_status(
-                                protocol
-                            )
-                        )
-                        protocol_data["basic_analysis"]["audit_status"] = audit_status
-                    except Exception as e:
-                        self.logger.error(f"获取协议数据时出错: {str(e)}")
-
-                # 使用AI预测器分析
-                analysis = self.ai_predictor.analyze_defi_protocol_risk(protocol_data)
-
-                # 提取安全风险评分
-                security_score = analysis.get("risk_metrics", {}).get(
+                return self.create_risk_factor(
+                    risk_type="PROTOCOL",
+                    factor_name="协议安全性",
+                    score=final_score,
+                    weight=0.4,
+                    description=description,
+                    trend=defi_safety_factor.trend,
+                    data_points=merged_data_points,
+                    metadata=merged_metadata,
+                )
+            elif defi_safety_factor:
+                # 如果只有DeFi Safety数据可用
+                return defi_safety_factor
+            elif ai_analysis:
+                # 如果只有AI分析可用
+                security_score = ai_analysis.get("risk_metrics", {}).get(
                     "security_risk", 50
                 )
 
                 # 生成描述
                 description = f"{protocol}协议安全风险评分: {security_score}"
-                if "recommendations" in analysis:
-                    description += f"。建议: {analysis['recommendations'][0] if analysis['recommendations'] else ''}"
-
-                # 确定趋势
-                trend = "稳定"
+                if "recommendations" in ai_analysis and ai_analysis["recommendations"]:
+                    description += f"。建议: {ai_analysis['recommendations'][0]}"
 
                 return self.create_risk_factor(
                     risk_type="PROTOCOL",
@@ -664,15 +722,21 @@ class RiskEngine:
                     score=security_score,
                     weight=0.4,
                     description=description,
-                    trend=trend,
-                    data_points=[
-                        {"protocol": protocol, "security_score": security_score}
-                    ],
-                    metadata=analysis,
+                    trend="稳定",
+                    data_points=ai_analysis.get("data_points", []),
+                    metadata=ai_analysis,
                 )
-
-            # 如果没有AI预测器，使用现有的硬编码逻辑
-            # 现有代码保持不变...
+            else:
+                # 如果两种方法都不可用，返回默认风险因子
+                return self.create_risk_factor(
+                    risk_type="PROTOCOL",
+                    factor_name="协议安全性",
+                    score=70,  # 默认高风险
+                    weight=0.4,
+                    description=f"{protocol}协议安全风险分析失败",
+                    trend="稳定",
+                    data_points=[{"protocol": protocol, "security_score": 70}],
+                )
 
         except Exception as e:
             self.logger.error(f"分析协议安全风险时出错: {str(e)}")

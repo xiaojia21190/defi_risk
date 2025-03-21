@@ -15,10 +15,17 @@ from app.services.recommendation_service import RecommendationService
 class ProtocolRiskAnalyzer(RiskAnalyzerBase):
     """协议风险分析器"""
 
-    def __init__(self, ai_service=None, ai_predictor=None, blockchain_service=None):
+    def __init__(
+        self,
+        ai_service=None,
+        ai_predictor=None,
+        blockchain_service=None,
+        risk_engine=None,
+    ):
         """初始化协议风险分析器"""
         super().__init__(ai_service, ai_predictor, blockchain_service)
         self.recommendation_service = RecommendationService()
+        self.risk_engine = risk_engine
 
     async def analyze(self, protocol: str) -> RiskAnalysisResult:
         """分析协议风险"""
@@ -98,7 +105,11 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
                 risk_type=RiskType.PROTOCOL.value,
                 target=protocol,
                 score=50,  # 默认中等风险
-                factors=[],
+                factors=[
+                    "无法完成风险分析，请检查输入的协议名称是否正确",
+                    "确保区块链服务正常运行",
+                    "尝试稍后再次分析",
+                ],
                 recommendations=[
                     "无法完成风险分析，请检查输入的协议名称是否正确",
                     "确保区块链服务正常运行",
@@ -161,6 +172,12 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
     async def _analyze_protocol_security(self, protocol: str) -> Optional[RiskFactor]:
         """分析协议安全风险"""
         try:
+            # 直接调用RiskEngine的安全风险分析方法
+            # 注意：这要求ProtocolRiskAnalyzer实例化时能访问RiskEngine实例
+            if hasattr(self, "risk_engine") and self.risk_engine:
+                return await self.risk_engine._analyze_protocol_security(protocol)
+
+            # 如果没有访问RiskEngine的权限，使用现有的分析逻辑
             if not self.blockchain_service:
                 self.logger.warning("区块链服务未初始化，无法获取协议安全数据")
                 return None
