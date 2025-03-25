@@ -170,6 +170,28 @@ export interface MarketAnalysis {
   signals: string[];
 }
 
+// 钱包风险评估接口
+export interface WalletRiskAssessment {
+  wallet_address: string;
+  risk_score: number;
+  risk_level: string;
+  risk_factors: string[];
+  risk_metrics: {
+    [key: string]: number | string;
+  };
+  recommendations: string[];
+  warnings: string[];
+  monitoring_points: string[];
+  analysis_timestamp: string;
+  positions_summary?: {
+    total_value: number;
+    position_count: number;
+    protocols: string[];
+    assets: string[];
+  };
+  ai_enhanced?: boolean;
+}
+
 export interface DemoStatus {
   demo_mode: boolean;
   timestamp: string;
@@ -347,8 +369,8 @@ class ApiService {
     }
   }
 
-  // 新方法：获取钱包风险评估
-  async getWalletRiskAssessment(address: string): Promise<{ risk_level: string, recommendations: string[] }> {
+  // 钱包风险评估接口
+  async getWalletRiskAssessment(address: string): Promise<WalletRiskAssessment> {
     if (!address || address === '') {
       throw new Error('未提供钱包地址');
     }
@@ -356,9 +378,19 @@ class ApiService {
     try {
       const response = await this.fetchJson<any>(`/wallet/${address}/risk`);
 
+      // 格式化响应数据为WalletRiskAssessment类型
       return {
-        risk_level: response.risk_assessment?.risk_level || "medium",
-        recommendations: response.risk_assessment?.recommendations || []
+        wallet_address: address,
+        risk_score: response.risk_score || 0,
+        risk_level: response.risk_level || "中等",
+        risk_factors: response.risk_factors || [],
+        risk_metrics: response.risk_metrics || {},
+        recommendations: response.recommendations || [],
+        warnings: response.warnings || [],
+        monitoring_points: response.monitoring_points || [],
+        analysis_timestamp: response.analysis_timestamp || new Date().toISOString(),
+        positions_summary: response.positions_summary,
+        ai_enhanced: response.ai_enhanced || false
       };
     } catch (error) {
       console.error('获取钱包风险评估失败:', error);

@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { motion } from "framer-motion";
 
 interface AlertsListProps {
   address?: string;
@@ -253,9 +254,9 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
   return (
     <Card>
       <CardHeader>
-        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-4 justify-between items-start sm:flex-row sm:items-center">
           <div>
-            <CardTitle className="flex items-center gap-2">
+            <CardTitle className="flex gap-2 items-center">
               <AlertTriangle className="w-5 h-5 text-amber-500" />
               风险警报
               {stats.total > 0 && (
@@ -267,10 +268,10 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
             <CardDescription>监控您的DeFi投资风险和市场变化</CardDescription>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex gap-4 items-center">
             {lastRefreshTime && <span className="hidden text-xs text-muted-foreground sm:inline-block">上次更新: {lastRefreshTime}</span>}
 
-            <div className="flex items-center gap-2">
+            <div className="flex gap-2 items-center">
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -319,38 +320,43 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
 
       <CardContent>
         {/* 过滤器 */}
-        <div className="flex flex-wrap gap-2 mb-4">
-          <div>
-            <span className="mr-2 text-xs text-muted-foreground">严重性:</span>
-            <div className="flex gap-1 mt-1">
-              <Badge variant={!filter.severity ? "default" : "secondary"} className="cursor-pointer" onClick={() => setFilter({ ...filter, severity: null })}>
-                全部
-              </Badge>
-              {Object.entries(severityConfigs).map(([key, config]) => (
-                <Badge key={key} variant={filter.severity === key ? (key === "high" ? "destructive" : key === "medium" ? "secondary" : "default") : "outline"} className="cursor-pointer" onClick={() => setFilter({ ...filter, severity: key as Alert["severity"] })}>
-                  <div className="flex items-center gap-1">
-                    {config.icon}
-                    <span>{config.label}</span>
-                  </div>
-                </Badge>
-              ))}
+        <div className="p-4 mb-6 rounded-lg border bg-muted/30">
+          <div className="flex flex-col justify-between items-start space-y-4 sm:flex-row sm:space-y-0 sm:space-x-4 sm:items-center">
+            <div className="flex items-center space-x-2">
+              <Filter className="w-4 h-4 text-muted-foreground" />
+              <h3 className="text-sm font-medium">筛选警报</h3>
             </div>
-          </div>
 
-          <div className="ml-auto">
-            <span className="mr-2 text-xs text-muted-foreground">类型:</span>
-            <div className="flex flex-wrap gap-1 mt-1">
-              <Badge variant={!filter.type ? "default" : "secondary"} className="cursor-pointer" onClick={() => setFilter({ ...filter, type: null })}>
-                全部
-              </Badge>
-              {Object.entries(typeConfigs).map(([key, config]) => (
-                <Badge key={key} variant={filter.type === key ? "default" : "secondary"} className="cursor-pointer" onClick={() => setFilter({ ...filter, type: key as Alert["type"] })}>
-                  <div className="flex items-center gap-1">
-                    {config.icon}
-                    <span>{config.label}</span>
-                  </div>
-                </Badge>
-              ))}
+            <div className="flex flex-wrap gap-2">
+              <Select value={filter.severity || ""} onValueChange={(value: string) => setFilter({ ...filter, severity: value || null })}>
+                <SelectTrigger className="w-32 h-8">
+                  <SelectValue placeholder="严重性" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">全部严重性</SelectItem>
+                  <SelectItem value="high">高</SelectItem>
+                  <SelectItem value="medium">中</SelectItem>
+                  <SelectItem value="low">低</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={filter.type || ""} onValueChange={(value: string) => setFilter({ ...filter, type: value || null })}>
+                <SelectTrigger className="w-32 h-8">
+                  <SelectValue placeholder="警报类型" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">全部类型</SelectItem>
+                  {Object.entries(typeConfigs).map(([type, config]) => (
+                    <SelectItem key={type} value={type}>
+                      <div className="flex items-center">{config.label}</div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Button variant="outline" size="sm" onClick={() => setFilter({ severity: null, type: null })} disabled={!filter.severity && !filter.type}>
+                重置
+              </Button>
             </div>
           </div>
         </div>
@@ -360,19 +366,19 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
           <div className="grid grid-cols-2 gap-4 mb-6 md:grid-cols-4">
             <Card className="bg-secondary/30">
               <CardContent className="p-4">
-                <div className="flex items-center justify-between">
+                <div className="flex justify-between items-center">
                   <div>
                     <p className="text-sm text-muted-foreground">总警报</p>
                     <p className="text-2xl font-bold">{stats.total}</p>
                   </div>
-                  <Bell className="w-8 h-8 text-primary opacity-80" />
+                  <Bell className="w-8 h-8 opacity-80 text-primary" />
                 </div>
               </CardContent>
             </Card>
 
             <Card className={cn("transition-colors", stats.high > 0 ? "bg-destructive/10" : "bg-secondary/30")}>
               <CardContent className="p-4">
-                <div className="flex items-center justify-between">
+                <div className="flex justify-between items-center">
                   <div>
                     <p className="text-sm text-muted-foreground">高风险</p>
                     <p className={cn("text-2xl font-bold", stats.high > 0 && "text-destructive")}>{stats.high}</p>
@@ -384,7 +390,7 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
 
             <Card className={cn("transition-colors", stats.medium > 0 ? "bg-amber-500/10" : "bg-secondary/30")}>
               <CardContent className="p-4">
-                <div className="flex items-center justify-between">
+                <div className="flex justify-between items-center">
                   <div>
                     <p className="text-sm text-muted-foreground">中风险</p>
                     <p className={cn("text-2xl font-bold", stats.medium > 0 && "text-amber-500")}>{stats.medium}</p>
@@ -396,7 +402,7 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
 
             <Card className={cn("transition-colors", stats.low > 0 ? "bg-green-500/10" : "bg-secondary/30")}>
               <CardContent className="p-4">
-                <div className="flex items-center justify-between">
+                <div className="flex justify-between items-center">
                   <div>
                     <p className="text-sm text-muted-foreground">低风险</p>
                     <p className={cn("text-2xl font-bold", stats.low > 0 && "text-green-500")}>{stats.low}</p>
@@ -410,12 +416,12 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
 
         {/* 警报列表 */}
         {loading ? (
-          <div className="flex items-center justify-center py-12">
+          <div className="flex justify-center items-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
           </div>
         ) : error ? (
           <div className="py-8 text-center">
-            <AlertTriangle className="w-8 h-8 mx-auto mb-2 text-destructive" />
+            <AlertTriangle className="mx-auto mb-2 w-8 h-8 text-destructive" />
             <p className="text-muted-foreground">{error}</p>
             <Button className="mt-4" onClick={handleRefresh}>
               重试
@@ -423,55 +429,58 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
           </div>
         ) : filteredAlerts.length === 0 ? (
           <div className="py-12 text-center">
-            <CheckCircle className="w-12 h-12 mx-auto mb-4 text-green-500 opacity-80" />
+            <CheckCircle className="mx-auto mb-4 w-12 h-12 text-green-500 opacity-80" />
             <h3 className="mb-2 text-lg font-medium">暂无警报</h3>
             <p className="text-muted-foreground">{stats.total > 0 ? "没有符合当前筛选条件的警报" : "您的投资组合目前没有任何风险警报"}</p>
           </div>
         ) : (
           <div className="space-y-4">
-            {filteredAlerts.map((alert) => {
+            {filteredAlerts.map((alert, index) => {
               const severityConfig = severityConfigs[alert.severity];
               const typeConfig = typeConfigs[alert.type];
 
               return (
-                <Card key={alert.id} className="overflow-hidden">
-                  <div className={cn("h-1", severityConfig.color)} />
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Badge variant={severityConfig.color} className="flex items-center gap-1">
-                            {severityConfig.icon}
-                            <span>{severityConfig.label}</span>
-                          </Badge>
-                          <Badge variant="secondary" className="flex items-center gap-1">
-                            {typeConfig.icon}
-                            <span>{typeConfig.label}</span>
-                          </Badge>
-                          <span className="ml-auto text-xs text-muted-foreground">{formatTimestamp(alert.timestamp)}</span>
-                        </div>
-
-                        <h4 className="mb-1 font-medium">{alert.message}</h4>
-
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          <Badge variant="secondary" className="text-xs">
-                            协议: {alert.protocol}
-                          </Badge>
-                          <Badge variant="secondary" className="text-xs">
-                            资产: {alert.asset}
-                          </Badge>
-                        </div>
-
-                        {alert.details?.recommendation && (
-                          <div className="mt-3 text-sm text-muted-foreground">
-                            <span className="font-medium">建议: </span>
-                            {alert.details.recommendation}
-                          </div>
-                        )}
+                <motion.div
+                  key={alert.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, delay: index * 0.05 }}
+                  className={cn("mb-4 p-4 rounded-lg border shadow-sm", alert.severity === "high" ? "border-destructive/50 bg-destructive/10" : alert.severity === "medium" ? "border-warning/50 bg-warning/10" : "border-success/50 bg-success/10")}
+                >
+                  <div className="flex gap-4 justify-between items-start">
+                    <div className="flex-1">
+                      <div className="flex gap-2 items-center mb-1">
+                        <Badge variant={severityConfig.color} className="flex gap-1 items-center">
+                          {severityConfig.icon}
+                          <span>{severityConfig.label}</span>
+                        </Badge>
+                        <Badge variant="secondary" className="flex gap-1 items-center">
+                          {typeConfig.icon}
+                          <span>{typeConfig.label}</span>
+                        </Badge>
+                        <span className="ml-auto text-xs text-muted-foreground">{formatTimestamp(alert.timestamp)}</span>
                       </div>
+
+                      <h4 className="mb-1 font-medium">{alert.message}</h4>
+
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        <Badge variant="secondary" className="text-xs">
+                          协议: {alert.protocol}
+                        </Badge>
+                        <Badge variant="secondary" className="text-xs">
+                          资产: {alert.asset}
+                        </Badge>
+                      </div>
+
+                      {alert.details?.recommendation && (
+                        <div className="mt-3 text-sm text-muted-foreground">
+                          <span className="font-medium">建议: </span>
+                          {alert.details.recommendation}
+                        </div>
+                      )}
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </motion.div>
               );
             })}
           </div>

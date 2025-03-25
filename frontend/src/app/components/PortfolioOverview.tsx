@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { apiService } from "../services/api";
 
-// 使用简单的自定义饼图组件
+// 增强SimplePieChart组件，添加悬停效果
 const SimplePieChart: React.FC<{
   data: Array<{
     title: string;
@@ -20,6 +20,7 @@ const SimplePieChart: React.FC<{
   }>;
   total: number;
 }> = ({ data, total }) => {
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const totalValue = total || data.reduce((sum, item) => sum + item.value, 0);
 
   return (
@@ -39,23 +40,47 @@ const SimplePieChart: React.FC<{
 
           const pathData = [`M 50 50`, `L ${x1} ${y1}`, `A 40 40 0 ${largeArcFlag} 1 ${x2} ${y2}`, `L 50 50`].join(" ");
 
-          return <path key={item.title} d={pathData} fill={item.color} stroke="white" strokeWidth="0.5" />;
+          return (
+            <path
+              key={item.title}
+              d={pathData}
+              fill={item.color}
+              stroke="white"
+              strokeWidth="0.5"
+              className="transition-all duration-300 cursor-pointer"
+              style={{
+                transform: activeIndex === index ? "translate(2px, 2px)" : "none",
+                filter: activeIndex === index ? "drop-shadow(0 0 5px rgba(0,0,0,0.3))" : "none",
+                opacity: activeIndex !== null && activeIndex !== index ? 0.7 : 1,
+              }}
+              onMouseEnter={() => setActiveIndex(index)}
+              onMouseLeave={() => setActiveIndex(null)}
+            />
+          );
         })}
       </svg>
       <div className="flex absolute inset-0 flex-col justify-center items-center text-center">
-        {data.map((item) => {
-          const percentage = (item.value / totalValue) * 100;
-          if (percentage > 5) {
-            return (
-              <div key={item.title} className="text-xs font-medium text-white" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>
-                {item.title}
-                <br />
-                {percentage.toFixed(1)}%
-              </div>
-            );
-          }
-          return null;
-        })}
+        {activeIndex !== null ? (
+          <div className="text-sm font-medium">
+            {data[activeIndex].title}
+            <br />
+            {((data[activeIndex].value / totalValue) * 100).toFixed(1)}%
+          </div>
+        ) : (
+          data.map((item) => {
+            const percentage = (item.value / totalValue) * 100;
+            if (percentage > 5) {
+              return (
+                <div key={item.title} className="text-xs font-medium text-white" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>
+                  {item.title}
+                  <br />
+                  {percentage.toFixed(1)}%
+                </div>
+              );
+            }
+            return null;
+          })
+        )}
       </div>
     </div>
   );
@@ -277,17 +302,68 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
 
   return (
     <div className="space-y-6">
+      <div className="grid gap-4 grid-cols-2 sm:grid-cols-4 mb-6">
+        <Card className="bg-gradient-to-br from-primary/20 to-primary/5">
+          <CardContent className="p-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="text-sm text-muted-foreground">总资产价值</p>
+                <h3 className="text-2xl font-bold mt-1">${formatCurrency(portfolio.total_value_usd)}</h3>
+              </div>
+              <div className="p-2 rounded-full bg-primary/10">
+                <DollarSign className="h-5 w-5 text-primary" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-blue-500/20 to-blue-500/5">
+          <CardContent className="p-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="text-sm text-muted-foreground">协议数量</p>
+                <h3 className="text-2xl font-bold mt-1">{portfolio.protocol_count}</h3>
+              </div>
+              <div className="p-2 rounded-full bg-blue-500/10">
+                <Network className="h-5 w-5 text-blue-500" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-amber-500/20 to-amber-500/5">
+          <CardContent className="p-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="text-sm text-muted-foreground">头寸数量</p>
+                <h3 className="text-2xl font-bold mt-1">{portfolio.position_count}</h3>
+              </div>
+              <div className="p-2 rounded-full bg-amber-500/10">
+                <Coins className="h-5 w-5 text-amber-500" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-green-500/20 to-green-500/5">
+          <CardContent className="p-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="text-sm text-muted-foreground">平均APY</p>
+                <h3 className="text-2xl font-bold mt-1">{calculateAverageApy(portfolio)}%</h3>
+              </div>
+              <div className="p-2 rounded-full bg-green-500/10">
+                <Percent className="h-5 w-5 text-green-500" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       <Card>
         <CardHeader>
-          <div className="flex justify-between items-center">
-            <div>
-              <CardTitle>投资组合概览</CardTitle>
-              <CardDescription>总资产价值: {formatCurrency(portfolio.total_value_usd)}</CardDescription>
-            </div>
-            <div className="flex gap-2 items-center">
-              <Badge variant={portfolio.is_demo_data ? "secondary" : "default"}>{portfolio.is_demo_data ? "演示数据" : "实时数据"}</Badge>
-            </div>
-          </div>
+          <CardTitle>投资组合概览</CardTitle>
+          <CardDescription>总资产价值: {formatCurrency(portfolio.total_value_usd)}</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">

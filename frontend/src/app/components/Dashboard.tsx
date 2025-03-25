@@ -7,8 +7,8 @@ import PortfolioOverview from "./PortfolioOverview";
 import AlertsList from "./AlertsList";
 import MarketAnalysis from "./MarketAnalysis";
 import { apiService } from "../services/api";
-import type { Portfolio, MarketPrediction, Position } from "../services/api";
-import { Loader2, RefreshCw, AlertTriangle, Fuel, Shield, BarChart3, Settings, History, TrendingUp, Wallet } from "lucide-react";
+import type { Portfolio, MarketPrediction, Position, WalletRiskAssessment } from "../services/api";
+import { Loader2, RefreshCw, AlertTriangle, Fuel, Shield, BarChart3, Settings, History, TrendingUp, Wallet, Zap } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -17,25 +17,86 @@ import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 
-// 风险分析结果接口
-interface RiskAnalysis {
-  risk_level: string;
-  recommendations: string[];
-  market_analysis?: {
-    [key: string]: {
-      current_price: number;
-      volume_24h: number;
-      market_cap: number;
-      price_change_24h: number;
-      volatility_30d: number;
-    };
+// 风险分析结果接口使用API中定义的WalletRiskAssessment
+
+// 将Portfolio类型转换为PortfolioOverview组件所需的格式
+const adaptPortfolioForOverview = (portfolio: Portfolio) => {
+  if (!portfolio) return null;
+
+  // 转换为PortfolioOverview所需的格式
+  const adaptedPortfolio = {
+    wallet_address: portfolio.wallet_address,
+    total_value: portfolio.total_value,
+    total_value_usd: portfolio.total_value_usd,
+    position_count: portfolio.position_count,
+    protocol_count: portfolio.protocol_count,
+    positions: portfolio.positions.reduce(
+      (protocolPositions, position) => {
+        // 查找此协议是否已经存在于转换结果中
+        let protocolPosition = protocolPositions.find((p) => p.protocol === position.protocol);
+
+        // 如果不存在，创建一个新的协议位置
+        if (!protocolPosition) {
+          protocolPosition = {
+            protocol: position.protocol,
+            total_assets: 0,
+            total_debts: 0,
+            leverage: position.leverage || 1,
+            positions: [],
+          };
+          protocolPositions.push(protocolPosition);
+        }
+
+        // 添加位置到协议位置中
+        protocolPosition.positions.push({
+          protocol: position.protocol,
+          asset: position.asset,
+          amount: position.amount || 0,
+          invest_type: position.invest_type || 0,
+          apy: position.apy || null,
+          tokenList: position.tokenList || [],
+        });
+
+        // 累加资产总值
+        protocolPosition.total_assets += position.amount || 0;
+
+        return protocolPositions;
+      },
+      [] as Array<{
+        protocol: string;
+        total_assets: number;
+        total_debts: number;
+        leverage: number;
+        positions: Array<{
+          protocol: string;
+          asset: string;
+          amount: number;
+          invest_type: number;
+          apy: number | null;
+          tokenList: any[];
+        }>;
+      }>
+    ),
+    // 转换 Protocol 数组为所需的格式
+    protocols: portfolio.protocols.map((protocol) => ({
+      name: protocol.name,
+      chain: protocol.chain || "",
+      tvl: protocol.tvl || 0,
+      supported_assets: protocol.supported_assets || [],
+      features: protocol.features || [],
+      description: protocol.description || "",
+    })),
+    timestamp: portfolio.timestamp,
+    is_demo_data: portfolio.is_demo_data,
   };
-}
+
+  return adaptedPortfolio;
+};
 
 export const Dashboard: React.FC = () => {
   const { address, isConnected } = useAccount();
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
-  const [riskAnalysis, setRiskAnalysis] = useState<RiskAnalysis | null>(null);
+  const [riskAnalysis, setRiskAnalysis] = useState<WalletRiskAssessment | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,13 +156,15 @@ export const Dashboard: React.FC = () => {
       // 调用风险分析API
       const riskAnalysisData = await apiService.getWalletRiskAssessment(address);
 
+      // 更新状态
+      setRiskAnalysis(riskAnalysisData);
+
       // 更新portfolio的风险相关数据
       if (portfolio) {
         const updatedPortfolio: Portfolio = {
           ...portfolio,
           risk_level: riskAnalysisData.risk_level,
           recommendations: riskAnalysisData.recommendations,
-          market_analysis: riskAnalysisData.market_analysis || {},
         };
         setPortfolio(updatedPortfolio);
       }
@@ -165,7 +228,7 @@ export const Dashboard: React.FC = () => {
 
       {!loading && !error && portfolio && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-2">
-          <PortfolioOverview portfolio={portfolio} />
+          <PortfolioOverview portfolio={adaptPortfolioForOverview(portfolio)} />
           <Card>
             <CardHeader>
               <CardTitle>风险分析</CardTitle>
@@ -191,16 +254,54 @@ export const Dashboard: React.FC = () => {
                   <div className="flex justify-between items-center">
                     <div>
                       <p className="text-sm font-medium">风险等级</p>
-                      <h3 className="text-2xl font-bold">{portfolio.risk_level}</h3>
+                      <div className="flex gap-2 items-center">
+                        <h3 className="text-2xl font-bold">{portfolio.risk_level}</h3>
+                        {riskAnalysis?.risk_score !== undefined && (
+                          <Badge variant="outline" className="text-sm">
+                            风险评分: {riskAnalysis.risk_score}/100
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                     <Button variant="outline" size="sm" onClick={analyzeWalletRisk} disabled={analyzing}>
                       {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : "重新分析"}
                     </Button>
                   </div>
+
+                  {/* 风险因素 */}
+                  {riskAnalysis?.risk_factors && riskAnalysis.risk_factors.length > 0 && (
+                    <div>
+                      <p className="mb-2 text-sm font-medium">风险因素</p>
+                      <ul className="space-y-1">
+                        {riskAnalysis.risk_factors.map((factor, index) => (
+                          <li key={index} className="text-sm text-destructive">
+                            • {factor}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* 风险指标 */}
+                  {riskAnalysis?.risk_metrics && Object.keys(riskAnalysis.risk_metrics).length > 0 && (
+                    <div>
+                      <p className="mb-2 text-sm font-medium">风险指标</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {Object.entries(riskAnalysis.risk_metrics).map(([key, value], index) => (
+                          <div key={index} className="p-2 rounded-md border">
+                            <p className="text-xs text-muted-foreground">{key}</p>
+                            <p className="text-sm font-medium">{value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 推荐措施 */}
                   {portfolio.recommendations && portfolio.recommendations.length > 0 && (
                     <div>
                       <p className="mb-2 text-sm font-medium">建议</p>
-                      <ul className="space-y-2">
+                      <ul className="space-y-1">
                         {portfolio.recommendations.map((rec, index) => (
                           <li key={index} className="text-sm text-muted-foreground">
                             • {rec}
@@ -209,6 +310,93 @@ export const Dashboard: React.FC = () => {
                       </ul>
                     </div>
                   )}
+
+                  {/* 预警信息 */}
+                  {riskAnalysis?.warnings && riskAnalysis.warnings.length > 0 && (
+                    <div>
+                      <p className="mb-2 text-sm font-medium">预警信息</p>
+                      <div className="space-y-2">
+                        {riskAnalysis.warnings.map((warning, index) => (
+                          <Alert key={index} variant="destructive" className="py-2">
+                            <AlertTriangle className="w-4 h-4" />
+                            <AlertDescription>{warning}</AlertDescription>
+                          </Alert>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 监控点 */}
+                  {riskAnalysis?.monitoring_points && riskAnalysis.monitoring_points.length > 0 && (
+                    <div>
+                      <p className="mb-2 text-sm font-medium">监控点</p>
+                      <Table>
+                        <TableBody>
+                          {riskAnalysis.monitoring_points.map((point, index) => (
+                            <TableRow key={index}>
+                              <TableCell className="text-sm">{point}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+
+                  {/* 头寸摘要信息 */}
+                  {riskAnalysis?.positions_summary && (
+                    <div>
+                      <p className="mb-2 text-sm font-medium">头寸摘要</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="p-2 rounded-md border">
+                          <p className="text-xs text-muted-foreground">总价值</p>
+                          <p className="text-sm font-medium">${riskAnalysis.positions_summary.total_value.toLocaleString()}</p>
+                        </div>
+                        <div className="p-2 rounded-md border">
+                          <p className="text-xs text-muted-foreground">头寸数量</p>
+                          <p className="text-sm font-medium">{riskAnalysis.positions_summary.position_count}</p>
+                        </div>
+                      </div>
+
+                      {riskAnalysis.positions_summary.protocols.length > 0 && (
+                        <div className="mt-2">
+                          <p className="text-xs text-muted-foreground">协议 ({riskAnalysis.positions_summary.protocols.length})</p>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {riskAnalysis.positions_summary.protocols.map((protocol, index) => (
+                              <Badge key={index} variant="secondary" className="text-xs">
+                                {protocol}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {riskAnalysis.positions_summary.assets.length > 0 && (
+                        <div className="mt-2">
+                          <p className="text-xs text-muted-foreground">资产 ({riskAnalysis.positions_summary.assets.length})</p>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {riskAnalysis.positions_summary.assets.map((asset, index) => (
+                              <Badge key={index} variant="outline" className="text-xs">
+                                {asset}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* AI增强标记 */}
+                  {riskAnalysis?.ai_enhanced && (
+                    <div className="mt-4">
+                      <Badge className="bg-blue-600 hover:bg-blue-700">
+                        <Zap className="mr-1 w-3 h-3" />
+                        AI增强分析
+                      </Badge>
+                    </div>
+                  )}
+
+                  {/* 分析时间戳 */}
+                  {riskAnalysis?.analysis_timestamp && <div className="mt-4 text-xs text-muted-foreground">分析时间: {new Date(riskAnalysis.analysis_timestamp).toLocaleString()}</div>}
                 </div>
               )}
             </CardContent>

@@ -183,28 +183,35 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ marketPredictions, load
                   <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 10, bottom: 0 }}>
                     <defs>
                       <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0.05} />
+                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8} />
+                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0.1} />
                       </linearGradient>
                       <linearGradient id="colorVolume" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="hsl(var(--secondary))" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="hsl(var(--secondary))" stopOpacity={0.05} />
+                        <stop offset="5%" stopColor="hsl(var(--secondary))" stopOpacity={0.8} />
+                        <stop offset="95%" stopColor="hsl(var(--secondary))" stopOpacity={0.1} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
-                    <XAxis dataKey="time" tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" tickLine={false} axisLine={false} />
-                    <YAxis yAxisId="left" tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" domain={["auto", "auto"]} tickFormatter={(value) => `$${formatLargeNumber(value)}`} tickLine={false} axisLine={false} />
-                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" domain={["auto", "auto"]} tickFormatter={(value) => formatLargeNumber(value)} tickLine={false} axisLine={false} />
+                    <XAxis dataKey="time" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" tickLine={false} axisLine={false} />
+                    <YAxis yAxisId="left" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" domain={["auto", "auto"]} tickFormatter={(value) => `$${formatLargeNumber(value)}`} tickLine={false} axisLine={false} />
+                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" domain={["auto", "auto"]} tickFormatter={(value) => formatLargeNumber(value)} tickLine={false} axisLine={false} />
                     <Tooltip
                       contentStyle={{
                         backgroundColor: "hsl(var(--background))",
                         border: "1px solid hsl(var(--border))",
-                        borderRadius: "6px",
+                        borderRadius: "8px",
+                        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
+                        padding: "10px",
                       }}
-                      labelStyle={{ color: "hsl(var(--foreground))" }}
+                      labelStyle={{ color: "hsl(var(--foreground))", fontWeight: "bold", marginBottom: "8px" }}
+                      formatter={(value, name) => {
+                        if (name === "price") return [`$${Number(value).toFixed(2)}`, "价格"];
+                        if (name === "volume") return [formatLargeNumber(Number(value)), "交易量"];
+                        return [value, name];
+                      }}
                     />
-                    <Area yAxisId="left" type="monotone" dataKey="price" stroke="hsl(var(--primary))" fillOpacity={1} fill="url(#colorPrice)" strokeWidth={2} />
-                    <Area yAxisId="right" type="monotone" dataKey="volume" stroke="hsl(var(--secondary))" fillOpacity={1} fill="url(#colorVolume)" strokeWidth={2} />
+                    <Area yAxisId="left" type="monotone" dataKey="price" stroke="hsl(var(--primary))" strokeWidth={2} fillOpacity={1} fill="url(#colorPrice)" activeDot={{ r: 6, strokeWidth: 2, stroke: "white" }} />
+                    <Area yAxisId="right" type="monotone" dataKey="volume" stroke="hsl(var(--secondary))" strokeWidth={1.5} fillOpacity={1} fill="url(#colorVolume)" />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>

@@ -219,4 +219,22 @@
   .border-success\/50 {
     border-color: hsl(var(--success) / 0.5);
   }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .glass-card {
+    @apply bg-background/80 backdrop-blur-md border border-white/10;
+  }
+
+  .grid-auto-fit {
+    @apply grid grid-cols-1 gap-4;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
 }
