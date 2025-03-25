@@ -5,12 +5,12 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Python 调试程序: FastAPI",
+      "name": "Python Debugger: FastAPI",
       "type": "debugpy",
       "request": "launch",
       "module": "uvicorn",
       "args": [
-        "main:app",
+        "app.main:app",
         "--reload"
       ],
       "jinja": true

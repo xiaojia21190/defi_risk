@@ -610,6 +610,55 @@ class AiService:
             logger.error(f"检查AI服务可用性时出错: {str(e)}")
             return False
 
+    async def get_portfolio_insights(
+        self, wallet_address: str, positions: List[Dict], risk_analysis: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        获取投资组合洞察
+
+        Args:
+            wallet_address: 钱包地址
+            positions: 钱包头寸列表
+            risk_analysis: 风险分析结果
+
+        Returns:
+            AI洞察结果，包含recommendations等
+        """
+        try:
+            logger.info(f"获取投资组合洞察: {wallet_address}")
+
+            # 提取关键风险指标
+            risk_metrics = risk_analysis.get("risk_metrics", {})
+            risk_factors = risk_analysis.get("risk_factors", [])
+
+            # 准备分析数据
+            analysis_data = {
+                "wallet_address": wallet_address,
+                "positions": positions,
+                "risk_score": risk_analysis.get("risk_score", 0),
+                "risk_level": risk_analysis.get("risk_level", "未知"),
+                "risk_metrics": risk_metrics,
+                "risk_factors": risk_factors,
+            }
+
+            # 调用AI预测器分析
+            insights_result = await self.analyze_with_predictor(
+                analysis_type="portfolio_insights", data=analysis_data
+            )
+
+            logger.info(f"获取投资组合洞察完成: {wallet_address}")
+            return insights_result
+
+        except Exception as e:
+            error_message = f"获取投资组合洞察失败: {str(e)}"
+            logger.error(error_message)
+            return {
+                "error": error_message,
+                "recommendations": [],
+                "insights": [f"投资组合分析过程中出错: {str(e)}"],
+                "warnings": ["无法完成投资组合分析，请稍后重试"],
+            }
+
     async def analyze_with_predictor(
         self,
         analysis_type: str,

@@ -3,7 +3,7 @@
 """
 
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Depends
 from app.services.risk_engine import RiskEngine
 from app.services.ai_service import AiService
 from app.services.blockchain import BlockchainService
@@ -53,16 +53,16 @@ def init_risk_engine() -> RiskEngine:
     correlation_risk_analyzer = CorrelationRiskAnalyzer(
         ai_predictor=ai_service, blockchain_service=blockchain_service
     )
-    # smart_contract_risk_analyzer = SmartContractRiskAnalyzer(
-    #     ai_predictor=ai_service, blockchain_service=blockchain_service
-    # )
+    smart_contract_risk_analyzer = SmartContractRiskAnalyzer(
+        ai_predictor=ai_service, blockchain_service=blockchain_service
+    )
 
     # 注册风险分析器
     risk_engine.register_analyzer("market", market_risk_analyzer)
     risk_engine.register_analyzer("protocol", protocol_risk_analyzer)
     risk_engine.register_analyzer("liquidity", liquidity_risk_analyzer)
     risk_engine.register_analyzer("correlation", correlation_risk_analyzer)
-    # risk_engine.register_analyzer("smart_contract", smart_contract_risk_analyzer)
+    risk_engine.register_analyzer("smart_contract", smart_contract_risk_analyzer)
 
     # 设置风险权重
     risk_engine.set_weights(settings.RISK_WEIGHTS)
@@ -116,37 +116,53 @@ def init_app(app: FastAPI) -> None:
     )
 
 
-def get_risk_engine() -> RiskEngine:
+def get_risk_engine(request: Request) -> RiskEngine:
     """
     获取风险引擎实例
+
+    Args:
+        request: FastAPI请求对象
 
     Returns:
         风险引擎实例
     """
-    # 这里应该从应用状态中获取风险引擎实例
-    # 但为了简化，直接创建一个新实例
-    return init_risk_engine()
+    return request.app.state.risk_engine
 
 
-def get_ai_service() -> AiService:
+def get_ai_service(request: Request) -> AiService:
     """
     获取AI服务实例
+
+    Args:
+        request: FastAPI请求对象
 
     Returns:
         AI服务实例
     """
-    # 这里应该从应用状态中获取AI服务实例
-    # 但为了简化，直接创建一个新实例
-    return AiService()
+    return request.app.state.ai_service
 
 
-def get_blockchain_service() -> BlockchainService:
+def get_blockchain_service(request: Request) -> BlockchainService:
     """
     获取区块链服务实例
+
+    Args:
+        request: FastAPI请求对象
 
     Returns:
         区块链服务实例
     """
-    # 这里应该从应用状态中获取区块链服务实例
-    # 但为了简化，直接创建一个新实例
-    return BlockchainService()
+    return request.app.state.blockchain_service
+
+
+def get_demo_data_service(request: Request) -> DemoDataService:
+    """
+    获取演示数据服务实例
+
+    Args:
+        request: FastAPI请求对象
+
+    Returns:
+        演示数据服务实例
+    """
+    return request.app.state.demo_data_service

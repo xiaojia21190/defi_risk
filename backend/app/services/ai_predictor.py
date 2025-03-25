@@ -1420,166 +1420,291 @@ class AiPredictor:
 
     def analyze_correlation_risk(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        分析资产相关性风险
+        分析相关性风险
 
         Args:
-            data: 包含资产列表和权重的数据，格式为
-                 {"assets": ["BTC", "ETH", ...],
-                  "weights": {"BTC": 0.4, "ETH": 0.3, ...},
-                  "correlation_type": "asset_correlation"|"investment_type_correlation"|"protocol_correlation"}
+            data: 包含资产相关性数据的字典
 
         Returns:
             Dict: 相关性风险分析结果
         """
         try:
-            # 获取相关性分析类型，默认为资产相关性
+            self.logger.info(f"开始分析相关性风险")
+
+            # 提取相关类型
             correlation_type = data.get("correlation_type", "asset_correlation")
 
-            self.logger.info(f"开始分析相关性风险，类型: {correlation_type}")
-
-            # 提取资产列表和权重
-            assets = data.get("assets", [])
-            weights = data.get("weights", {})
-
-            if not assets or len(assets) < 2:
-                return {
-                    "risk_score": 50,
-                    "description": "无法分析相关性风险，资产数量不足",
-                    "trend": "稳定",
-                    "data_points": [],
-                }
-
-            # 根据不同的相关性类型提供不同的分析描述
-            type_descriptions = {
-                "asset_correlation": "资产间相关性",
-                "investment_type_correlation": "投资类型相关性",
-                "protocol_correlation": "协议间相关性",
-                "correlation_risk": "整体相关性",
-            }
-
-            analysis_description = type_descriptions.get(correlation_type, "相关性")
-
-            # 模拟相关性矩阵（实际应用中应该使用真实的历史数据计算相关性）
-            # 这里使用一个简化的模型，假设大多数加密资产之间有中高度相关性
-            correlation_matrix = {}
-            high_correlation_pairs = []
-            avg_correlation = 0
-            correlation_count = 0
-
-            # 为不同类型的相关性分析设置不同的相关系数基准
-            correlation_base = 0.5  # 默认基准
-            correlation_range = 0.4  # 默认范围
-
-            if correlation_type == "investment_type_correlation":
-                correlation_base = 0.4  # 投资类型间相关性较低
-                correlation_range = 0.3
+            if correlation_type == "asset_correlation":
+                return self._analyze_asset_correlation(data)
             elif correlation_type == "protocol_correlation":
-                correlation_base = 0.6  # 协议间相关性较高
-                correlation_range = 0.3
-
-            # 生成相关性矩阵
-            for i in range(len(assets)):
-                for j in range(i + 1, len(assets)):
-                    asset1 = assets[i]
-                    asset2 = assets[j]
-
-                    # 根据相关性类型调整相关系数计算
-                    correlation = (
-                        correlation_base + np.random.random() * correlation_range
-                    )
-
-                    # 存储相关系数
-                    if asset1 not in correlation_matrix:
-                        correlation_matrix[asset1] = {}
-                    correlation_matrix[asset1][asset2] = correlation
-
-                    # 累加相关系数
-                    avg_correlation += correlation
-                    correlation_count += 1
-
-                    # 标记高相关性资产对
-                    if correlation > 0.7:
-                        high_correlation_pairs.append(
-                            {
-                                "asset_pair": f"{asset1}-{asset2}",
-                                "correlation": correlation,
-                                "weight": (
-                                    weights.get(asset1, 1 / len(assets))
-                                    + weights.get(asset2, 1 / len(assets))
-                                )
-                                / 2,
-                            }
-                        )
-
-            # 计算平均相关系数
-            if correlation_count > 0:
-                avg_correlation = avg_correlation / correlation_count
+                return self._analyze_protocol_correlation(data)
+            elif correlation_type == "investment_type_correlation":
+                return self._analyze_investment_type_correlation(data)
             else:
-                avg_correlation = 0.5  # 默认值
+                return self._analyze_asset_correlation(data)  # 默认分析资产相关性
 
-            # 基于相关性分析计算风险分数
-            # 相关性越高，风险分数越高
-            correlation_score = avg_correlation * 100
-
-            # 生成描述
-            if correlation_score > 75:
-                description = (
-                    f"投资组合中{analysis_description}高度相关，缺乏多样性保护"
-                )
-                trend = "上升"
-            elif correlation_score > 50:
-                description = f"投资组合中{analysis_description}较高，多样化效果有限"
-                trend = "稳定"
-            elif correlation_score > 25:
-                description = f"投资组合中{analysis_description}适中，有一定多样化效果"
-                trend = "稳定"
-            else:
-                description = f"投资组合中{analysis_description}低，多样化效果良好"
-                trend = "下降"
-
-            # 添加高相关性对的信息
-            if high_correlation_pairs:
-                description += f"，存在{len(high_correlation_pairs)}对高相关性资产"
-
-            # 创建数据点
-            data_points = []
-
-            # 添加高相关性对
-            for pair in high_correlation_pairs:
-                data_points.append(pair)
-
-            # 添加平均相关系数
-            data_points.append(
-                {
-                    "avg_correlation": avg_correlation,
-                    "correlation_score": correlation_score,
-                    "high_correlation_pairs_count": len(high_correlation_pairs),
-                    "correlation_type": correlation_type,
-                }
-            )
-
-            # 构建结果
-            result = {
-                "risk_score": correlation_score,
-                "description": description,
-                "trend": trend,
-                "data_points": data_points,
-                "correlation_matrix": correlation_matrix,
-                "correlation_type": correlation_type,
-            }
-
-            self.logger.info(
-                f"{correlation_type}风险分析完成: 评分={correlation_score:.2f}"
-            )
-            return result
         except Exception as e:
-            self.logger.error(f"分析资产相关性风险时出错: {str(e)}")
+            self.logger.error(f"分析相关性风险失败: {str(e)}")
             return {
                 "risk_score": 50,
-                "description": f"分析资产相关性风险时出错: {str(e)}",
-                "trend": "稳定",
+                "description": f"相关性分析过程中出错: {str(e)}",
+                "trend": "未知",
                 "data_points": [],
             }
+
+    def analyze_portfolio_risk(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        分析投资组合风险，生成投资组合洞察
+
+        Args:
+            data: 包含钱包地址、头寸列表、风险分析结果的字典
+
+        Returns:
+            Dict: 包含洞察、建议和警告的分析结果
+        """
+        try:
+            self.logger.info(f"开始分析投资组合风险和生成洞察")
+
+            # 提取关键数据
+            wallet_address = data.get("wallet_address", "未知钱包")
+            positions = data.get("positions", [])
+            risk_score = data.get("risk_score", 0)
+            risk_level = data.get("risk_level", "未知")
+            risk_metrics = data.get("risk_metrics", {})
+            risk_factors = data.get("risk_factors", [])
+
+            if not positions:
+                return {
+                    "insights": ["投资组合为空，无法进行分析"],
+                    "recommendations": [
+                        "开始投资以获取收益",
+                        "从小额投资开始，逐步了解DeFi生态",
+                    ],
+                    "warnings": [],
+                    "confidence": 0.9,
+                }
+
+            # 计算资产分布
+            assets = {}
+            protocols = {}
+            investment_types = {}
+            total_value = 0
+            high_risk_positions = []
+            liquidation_risk_positions = []
+
+            for position in positions:
+                asset = position.get("asset", "未知资产")
+                protocol = position.get("protocol", "未知协议")
+                invest_type = position.get("invest_type", 0)
+                usd_value = float(position.get("usd_value", 0))
+
+                # 累计资产价值
+                if asset in assets:
+                    assets[asset] += usd_value
+                else:
+                    assets[asset] = usd_value
+
+                # 累计协议价值
+                if protocol in protocols:
+                    protocols[protocol] += usd_value
+                else:
+                    protocols[protocol] = usd_value
+
+                # 累计投资类型价值
+                invest_type_name = self._get_invest_type_name(invest_type)
+                if invest_type_name in investment_types:
+                    investment_types[invest_type_name] += usd_value
+                else:
+                    investment_types[invest_type_name] = usd_value
+
+                total_value += usd_value
+
+                # 检查高风险和清算风险头寸
+                risk_score = position.get("risk_score", 0)
+                health_factor = position.get("health_factor", 10)
+
+                if risk_score > 70:
+                    high_risk_positions.append(position)
+
+                if health_factor < 1.5 and invest_type in [1, 2]:  # 借贷和杠杆头寸
+                    liquidation_risk_positions.append(position)
+
+            # 计算投资组合的关键指标
+            insights = []
+            recommendations = []
+            warnings = []
+
+            # 1. 资产集中度分析
+            if total_value > 0:
+                assets_sorted = sorted(
+                    [(k, v) for k, v in assets.items()],
+                    key=lambda x: x[1],
+                    reverse=True,
+                )
+                if assets_sorted and assets_sorted[0][1] / total_value > 0.5:
+                    top_asset = assets_sorted[0][0]
+                    top_pct = assets_sorted[0][1] / total_value * 100
+                    insights.append(
+                        f"您的投资组合过于集中在{top_asset}，占总资产的{top_pct:.1f}%，增加了单一资产风险"
+                    )
+                    recommendations.append(
+                        f"考虑将部分{top_asset}转换为其他资产，降低集中度至40%以下"
+                    )
+
+            # 2. 协议分散度分析
+            if len(protocols) == 1:
+                protocol_name = list(protocols.keys())[0]
+                insights.append(
+                    f"您的投资全部集中在{protocol_name}协议，缺乏协议多样性"
+                )
+                recommendations.append("考虑分散投资到2-3个不同的协议，降低协议风险")
+            elif len(protocols) > 5:
+                insights.append(
+                    f"您的投资分散在{len(protocols)}个协议，管理成本可能较高"
+                )
+                recommendations.append("考虑合并部分小额投资，减少管理复杂度")
+
+            # 3. 投资类型分析
+            if (
+                "借贷" in investment_types
+                and investment_types.get("借贷", 0) / total_value > 0.4
+            ):
+                insights.append("借贷头寸占比过高，增加了清算风险")
+                recommendations.append("减少借贷头寸的比例，确保不超过总资产的30%")
+
+            if (
+                "流动性挖矿" in investment_types
+                and investment_types.get("流动性挖矿", 0) / total_value > 0.5
+            ):
+                insights.append("流动性挖矿占比较高，面临无常损失风险")
+                recommendations.append(
+                    "关注流动性池资产的相关性，选择相关性低的资产对提供流动性"
+                )
+
+            # 4. 风险警告
+            if len(high_risk_positions) > 0:
+                warnings.append(
+                    f"检测到{len(high_risk_positions)}个高风险头寸，建议密切关注"
+                )
+
+            if len(liquidation_risk_positions) > 0:
+                protocol_names = ", ".join(
+                    set([p.get("protocol", "未知") for p in liquidation_risk_positions])
+                )
+                warnings.append(
+                    f"{protocol_names}上的借贷头寸健康因子低于1.5，存在清算风险"
+                )
+                recommendations.append(
+                    "立即补充抵押品或偿还部分债务，提高健康因子至2.0以上"
+                )
+
+            # 5. 基于风险指标的一般性建议
+            market_risk = risk_metrics.get("market_risk", 0)
+            liquidity_risk = risk_metrics.get("liquidity_risk", 0)
+
+            if market_risk > 70:
+                insights.append("当前市场风险较高，投资组合波动可能加剧")
+                recommendations.append("考虑增加稳定币比例，对冲市场下行风险")
+
+            if liquidity_risk > 70:
+                insights.append("投资组合流动性风险较高，可能面临兑现困难")
+                recommendations.append("增加高流动性资产的比例，确保资金灵活性")
+
+            # 6. 稳定币分析
+            stablecoin_assets = [
+                "USDT",
+                "USDC",
+                "DAI",
+                "BUSD",
+                "TUSD",
+                "USDP",
+                "GUSD",
+                "USDD",
+                "FRAX",
+                "sUSD",
+            ]
+            stablecoin_value = sum(assets.get(coin, 0) for coin in stablecoin_assets)
+            stablecoin_ratio = stablecoin_value / total_value if total_value > 0 else 0
+
+            if stablecoin_ratio < 0.1:
+                insights.append(
+                    f"稳定币比例较低({stablecoin_ratio:.1%})，缺乏市场波动缓冲"
+                )
+                recommendations.append("增加稳定币比例至少20%，作为市场波动的缓冲")
+            elif stablecoin_ratio > 0.7:
+                insights.append(
+                    f"稳定币比例过高({stablecoin_ratio:.1%})，可能错过市场上涨机会"
+                )
+                recommendations.append("考虑将部分稳定币投入到收益较高的资产中")
+
+            # 确保至少有三条洞察和三条建议
+            if len(insights) < 3:
+                default_insights = [
+                    "投资组合综合风险评分处于中等水平，有优化空间",
+                    "当前仓位分布相对均衡，但可进一步优化",
+                    "考虑根据风险承受能力调整投资策略",
+                ]
+                insights.extend(default_insights[: 3 - len(insights)])
+
+            if len(recommendations) < 3:
+                default_recommendations = [
+                    "定期检查投资组合风险，每月至少一次",
+                    "关注市场趋势变化，及时调整投资策略",
+                    "探索新的DeFi机会，但控制在总资产的10%以内",
+                ]
+                recommendations.extend(
+                    default_recommendations[: 3 - len(recommendations)]
+                )
+
+            return {
+                "insights": insights,
+                "recommendations": recommendations,
+                "warnings": warnings,
+                "confidence": 0.85,
+                "supporting_data": {
+                    "asset_distribution": [
+                        {"name": k, "value": v} for k, v in assets.items()
+                    ],
+                    "protocol_distribution": [
+                        {"name": k, "value": v} for k, v in protocols.items()
+                    ],
+                    "investment_type_distribution": [
+                        {"name": k, "value": v} for k, v in investment_types.items()
+                    ],
+                    "stablecoin_ratio": stablecoin_ratio,
+                    "risk_level": risk_level,
+                },
+            }
+
+        except Exception as e:
+            self.logger.error(f"生成投资组合洞察失败: {str(e)}")
+            return {
+                "insights": [f"分析投资组合时出错: {str(e)}"],
+                "recommendations": ["建议重新分析或联系技术支持"],
+                "warnings": [],
+                "confidence": 0.3,
+            }
+
+    def _get_invest_type_name(self, invest_type: int) -> str:
+        """获取投资类型名称"""
+        type_names = {
+            0: "普通持有",
+            1: "借贷",
+            2: "杠杆",
+            3: "流动性挖矿",
+            4: "质押",
+            5: "衍生品",
+            6: "收益农场",
+            7: "保险",
+            8: "预言机",
+            9: "跨链桥",
+            10: "期权",
+            11: "合成资产",
+            12: "预测市场",
+            13: "借贷池",
+            14: "算法稳定币",
+        }
+        return type_names.get(invest_type, "其他")
 
     def generate_market_risk_recommendations(
         self, data: Dict[str, Any]
