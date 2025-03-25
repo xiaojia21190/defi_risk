@@ -178,15 +178,20 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
     setError(null);
 
     try {
-      const data = await apiService.getAlerts(address);
+      const response = await apiService.getAlerts(address);
+
+      // 处理后端返回的数据结构
+      // 期望的数据结构: { wallet_address, alerts, alert_count, timestamp, is_demo_data }
+      // 或者直接是一个警报数组
+      const alertsData = Array.isArray(response) ? response : (response as any).alerts || [];
 
       // 转换后端数据格式为前端格式
-      const formattedAlerts: Alert[] = data.map((alert: any) => ({
+      const formattedAlerts: Alert[] = alertsData.map((alert: any) => ({
         id: alert.id || Math.random().toString(36).substring(2),
         type: mapAlertType(alert.type),
         severity: mapSeverity(alert.severity),
         message: alert.message,
-        timestamp: alert.timestamp,
+        timestamp: alert.timestamp || new Date().toISOString(),
         protocol: alert.protocol || "未知协议",
         asset: alert.asset || "未知资产",
         details: alert.details || {},

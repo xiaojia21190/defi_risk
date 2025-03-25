@@ -155,6 +155,25 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
   const [loadingRisk, setLoadingRisk] = useState(false);
   const [activeTab, setActiveTab] = useState<"info" | "risk">("info");
 
+  // 计算平均APY
+  const calculateAverageApy = (portfolio: any) => {
+    if (!portfolio || !portfolio.positions) return 0;
+
+    let totalApy = 0;
+    let validPositionsCount = 0;
+
+    portfolio.positions.forEach((protocolPos: any) => {
+      protocolPos.positions.forEach((position: any) => {
+        if (position.apy && !isNaN(position.apy)) {
+          totalApy += position.apy;
+          validPositionsCount++;
+        }
+      });
+    });
+
+    return validPositionsCount > 0 ? (totalApy / validPositionsCount).toFixed(2) : 0;
+  };
+
   if (loading) {
     return (
       <Card>
@@ -302,16 +321,16 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 grid-cols-2 sm:grid-cols-4 mb-6">
+      <div className="grid grid-cols-2 gap-4 mb-6 sm:grid-cols-4">
         <Card className="bg-gradient-to-br from-primary/20 to-primary/5">
           <CardContent className="p-4">
             <div className="flex justify-between items-center">
               <div>
                 <p className="text-sm text-muted-foreground">总资产价值</p>
-                <h3 className="text-2xl font-bold mt-1">${formatCurrency(portfolio.total_value_usd)}</h3>
+                <h3 className="mt-1 text-2xl font-bold">${formatCurrency(portfolio.total_value_usd)}</h3>
               </div>
               <div className="p-2 rounded-full bg-primary/10">
-                <DollarSign className="h-5 w-5 text-primary" />
+                <DollarSign className="w-5 h-5 text-primary" />
               </div>
             </div>
           </CardContent>
@@ -322,10 +341,10 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
             <div className="flex justify-between items-center">
               <div>
                 <p className="text-sm text-muted-foreground">协议数量</p>
-                <h3 className="text-2xl font-bold mt-1">{portfolio.protocol_count}</h3>
+                <h3 className="mt-1 text-2xl font-bold">{portfolio.protocol_count}</h3>
               </div>
               <div className="p-2 rounded-full bg-blue-500/10">
-                <Network className="h-5 w-5 text-blue-500" />
+                <Network className="w-5 h-5 text-blue-500" />
               </div>
             </div>
           </CardContent>
@@ -336,10 +355,10 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
             <div className="flex justify-between items-center">
               <div>
                 <p className="text-sm text-muted-foreground">头寸数量</p>
-                <h3 className="text-2xl font-bold mt-1">{portfolio.position_count}</h3>
+                <h3 className="mt-1 text-2xl font-bold">{portfolio.position_count}</h3>
               </div>
               <div className="p-2 rounded-full bg-amber-500/10">
-                <Coins className="h-5 w-5 text-amber-500" />
+                <Coins className="w-5 h-5 text-amber-500" />
               </div>
             </div>
           </CardContent>
@@ -350,10 +369,10 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
             <div className="flex justify-between items-center">
               <div>
                 <p className="text-sm text-muted-foreground">平均APY</p>
-                <h3 className="text-2xl font-bold mt-1">{calculateAverageApy(portfolio)}%</h3>
+                <h3 className="mt-1 text-2xl font-bold">{calculateAverageApy(portfolio)}%</h3>
               </div>
               <div className="p-2 rounded-full bg-green-500/10">
-                <Percent className="h-5 w-5 text-green-500" />
+                <Percent className="w-5 h-5 text-green-500" />
               </div>
             </div>
           </CardContent>

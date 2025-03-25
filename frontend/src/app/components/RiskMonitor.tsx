@@ -148,7 +148,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, analyzing, complet
         </div>
 
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex justify-between items-center">
             <h3 className="text-sm font-medium">风险因素</h3>
             <Button onClick={onAnalyze} disabled={analyzing} variant="outline" size="sm" className="gap-2">
               {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
@@ -157,7 +157,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, analyzing, complet
           </div>
           {riskFactors.map((factor, index) => (
             <div key={index} className={`p-3 rounded-lg border ${factor.severity === "high" ? "border-destructive/50 bg-destructive/10" : factor.severity === "medium" ? "border-warning/50 bg-warning/10" : "border-success/50 bg-success/10"}`}>
-              <div className="flex items-start gap-3">
+              <div className="flex gap-3 items-start">
                 <div className={`p-1.5 rounded-full ${factor.severity === "high" ? "bg-destructive/20 text-destructive" : factor.severity === "medium" ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}`}>{factor.icon}</div>
                 <div>
                   <h4 className="text-sm font-medium">{factor.name}</h4>
@@ -172,7 +172,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, analyzing, complet
           <h3 className="mb-3 text-sm font-medium">优化建议</h3>
           <ul className="space-y-2 text-sm">
             {portfolio.recommendations.map((recommendation, index) => (
-              <li key={index} className="flex items-start gap-2">
+              <li key={index} className="flex gap-2 items-start">
                 <div className="min-w-4 mt-0.5">
                   <div className="w-1.5 h-1.5 rounded-full bg-primary" />
                 </div>
