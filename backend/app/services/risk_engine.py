@@ -32,13 +32,26 @@ class MarketRiskResult:
 class RiskEngine:
     """风险评估引擎"""
 
-    def __init__(self, blockchain_service=None):
+    def __init__(self, blockchain_service=None, ai_service=None):
+        """
+        初始化风险评估引擎
+
+        Args:
+            blockchain_service: 区块链服务实例
+            ai_service: AI服务实例，如果为None则不使用AI服务
+        """
         self.logger = logging.getLogger("defi_risk.risk_engine")
         self.risk_analyzers = {}
         self.risk_weights = settings.RISK_WEIGHTS
         self.blockchain_service = blockchain_service
-        self.ai_predictor = AiPredictor()
-        self.ai_service = None  # 初始化ai_service属性
+        self.ai_service = ai_service
+
+        # 不再自动创建ai_predictor，改为通过外部依赖注入
+        self.ai_predictor = None
+        if ai_service and hasattr(ai_service, "get_predictor"):
+            self.ai_predictor = ai_service.get_predictor()
+
+        self.logger.info(f"风险引擎初始化完成: blockchain_service={blockchain_service}, ai_service={ai_service}")
 
     def register_analyzer(self, risk_type: str, analyzer):
         """
@@ -51,17 +64,21 @@ class RiskEngine:
         self.logger.info(
             f"注册风险分析器: {risk_type} -> {analyzer.__class__.__name__}"
         )
-        # 设置AI服务和预测器
+
+        # 注入依赖服务
         if hasattr(analyzer, "ai_service") and self.ai_service:
             analyzer.ai_service = self.ai_service
+
         if hasattr(analyzer, "ai_predictor") and self.ai_predictor:
             analyzer.ai_predictor = self.ai_predictor
+
         if hasattr(analyzer, "blockchain_service") and self.blockchain_service:
             analyzer.blockchain_service = self.blockchain_service
 
-        # 设置对RiskEngine的引用，以便分析器可以调用RiskEngine的方法
-        if hasattr(analyzer, "risk_engine"):
-            analyzer.risk_engine = self
+        # 使用事件委托模式替代直接的循环引用
+        # 不再设置对RiskEngine的引用
+        # if hasattr(analyzer, "risk_engine"):
+        #     analyzer.risk_engine = self
 
         self.risk_analyzers[risk_type] = analyzer
 
@@ -1161,12 +1178,12 @@ class RiskEngine:
                 "analysis_timestamp": datetime.utcnow().isoformat(),
             }
 
-    def set_weights(self, weights: Dict[str, float]) -> None:
+    def set_weights(self, weights: Dict[str, float]):
         """
         设置风险权重
 
         Args:
-            weights: 风险权重字典，键为风险类型，值为权重
+            weights: 风险类型到权重的映射
         """
         self.logger.info(f"设置风险权重: {weights}")
         self.risk_weights = weights

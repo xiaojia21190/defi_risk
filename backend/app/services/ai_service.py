@@ -24,6 +24,7 @@ import uuid
 from app.models.domain.ai import AiAnalysis, AiPrediction, AiInsight, AiRequest
 from app.core.config import settings
 import requests
+from app.services.ai_predictor import AiPredictor
 
 
 logger = logging.getLogger("defi_risk.ai_service")
@@ -40,6 +41,42 @@ class AiService:
         self.max_tokens = 2000
         self.temperature = 0.7
         self.proxy_url = settings.PROXY_URL
+
+        # 惰性初始化AI预测器
+        self._ai_predictor = None
+        self._http_session = None
+
+        logger.info("AI服务初始化完成")
+
+    def get_predictor(self) -> AiPredictor:
+        """
+        获取AI预测器实例
+
+        Returns:
+            AiPredictor: AI预测器实例
+        """
+        if self._ai_predictor is None:
+            logger.info("创建AI预测器实例")
+            self._ai_predictor = AiPredictor()
+        return self._ai_predictor
+
+    async def close(self):
+        """
+        关闭AI服务，释放资源
+        """
+        logger.info("关闭AI服务")
+
+        # 关闭HTTP会话
+        if self._http_session is not None:
+            await self._http_session.close()
+            self._http_session = None
+
+        # 释放预测器资源
+        if self._ai_predictor is not None and hasattr(self._ai_predictor, "close"):
+            await self._ai_predictor.close()
+            self._ai_predictor = None
+
+        logger.info("AI服务已关闭")
 
     async def analyze(
         self,

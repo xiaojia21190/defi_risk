@@ -31,8 +31,8 @@ from app.models.domain.risk import (
 
 logger = logging.getLogger("defi_risk.blockchain_service")
 
-# 设置代理
-proxies = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
+# 使用settings中的代理设置
+proxies = {"http": settings.PROXY_URL, "https": settings.PROXY_URL} if settings.PROXY_URL else None
 
 from defillama import DefiLlama
 
@@ -193,7 +193,33 @@ class BlockchainService:
         self.okx_api_defi_path = "/api/v5/defi"
         self.okx_api_wallet_path = "/api/v5/wallet"
 
+        # 添加HTTP会话属性
+        self._http_session = None
+
         self._load_contract_abis()
+
+        logger.info("区块链服务初始化完成")
+
+    async def close(self):
+        """
+        关闭区块链服务，释放资源
+        """
+        logger.info("关闭区块链服务")
+
+        # 关闭HTTP会话
+        if self._http_session is not None:
+            await self._http_session.close()
+            self._http_session = None
+
+        # 关闭web3连接
+        if hasattr(self.web3.provider, 'close'):
+            self.web3.provider.close()
+
+        # 关闭DeFi Llama客户端
+        if hasattr(self.defi_llama_client, 'close'):
+            await self.defi_llama_client.close()
+
+        logger.info("区块链服务已关闭")
 
     def _load_contract_abis(self):
         """加载合约ABI"""

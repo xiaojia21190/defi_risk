@@ -57,7 +57,7 @@ class Settings:
     AI_MODEL: str = os.getenv("OPENAI_API_MODEL")
 
     # 代理设置
-    PROXY_URL = "http://127.0.0.1:7890"
+    PROXY_URL: str = os.getenv("PROXY_URL", "http://127.0.0.1:7890")
 
     # 风险权重配置
     RISK_WEIGHTS: Dict[str, float] = {
@@ -70,7 +70,7 @@ class Settings:
     }
 
     # 缓存设置
-    CACHE_TTL: int = Field(default=300, env="CACHE_TTL")  # 默认5分钟
+    CACHE_TTL: int = int(os.getenv("CACHE_TTL", "300"))  # 默认5分钟
 
     class Config:
         env_file = ".env"
