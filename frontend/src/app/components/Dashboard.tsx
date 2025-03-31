@@ -257,7 +257,7 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex items-center justify-between">
         <div className="space-y-1">
           <h2 className="text-2xl font-bold tracking-tight">DeFi投资组合</h2>
           <p className="text-sm text-muted-foreground">
@@ -265,7 +265,7 @@ export const Dashboard: React.FC = () => {
             {lastUpdateTime && <span className="ml-2">· 最后更新: {lastUpdateTime.toLocaleTimeString()}</span>}
           </p>
         </div>
-        <div className="flex gap-2 items-center">
+        <div className="flex items-center gap-2">
           <Button onClick={handleRefresh} disabled={loading} variant="outline" size="icon">
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
           </Button>
@@ -281,8 +281,8 @@ export const Dashboard: React.FC = () => {
       )}
 
       {loading && (
-        <Card className="p-6 w-full">
-          <div className="flex justify-center items-center">
+        <Card className="w-full p-6">
+          <div className="flex items-center justify-center">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
           </div>
         </Card>
@@ -311,12 +311,12 @@ export const Dashboard: React.FC = () => {
                 </CardHeader>
                 <CardContent>
                   {!portfolio.risk_level ? (
-                    <div className="flex flex-col justify-center items-center space-y-4">
+                    <div className="flex flex-col items-center justify-center space-y-4">
                       <Shield className="w-12 h-12 text-muted-foreground" />
                       <Button onClick={analyzeWalletRisk} disabled={analyzing}>
                         {analyzing ? (
                           <>
-                            <Loader2 className="mr-2 w-4 h-4 animate-spin" />
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                             分析中...
                           </>
                         ) : (
@@ -326,10 +326,10 @@ export const Dashboard: React.FC = () => {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      <div className="flex justify-between items-center">
+                      <div className="flex items-center justify-between">
                         <div>
                           <p className="text-sm font-medium">风险等级</p>
-                          <div className="flex gap-2 items-center">
+                          <div className="flex items-center gap-2">
                             <h3 className="text-2xl font-bold">{portfolio.risk_level}</h3>
                             {riskAnalysis?.risk_score !== undefined && (
                               <Badge variant="outline" className="text-sm">
@@ -347,7 +347,9 @@ export const Dashboard: React.FC = () => {
                       {riskAnalysis?.risk_factors && riskAnalysis.risk_factors.length > 0 && (
                         <div>
                           <p className="mb-1 text-sm font-medium">主要风险因素</p>
-                          <p className="text-sm text-destructive">• {riskAnalysis.risk_factors[0]}</p>
+                          <p className="text-sm text-destructive">
+                            • {riskAnalysis.risk_factors[0].name}: {riskAnalysis.risk_factors[0].description}
+                          </p>
                           {riskAnalysis.risk_factors.length > 1 && <p className="mt-1 text-xs text-muted-foreground">还有 {riskAnalysis.risk_factors.length - 1} 个风险因素</p>}
                         </div>
                       )}
@@ -365,7 +367,7 @@ export const Dashboard: React.FC = () => {
                       <Button
                         variant="outline"
                         size="sm"
-                        className="mt-2 w-full"
+                        className="w-full mt-2"
                         onClick={() => {
                           const riskTab = document.querySelector('[data-value="risk"]') as HTMLButtonElement;
                           if (riskTab) riskTab.click();
@@ -387,178 +389,7 @@ export const Dashboard: React.FC = () => {
 
           {/* 风险分析标签页 */}
           <TabsContent value="risk" className="mt-0">
-            <Card>
-              <CardHeader>
-                <CardTitle>详细风险分析</CardTitle>
-                <CardDescription>分析您的DeFi投资组合风险</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {!portfolio.risk_level ? (
-                  <div className="flex flex-col justify-center items-center space-y-4">
-                    <Shield className="w-12 h-12 text-muted-foreground" />
-                    <Button onClick={analyzeWalletRisk} disabled={analyzing}>
-                      {analyzing ? (
-                        <>
-                          <Loader2 className="mr-2 w-4 h-4 animate-spin" />
-                          分析中...
-                        </>
-                      ) : (
-                        "开始风险分析"
-                      )}
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <p className="text-sm font-medium">风险等级</p>
-                        <div className="flex gap-2 items-center">
-                          <h3 className="text-2xl font-bold">{portfolio.risk_level}</h3>
-                          {riskAnalysis?.risk_score !== undefined && (
-                            <Badge variant="outline" className="text-sm">
-                              风险评分: {riskAnalysis.risk_score}/100
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      <Button variant="outline" size="sm" onClick={analyzeWalletRisk} disabled={analyzing}>
-                        {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : "重新分析"}
-                      </Button>
-                    </div>
-
-                    {/* 风险因素 */}
-                    {riskAnalysis?.risk_factors && riskAnalysis.risk_factors.length > 0 && (
-                      <div>
-                        <p className="mb-2 text-sm font-medium">风险因素</p>
-                        <ul className="space-y-1">
-                          {riskAnalysis.risk_factors.map((factor, index) => (
-                            <li key={index} className="text-sm text-destructive">
-                              • {factor}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {/* 风险指标 */}
-                    {riskAnalysis?.risk_metrics && Object.keys(riskAnalysis.risk_metrics).length > 0 && (
-                      <div>
-                        <p className="mb-2 text-sm font-medium">风险指标</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {Object.entries(riskAnalysis.risk_metrics).map(([key, value], index) => (
-                            <div key={index} className="p-2 rounded-md border">
-                              <p className="text-xs text-muted-foreground">{key}</p>
-                              <p className="text-sm font-medium">{value}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 推荐措施 */}
-                    {portfolio.recommendations && portfolio.recommendations.length > 0 && (
-                      <div>
-                        <p className="mb-2 text-sm font-medium">建议</p>
-                        <ul className="space-y-1">
-                          {portfolio.recommendations.map((rec, index) => (
-                            <li key={index} className="text-sm text-muted-foreground">
-                              • {rec}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {/* 预警信息 */}
-                    {riskAnalysis?.warnings && riskAnalysis.warnings.length > 0 && (
-                      <div>
-                        <p className="mb-2 text-sm font-medium">预警信息</p>
-                        <div className="space-y-2">
-                          {riskAnalysis.warnings.map((warning, index) => (
-                            <Alert key={index} variant="destructive" className="py-2">
-                              <AlertTriangle className="w-4 h-4" />
-                              <AlertDescription>{warning}</AlertDescription>
-                            </Alert>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 监控点 */}
-                    {riskAnalysis?.monitoring_points && riskAnalysis.monitoring_points.length > 0 && (
-                      <div>
-                        <p className="mb-2 text-sm font-medium">监控点</p>
-                        <Table>
-                          <TableBody>
-                            {riskAnalysis.monitoring_points.map((point, index) => (
-                              <TableRow key={index}>
-                                <TableCell className="text-sm">{point}</TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    )}
-
-                    {/* 头寸摘要信息 */}
-                    {riskAnalysis?.positions_summary && (
-                      <div>
-                        <p className="mb-2 text-sm font-medium">头寸摘要</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="p-2 rounded-md border">
-                            <p className="text-xs text-muted-foreground">总价值</p>
-                            <p className="text-sm font-medium">${riskAnalysis.positions_summary.total_value.toLocaleString()}</p>
-                          </div>
-                          <div className="p-2 rounded-md border">
-                            <p className="text-xs text-muted-foreground">头寸数量</p>
-                            <p className="text-sm font-medium">{riskAnalysis.positions_summary.position_count}</p>
-                          </div>
-                        </div>
-
-                        {riskAnalysis.positions_summary.protocols.length > 0 && (
-                          <div className="mt-2">
-                            <p className="text-xs text-muted-foreground">协议 ({riskAnalysis.positions_summary.protocols.length})</p>
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {riskAnalysis.positions_summary.protocols.map((protocol, index) => (
-                                <Badge key={index} variant="secondary" className="text-xs">
-                                  {protocol}
-                                </Badge>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {riskAnalysis.positions_summary.assets.length > 0 && (
-                          <div className="mt-2">
-                            <p className="text-xs text-muted-foreground">资产 ({riskAnalysis.positions_summary.assets.length})</p>
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {riskAnalysis.positions_summary.assets.map((asset, index) => (
-                                <Badge key={index} variant="outline" className="text-xs">
-                                  {asset}
-                                </Badge>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* AI增强标记 */}
-                    {riskAnalysis?.ai_enhanced && (
-                      <div className="mt-4">
-                        <Badge className="bg-blue-600 hover:bg-blue-700">
-                          <Zap className="mr-1 w-3 h-3" />
-                          AI增强分析
-                        </Badge>
-                      </div>
-                    )}
-
-                    {/* 分析时间戳 */}
-                    {riskAnalysis?.analysis_timestamp && <div className="mt-4 text-xs text-muted-foreground">分析时间: {new Date(riskAnalysis.analysis_timestamp).toLocaleString()}</div>}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            <RiskMonitor portfolio={portfolio} riskAnalysis={riskAnalysis} analyzing={analyzing} completed={!!portfolio.risk_level} onAnalyze={analyzeWalletRisk} />
           </TabsContent>
 
           {/* 市场分析标签页 */}

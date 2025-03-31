@@ -19,6 +19,32 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
         super().__init__(ai_service, ai_predictor, blockchain_service)
         self.recommendation_service = RecommendationService()
 
+        # 确保区块链服务可用
+        self._ensure_blockchain_service_available("初始化")
+
+    def _ensure_blockchain_service_available(self, context=""):
+        """
+        确保区块链服务可用，如果不可用则尝试初始化
+
+        Args:
+            context: 调用上下文，用于日志记录
+
+        Returns:
+            bool: 区块链服务是否可用
+        """
+        if not self.blockchain_service:
+            try:
+                # 尝试导入并初始化区块链服务
+                from app.services.blockchain import BlockchainService
+
+                self.blockchain_service = BlockchainService()
+                self.logger.info(f"已自动初始化区块链服务 [{context}]")
+                return True
+            except Exception as e:
+                self.logger.error(f"无法自动初始化区块链服务 [{context}]: {str(e)}")
+                return False
+        return True
+
     async def analyze(self, data: Dict[str, Any]) -> RiskAnalysisResult:
         """
         分析相关性风险
@@ -32,6 +58,26 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
         self.logger.info("开始分析相关性风险")
 
         try:
+            # 确保区块链服务可用，并检查其健康状态
+            if self._ensure_blockchain_service_available("开始相关性风险分析"):
+                # 检查区块链服务健康状态
+                if hasattr(self.blockchain_service, "check_health") and callable(
+                    getattr(self.blockchain_service, "check_health")
+                ):
+                    try:
+                        health_status = await self.blockchain_service.check_health()
+                        if not health_status.get("is_healthy", False):
+                            self.logger.warning(
+                                f"区块链服务健康检查失败: {health_status.get('message', '未知原因')}"
+                            )
+                            # 尝试重新初始化
+                            self.blockchain_service = None
+                            self._ensure_blockchain_service_available(
+                                "重新初始化区块链服务"
+                            )
+                    except Exception as e:
+                        self.logger.warning(f"区块链服务健康检查异常: {str(e)}")
+
             # 获取风险因子
             risk_factors = await self.get_risk_factors(data)
 
@@ -110,10 +156,6 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
     ) -> Optional[RiskFactor]:
         """分析资产相关性风险"""
         try:
-            if not self.blockchain_service:
-                self.logger.warning("区块链服务未初始化，无法获取资产历史数据")
-                return None
-
             # 提取资产列表和权重
             assets = {}
             reward_assets = {}  # 单独跟踪奖励代币
@@ -121,23 +163,26 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
 
             # 处理嵌套的positions结构
             for protocol_position in positions:
-                inner_positions = protocol_position.get("positions", [])
+                # 安全获取内部positions，支持字典和对象类型
+                inner_positions = self._safe_get_attr(
+                    protocol_position, "positions", []
+                )
 
                 # 遍历每个协议中的具体资产positions
                 for pos in inner_positions:
-                    position_amount = pos.get("amount", 0)
-                    total_value += position_amount
+                    # 安全获取数值属性，支持字典和对象类型
+                    position_amount = self._safe_get_attr(pos, "amount", 0)
+                    total_value += float(position_amount) if position_amount else 0
 
                     # 优先从tokenList获取更精确的代币信息
-                    if pos.get("tokenList"):
+                    token_list = self._safe_get_attr(pos, "tokenList", None)
+                    if token_list:
                         # 计算非奖励代币且非排除代币的数量
-                        regular_tokens = self.filter_token_list(
-                            pos.get("tokenList", [])
-                        )
+                        regular_tokens = self.filter_token_list(token_list)
                         regular_token_count = len(regular_tokens) or 1  # 避免除以零
 
-                        for token in pos.get("tokenList", []):
-                            token_symbol = token.get("tokenSymbol", "")
+                        for token in token_list:
+                            token_symbol = self._safe_get_attr(token, "tokenSymbol", "")
                             if not token_symbol:
                                 continue
 
@@ -150,20 +195,26 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
 
                             # 使用代币实际金额(currencyAmount)而不是平均分配，如果可用
                             token_value = 0
-                            if (
-                                token.get("currencyAmount")
-                                and float(token.get("currencyAmount", 0)) > 0
-                            ):
+                            currency_amount = self._safe_get_attr(
+                                token, "currencyAmount", 0
+                            )
+
+                            if currency_amount and float(currency_amount) > 0:
                                 try:
-                                    token_value = float(token.get("currencyAmount", 0))
+                                    token_value = float(currency_amount)
                                 except (ValueError, TypeError):
                                     # 如果无法转换为float，使用估计值
-                                    token_value = position_amount / regular_token_count
+                                    token_value = (
+                                        float(position_amount) / regular_token_count
+                                    )
                             else:
-                                token_value = position_amount / regular_token_count
+                                token_value = (
+                                    float(position_amount) / regular_token_count
+                                )
 
                             # 根据代币类型分别处理
-                            if token.get("tokenType") == "reward":
+                            token_type = self._safe_get_attr(token, "tokenType", "")
+                            if token_type == "reward":
                                 if token_symbol not in reward_assets:
                                     reward_assets[token_symbol] = 0
                                 reward_assets[token_symbol] += token_value
@@ -173,9 +224,11 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
                                 assets[token_symbol] += token_value
                     else:
                         # 如果没有tokenList，使用资产名称
-                        asset = pos.get("asset", "Unknown").split("/")[
-                            0
-                        ]  # 处理流动性池资产格式
+                        asset_name = self._safe_get_attr(pos, "asset", "Unknown")
+                        if isinstance(asset_name, str) and "/" in asset_name:
+                            asset = asset_name.split("/")[0]  # 处理流动性池资产格式
+                        else:
+                            asset = str(asset_name)
 
                         # 排除应该被排除的资产
                         if self.is_excluded_token(asset):
@@ -186,7 +239,9 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
 
                         if asset not in assets:
                             assets[asset] = 0
-                        assets[asset] += position_amount
+                        assets[asset] += (
+                            float(position_amount) if position_amount else 0
+                        )
 
             # 如果资产不足，无法进行相关性分析
             if len(assets) < 2:
@@ -237,6 +292,24 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
                     # 如果AI分析失败，继续使用传统方法
 
             # 如果AI分析失败或不可用，使用区块链服务获取历史数据计算相关性
+            # 确保区块链服务可用
+            if not self._ensure_blockchain_service_available("资产相关性分析"):
+                # 使用默认的估计值
+                return self.create_risk_factor(
+                    risk_type=RiskType.CORRELATION.value,
+                    factor_name="资产相关性风险",
+                    score=50,  # 默认中等风险
+                    weight=0.4,
+                    description="无法初始化区块链服务获取资产历史数据，使用默认的相关性风险评估",
+                    trend="稳定",
+                    data_points=[],
+                    metadata={
+                        "assets": assets,
+                        "reward_assets": reward_assets,
+                        "estimation_method": "default",
+                    },
+                )
+
             # 获取所有资产对的相关性数据
             asset_list = list(assets.keys())
             correlation_matrix = {}
@@ -402,8 +475,12 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
                     f"使用AI估计资产相关性时出错: {str(e)}，将使用后备方法"
                 )
 
-        # 如果AI调用失败或未配置AI服务，使用后备方法
+        # 如果AI调用失败或未配置AI服务，确保区块链服务可用再继续
+        self._ensure_blockchain_service_available(
+            f"估计资产 {asset1} 和 {asset2} 的相关性"
+        )
 
+        # 使用后备方法
         # 检查是否为稳定币
         if self._is_stablecoin(asset1_upper) and self._is_stablecoin(asset2_upper):
             return 0.95  # 稳定币之间高度相关
@@ -455,21 +532,30 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
     ) -> Optional[RiskFactor]:
         """分析协议相关性风险"""
         try:
+            # 确保区块链服务可用
+            self._ensure_blockchain_service_available("协议相关性分析")
+
             # 处理嵌套的positions结构
             protocols = {}
             total_value = 0
 
             # 遍历协议positions
             for protocol_position in positions:
-                protocol = protocol_position.get("protocol", "Unknown")
-                inner_positions = protocol_position.get("positions", [])
+                protocol = self._safe_get_attr(protocol_position, "protocol", "Unknown")
+                inner_positions = self._safe_get_attr(
+                    protocol_position, "positions", []
+                )
 
                 if protocol not in protocols:
                     protocols[protocol] = 0
 
                 # 累加该协议下所有position的金额
                 for pos in inner_positions:
-                    amount = pos.get("amount", 0)
+                    amount = self._safe_get_attr(pos, "amount", 0)
+                    try:
+                        amount = float(amount)
+                    except (ValueError, TypeError):
+                        amount = 0
                     protocols[protocol] += amount
                     total_value += amount
 
@@ -586,19 +672,30 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
     ) -> Optional[RiskFactor]:
         """分析投资类型相关性风险"""
         try:
+            # 确保区块链服务可用
+            self._ensure_blockchain_service_available("投资类型相关性分析")
+
             # 处理嵌套的positions结构
             investment_types = {}
             total_value = 0
 
             # 遍历协议positions
             for protocol_position in positions:
-                inner_positions = protocol_position.get("positions", [])
+                inner_positions = self._safe_get_attr(
+                    protocol_position, "positions", []
+                )
 
                 # 遍历每个协议中的具体资产positions
                 for pos in inner_positions:
-                    invest_type = pos.get("invest_type", 0)
-                    invest_type_name = pos.get("invest_type_name", "未知类型")
-                    amount = pos.get("amount", 0)
+                    invest_type = self._safe_get_attr(pos, "invest_type", 0)
+                    invest_type_name = self._safe_get_attr(
+                        pos, "invest_type_name", "未知类型"
+                    )
+                    amount = self._safe_get_attr(pos, "amount", 0)
+                    try:
+                        amount = float(amount)
+                    except (ValueError, TypeError):
+                        amount = 0
                     total_value += amount
 
                     if invest_type not in investment_types:
@@ -746,6 +843,9 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
         Returns:
             建议列表
         """
+        # 确保区块链服务可用
+        self._ensure_blockchain_service_available("获取相关性风险建议")
+
         # 使用推荐服务生成建议
         return self.recommendation_service.get_correlation_risk_recommendations(
             risk_factors
@@ -761,7 +861,115 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
         Returns:
             监控点列表
         """
+        # 确保区块链服务可用
+        self._ensure_blockchain_service_available("获取相关性风险监控点")
+
         # 使用推荐服务生成监控点
         return self.recommendation_service.get_monitoring_points(
             "CORRELATION", risk_factors
         )
+
+    def _safe_get_attr(self, obj, attr_name, default=None):
+        """
+        安全获取对象属性或字典值
+
+        Args:
+            obj: 对象或字典
+            attr_name: 属性或键名
+            default: 默认值
+
+        Returns:
+            属性值或默认值
+        """
+        if obj is None:
+            return default
+
+        # 如果是字典类型
+        if isinstance(obj, dict):
+            return obj.get(attr_name, default)
+
+        # 如果是对象类型
+        try:
+            return getattr(obj, attr_name, default)
+        except (AttributeError, TypeError):
+            return default
+
+    def filter_token_list(self, token_list):
+        """
+        过滤代币列表，排除奖励代币和应该被排除的代币
+
+        Args:
+            token_list: 代币列表
+
+        Returns:
+            过滤后的代币列表
+        """
+        if not token_list:
+            return []
+
+        filtered_tokens = []
+        for token in token_list:
+            token_symbol = self._safe_get_attr(token, "tokenSymbol", "")
+            token_type = self._safe_get_attr(token, "tokenType", "")
+
+            # 排除奖励代币和应该被排除的代币
+            if (
+                not token_symbol
+                or token_type == "reward"
+                or self.is_excluded_token(token_symbol)
+            ):
+                continue
+
+            filtered_tokens.append(token)
+
+        return filtered_tokens
+
+    def is_excluded_token(self, token_symbol):
+        """
+        检查代币是否应该被排除在相关性分析之外
+
+        Args:
+            token_symbol: 代币符号
+
+        Returns:
+            bool: 是否应该被排除
+        """
+        excluded_tokens = [
+            # 稳定币通常不参与相关性分析，因为它们的价格波动很小
+            "USDT",
+            "USDC",
+            "DAI",
+            "BUSD",
+            "TUSD",
+            "USDP",
+            "GUSD",
+            "USDN",
+            "HUSD",
+            "SUSD",
+            # 包装代币通常与其底层资产高度相关
+            "WETH",
+            "WBTC",
+            "WBNB",
+            "WAVAX",
+            # 流动性代币或治理代币，通常不参与相关性分析
+            "LP",
+            "FARM",
+            "XVS",
+            "CAKE",
+        ]
+
+        if not token_symbol:
+            return True
+
+        token_upper = token_symbol.upper()
+
+        # 检查精确匹配
+        if token_upper in excluded_tokens:
+            return True
+
+        # 检查部分匹配（如USDT-3CRV这样的代币名称）
+        for excluded in excluded_tokens:
+            if excluded in token_upper:
+                return True
+
+        return False

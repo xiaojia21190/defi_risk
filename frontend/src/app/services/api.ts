@@ -175,7 +175,13 @@ export interface WalletRiskAssessment {
   wallet_address: string;
   risk_score: number;
   risk_level: string;
-  risk_factors: string[];
+  risk_factors: Array<{
+    name: string;
+    score: number;
+    weight: number;
+    description: string;
+    trend: string;
+  }>;
   risk_metrics: {
     [key: string]: number | string;
   };
@@ -190,6 +196,8 @@ export interface WalletRiskAssessment {
     assets: string[];
   };
   ai_enhanced?: boolean;
+  timestamp?: string;
+  is_demo_data?: boolean;
 }
 
 export interface DemoStatus {
@@ -390,7 +398,9 @@ class ApiService {
         monitoring_points: response.monitoring_points || [],
         analysis_timestamp: response.analysis_timestamp || new Date().toISOString(),
         positions_summary: response.positions_summary,
-        ai_enhanced: response.ai_enhanced || false
+        ai_enhanced: response.ai_enhanced || false,
+        timestamp: response.timestamp,
+        is_demo_data: response.is_demo_data || false
       };
     } catch (error) {
       console.error('获取钱包风险评估失败:', error);

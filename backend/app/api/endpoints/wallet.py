@@ -8,6 +8,7 @@ from app.core.init_app import get_blockchain_service, get_ai_service, get_risk_e
 from app.core.config import settings
 import logging
 from datetime import datetime
+from app.core.utility import create_standard_response, safe_get, ensure_list
 
 from app.services.risk_engine import RiskEngine
 
@@ -70,16 +71,17 @@ async def get_wallet_positions(
                             }
                         )
 
-            return {
-                "wallet_address": wallet_address,
-                "positions": wallet_data.get("positions", []),
-                "total_value_usd": wallet_data.get("total_value_usd", 0),
-                "position_count": len(wallet_data.get("positions", [])),
-                "protocols": protocols_used,
-                "protocol_count": len(protocols_used),
-                "timestamp": datetime.now().isoformat(),
-                "is_demo_data": True,
-            }
+            return create_standard_response(
+                {
+                    "positions": wallet_data.get("positions", []),
+                    "total_value_usd": wallet_data.get("total_value_usd", 0),
+                    "position_count": len(wallet_data.get("positions", [])),
+                    "protocols": protocols_used,
+                    "protocol_count": len(protocols_used),
+                },
+                wallet_address=wallet_address,
+                is_demo=True,
+            )
 
         # 获取所有协议头寸
         positions = await blockchain_service.get_all_positions(wallet_address)
@@ -135,16 +137,16 @@ async def get_wallet_positions(
                     )
 
         # 构建响应
-        response = {
-            "wallet_address": wallet_address,
-            "positions": positions,
-            "total_value_usd": total_value,
-            "position_count": len(positions),
-            "protocols": protocols_used,
-            "protocol_count": len(protocols_used),
-            "timestamp": datetime.now().isoformat(),
-            "is_demo_data": False,
-        }
+        response = create_standard_response(
+            {
+                "positions": positions,
+                "total_value_usd": total_value,
+                "position_count": len(positions),
+                "protocols": protocols_used,
+                "protocol_count": len(protocols_used),
+            },
+            wallet_address=wallet_address,
+        )
 
         return response
     except Exception as e:
@@ -174,10 +176,49 @@ async def analyze_wallet_risk(
     try:
         logger.info(f"收到钱包风险分析请求: {wallet_address}")
 
+        # 检查区块链服务是否可用，不可用时使用演示数据
+        if not blockchain_service or not hasattr(
+            blockchain_service, "get_all_positions"
+        ):
+            logger.warning("区块链服务不可用，使用演示数据")
+            if settings.DEMO_MODE:
+                return demo_service.analyze_wallet_risk(wallet_address)
+            else:
+                raise HTTPException(status_code=503, detail="区块链服务暂时不可用")
+
         # 如果是演示模式，使用演示数据
         if settings.DEMO_MODE:
             logger.info(f"使用演示数据: 钱包风险 {wallet_address}")
-            return demo_service.analyze_wallet_risk(wallet_address)
+            demo_risk_data = demo_service.analyze_wallet_risk(wallet_address)
+
+            # 确保演示数据中的assets是完整的
+            if not demo_risk_data.get("positions_summary", {}).get("assets"):
+                wallet_data = demo_service.get_wallet_positions(wallet_address)
+                positions = wallet_data.get("positions", [])
+
+                # 使用优化后的逻辑收集所有资产
+                assets = set()
+                for p in positions:
+                    # 直接从positions获取asset
+                    if "asset" in p:
+                        assets.add(p["asset"])
+                    # 从嵌套的positions子数组获取asset
+                    if "positions" in p:
+                        for sub_p in p["positions"]:
+                            if "asset" in sub_p and sub_p["asset"]:
+                                assets.add(sub_p["asset"])
+                            # 从tokenList中获取资产
+                            if "tokenList" in sub_p:
+                                for token in sub_p["tokenList"]:
+                                    if "tokenSymbol" in token and token["tokenSymbol"]:
+                                        assets.add(token["tokenSymbol"])
+
+                # 过滤掉空值并更新demo_risk_data
+                assets = list(filter(None, assets))
+                if assets and "positions_summary" in demo_risk_data:
+                    demo_risk_data["positions_summary"]["assets"] = assets
+
+            return demo_risk_data
 
         # 获取钱包头寸
         positions = await blockchain_service.get_all_positions(wallet_address)
@@ -193,29 +234,70 @@ async def analyze_wallet_risk(
         )
 
         # 构建响应
-        result = {
-            "wallet_address": wallet_address,
-            "risk_score": risk_analysis.get("risk_score", 0),
-            "risk_level": risk_analysis.get("risk_level", "未知"),
-            "risk_factors": risk_analysis.get("risk_factors", []),
-            "risk_metrics": risk_analysis.get("risk_metrics", {}),
-            "recommendations": ai_insights.get("recommendations", [])
-            or risk_analysis.get("recommendations", []),
-            "warnings": risk_analysis.get("warnings", []),
-            "monitoring_points": risk_analysis.get("monitoring_points", []),
-            "analysis_timestamp": risk_analysis.get(
-                "analysis_timestamp", datetime.now().isoformat()
-            ),
-            "positions_summary": {
-                "total_value": sum(
-                    position.get("usd_value", 0) for position in positions
+        result = create_standard_response(
+            {
+                "risk_score": risk_analysis.get("risk_score", 0),
+                "risk_level": risk_analysis.get("risk_level", "未知"),
+                "risk_factors": risk_analysis.get("risk_factors", []),
+                "risk_metrics": risk_analysis.get("risk_metrics", {}),
+                "recommendations": ai_insights.get("recommendations", [])
+                or risk_analysis.get("recommendations", []),
+                "warnings": risk_analysis.get("warnings", []),
+                "monitoring_points": risk_analysis.get("monitoring_points", []),
+                "analysis_timestamp": risk_analysis.get(
+                    "analysis_timestamp", datetime.now().isoformat()
                 ),
-                "position_count": len(positions),
-                "protocols": list(set(p.get("protocol", "") for p in positions)),
-                "assets": list(set(p.get("asset", "") for p in positions)),
+                "positions_summary": {
+                    "total_value": sum(
+                        safe_get_position_value(position) for position in positions
+                    ),
+                    "position_count": len(positions),
+                    "protocols": list(
+                        filter(
+                            None, set(safe_get(p, "protocol", "") for p in positions)
+                        )
+                    ),
+                    "assets": list(
+                        filter(
+                            None,
+                            {
+                                # 直接从positions对象中提取asset字段
+                                safe_get(p, "asset", "")
+                                for p in positions
+                            }
+                            .union(
+                                {
+                                    # 从嵌套的positions子数组中提取asset字段
+                                    safe_get(sub_p, "asset", "")
+                                    for p in positions
+                                    if has_positions(p)
+                                    for sub_p in ensure_list(
+                                        safe_get(p, "positions", [])
+                                    )
+                                }
+                            )
+                            .union(
+                                {
+                                    # 考虑tokenList中可能的资产
+                                    safe_get(token, "tokenSymbol", "")
+                                    for p in positions
+                                    if has_positions(p)
+                                    for sub_p in ensure_list(
+                                        safe_get(p, "positions", [])
+                                    )
+                                    if has_token_list(sub_p)
+                                    for token in ensure_list(
+                                        safe_get(sub_p, "tokenList", [])
+                                    )
+                                }
+                            ),
+                        )
+                    ),
+                },
+                "ai_enhanced": ai_insights.get("recommendations", []) != [],
             },
-            "ai_enhanced": ai_insights.get("recommendations", []) != [],
-        }
+            wallet_address=wallet_address,
+        )
 
         return result
     except Exception as e:
@@ -223,8 +305,94 @@ async def analyze_wallet_risk(
         # 如果出错且是演示模式，返回演示数据
         if settings.DEMO_MODE:
             logger.info(f"出错时使用演示数据: 钱包风险 {wallet_address}")
-            return demo_service.analyze_wallet_risk(wallet_address)
+            demo_risk_data = demo_service.analyze_wallet_risk(wallet_address)
+
+            # 确保演示数据中的assets是完整的
+            if not demo_risk_data.get("positions_summary", {}).get("assets"):
+                wallet_data = demo_service.get_wallet_positions(wallet_address)
+                positions = wallet_data.get("positions", [])
+
+                # 使用优化后的逻辑收集所有资产
+                assets = set()
+                for p in positions:
+                    # 直接从positions获取asset
+                    if "asset" in p:
+                        assets.add(p["asset"])
+                    # 从嵌套的positions子数组获取asset
+                    if "positions" in p:
+                        for sub_p in p["positions"]:
+                            if "asset" in sub_p and sub_p["asset"]:
+                                assets.add(sub_p["asset"])
+                            # 从tokenList中获取资产
+                            if "tokenList" in sub_p:
+                                for token in sub_p["tokenList"]:
+                                    if "tokenSymbol" in token and token["tokenSymbol"]:
+                                        assets.add(token["tokenSymbol"])
+
+                # 过滤掉空值并更新demo_risk_data
+                assets = list(filter(None, assets))
+                if assets and "positions_summary" in demo_risk_data:
+                    demo_risk_data["positions_summary"]["assets"] = assets
+
+            return demo_risk_data
+
         raise HTTPException(status_code=500, detail=f"分析钱包风险失败: {str(e)}")
+
+
+def safe_get_position_value(position):
+    """
+    安全获取头寸的价值，处理不同类型的头寸对象
+
+    Args:
+        position: 头寸对象，可能是字典或PlatformAsset类型
+
+    Returns:
+        float: 头寸价值
+    """
+    # 尝试获取total_assets
+    total_assets = safe_get(position, "total_assets", None)
+    if total_assets is not None:
+        try:
+            return float(total_assets)
+        except (ValueError, TypeError):
+            pass
+
+    # 尝试获取amount
+    amount = safe_get(position, "amount", 0)
+    try:
+        return float(amount)
+    except (ValueError, TypeError):
+        return 0
+
+
+def has_positions(obj):
+    """
+    检查对象是否有positions属性或键
+
+    Args:
+        obj: 要检查的对象
+
+    Returns:
+        bool: 是否有positions
+    """
+    if isinstance(obj, dict):
+        return "positions" in obj
+    return hasattr(obj, "positions") and getattr(obj, "positions") is not None
+
+
+def has_token_list(obj):
+    """
+    检查对象是否有tokenList属性或键
+
+    Args:
+        obj: 要检查的对象
+
+    Returns:
+        bool: 是否有tokenList
+    """
+    if isinstance(obj, dict):
+        return "tokenList" in obj
+    return hasattr(obj, "tokenList") and getattr(obj, "tokenList") is not None
 
 
 @router.get("/{wallet_address}/market-risk")
@@ -243,6 +411,16 @@ async def analyze_wallet_market_risk(
     try:
         logger.info(f"收到钱包市场风险分析请求: {wallet_address}")
 
+        # 检查区块链服务是否可用，不可用时使用演示数据
+        if not blockchain_service or not hasattr(
+            blockchain_service, "get_all_positions"
+        ):
+            logger.warning("区块链服务不可用，使用演示数据")
+            if settings.DEMO_MODE:
+                return demo_service.get_wallet_market_risk(wallet_address)
+            else:
+                raise HTTPException(status_code=503, detail="区块链服务暂时不可用")
+
         # 如果是演示模式，使用演示数据
         if settings.DEMO_MODE:
             logger.info(f"使用演示数据: 钱包市场风险分析 {wallet_address}")
@@ -254,20 +432,31 @@ async def analyze_wallet_market_risk(
                 logger.info("演示服务中没有专门的市场风险方法，使用通用风险数据")
                 risk_data = demo_service.analyze_wallet_risk(wallet_address)
                 # 从通用风险数据中提取市场风险相关数据
-                return {
-                    "wallet_address": wallet_address,
-                    "risk_type": "MARKET",
-                    "target": "portfolio",
-                    "score": risk_data.get("risk_metrics", {}).get("market_risk_score", 50),
-                    "risk_level": "HIGH" if risk_data.get("risk_score", 50) > 70 else
-                                 "MEDIUM" if risk_data.get("risk_score", 50) > 40 else "LOW",
-                    "factors": risk_data.get("risk_factors", []),
-                    "recommendations": risk_data.get("recommendations", []),
-                    "monitoring_points": risk_data.get("monitoring_points", []),
-                    "ai_insights": [],
-                    "ai_available": True,
-                    "is_demo_data": True,
-                }
+                return create_standard_response(
+                    {
+                        "risk_type": "MARKET",
+                        "target": "portfolio",
+                        "score": risk_data.get("risk_metrics", {}).get(
+                            "market_risk_score", 50
+                        ),
+                        "risk_level": (
+                            "HIGH"
+                            if risk_data.get("risk_score", 50) > 70
+                            else (
+                                "MEDIUM"
+                                if risk_data.get("risk_score", 50) > 40
+                                else "LOW"
+                            )
+                        ),
+                        "factors": risk_data.get("risk_factors", []),
+                        "recommendations": risk_data.get("recommendations", []),
+                        "monitoring_points": risk_data.get("monitoring_points", []),
+                        "ai_insights": [],
+                        "ai_available": True,
+                    },
+                    wallet_address=wallet_address,
+                    is_demo=True,
+                )
 
         # 检查AI服务是否可用
         ai_available = False
@@ -282,23 +471,26 @@ async def analyze_wallet_market_risk(
             positions = await blockchain_service.get_all_positions(wallet_address)
         except Exception as pos_error:
             logger.error(f"获取钱包头寸时出错: {str(pos_error)}")
-            raise HTTPException(status_code=500, detail=f"获取钱包头寸失败: {str(pos_error)}")
+            raise HTTPException(
+                status_code=500, detail=f"获取钱包头寸失败: {str(pos_error)}"
+            )
 
         if not positions:
             logger.info(f"钱包 {wallet_address} 没有头寸")
-            return {
-                "wallet_address": wallet_address,
-                "risk_type": "MARKET",
-                "target": "portfolio",
-                "score": 0,
-                "risk_level": "LOW",
-                "factors": [],
-                "recommendations": ["添加资产以获取市场风险分析"],
-                "monitoring_points": [],
-                "ai_insights": [],
-                "ai_available": ai_available,
-                "timestamp": datetime.now().isoformat(),
-            }
+            return create_standard_response(
+                {
+                    "risk_type": "MARKET",
+                    "target": "portfolio",
+                    "score": 0,
+                    "risk_level": "LOW",
+                    "factors": [],
+                    "recommendations": ["添加资产以获取市场风险分析"],
+                    "monitoring_points": [],
+                    "ai_insights": [],
+                    "ai_available": ai_available,
+                },
+                wallet_address=wallet_address,
+            )
 
         # 分析市场风险
         try:
@@ -306,37 +498,42 @@ async def analyze_wallet_market_risk(
         except Exception as risk_error:
             logger.error(f"分析市场风险时出错: {str(risk_error)}")
             # 返回一个基本的风险结果
-            return {
-                "wallet_address": wallet_address,
-                "risk_type": "MARKET",
-                "target": "portfolio",
-                "score": 50,  # 默认中等风险
-                "risk_level": "MEDIUM",
-                "factors": [],
-                "recommendations": ["风险分析过程中出错，请稍后重试"],
-                "monitoring_points": ["监控市场整体波动"],
-                "ai_insights": [f"分析过程中出错: {str(risk_error)}"],
-                "ai_available": ai_available,
-                "error": str(risk_error),
-                "timestamp": datetime.now().isoformat(),
-            }
+            return create_standard_response(
+                {
+                    "risk_type": "MARKET",
+                    "target": "portfolio",
+                    "score": 50,  # 默认中等风险
+                    "risk_level": "MEDIUM",
+                    "factors": [],
+                    "recommendations": ["风险分析过程中出错，请稍后重试"],
+                    "monitoring_points": ["监控市场整体波动"],
+                    "ai_insights": [f"分析过程中出错: {str(risk_error)}"],
+                    "ai_available": ai_available,
+                    "error": str(risk_error),
+                },
+                wallet_address=wallet_address,
+            )
 
         # 获取AI洞察和建议
         ai_insights = []
         ai_recommendations = []
         ai_monitoring_points = []
 
-        if ai_available and hasattr(market_risk_result, 'factors') and market_risk_result.factors:
+        if (
+            ai_available
+            and hasattr(market_risk_result, "factors")
+            and market_risk_result.factors
+        ):
             try:
                 # 准备AI分析的数据
                 risk_data = {
                     "risk_factors": [
                         {
-                            "factor_name": getattr(factor, "factor_name", "未知因素"),
-                            "score": getattr(factor, "score", 50),
-                            "description": getattr(factor, "description", ""),
-                            "trend": getattr(factor, "trend", "稳定"),
-                            "data_points": getattr(factor, "data_points", []),
+                            "factor_name": safe_get(factor, "factor_name", "未知因素"),
+                            "score": safe_get(factor, "score", 50),
+                            "description": safe_get(factor, "description", ""),
+                            "trend": safe_get(factor, "trend", "稳定"),
+                            "data_points": safe_get(factor, "data_points", []),
                         }
                         for factor in market_risk_result.factors
                     ],
@@ -349,7 +546,10 @@ async def analyze_wallet_market_risk(
                 )
 
                 # 确保使用字典访问方式获取推荐
-                if isinstance(ai_rec_result, dict) and "recommendations" in ai_rec_result:
+                if (
+                    isinstance(ai_rec_result, dict)
+                    and "recommendations" in ai_rec_result
+                ):
                     ai_recommendations = ai_rec_result["recommendations"]
 
                 # 获取AI监控点
@@ -358,7 +558,10 @@ async def analyze_wallet_market_risk(
                 )
 
                 # 确保使用字典访问方式获取监控点
-                if isinstance(ai_mon_result, dict) and "monitoring_points" in ai_mon_result:
+                if (
+                    isinstance(ai_mon_result, dict)
+                    and "monitoring_points" in ai_mon_result
+                ):
                     ai_monitoring_points = ai_mon_result["monitoring_points"]
 
             except Exception as ai_error:
@@ -367,41 +570,45 @@ async def analyze_wallet_market_risk(
 
         # 构建响应
         # 安全地访问market_risk_result的属性
-        risk_type = getattr(market_risk_result, "risk_type", "MARKET")
-        target = getattr(market_risk_result, "target", "portfolio")
-        score = getattr(market_risk_result, "score", 50.0)
-        recommendations = getattr(market_risk_result, "recommendations", [])
-        monitoring_points = getattr(market_risk_result, "monitoring_points", [])
+        risk_type = safe_get(market_risk_result, "risk_type", "MARKET")
+        target = safe_get(market_risk_result, "target", "portfolio")
+        score = safe_get(market_risk_result, "score", 50.0)
+        recommendations = safe_get(market_risk_result, "recommendations", [])
+        monitoring_points = safe_get(market_risk_result, "monitoring_points", [])
+        result_ai_insights = safe_get(market_risk_result, "ai_insights", [])
 
         # 确定风险等级
         risk_level = "HIGH" if score > 70 else "MEDIUM" if score > 40 else "LOW"
 
         # 安全地处理factors
         factors = []
-        if hasattr(market_risk_result, "factors"):
+        if hasattr(market_risk_result, "factors") and market_risk_result.factors:
             for factor in market_risk_result.factors:
-                factors.append({
-                    "name": getattr(factor, "factor_name", "未知因素"),
-                    "score": getattr(factor, "score", 50.0),
-                    "weight": getattr(factor, "weight", 1.0),
-                    "description": getattr(factor, "description", ""),
-                    "trend": getattr(factor, "trend", "稳定"),
-                    "data_points": getattr(factor, "data_points", []),
-                })
+                factors.append(
+                    {
+                        "name": safe_get(factor, "name", "未知因素"),
+                        "score": safe_get(factor, "score", 50.0),
+                        "weight": safe_get(factor, "weight", 1.0),
+                        "description": safe_get(factor, "description", ""),
+                        "trend": safe_get(factor, "trend", "稳定"),
+                        "data_points": safe_get(factor, "data_points", []),
+                    }
+                )
 
-        response = {
-            "wallet_address": wallet_address,
-            "risk_type": risk_type,
-            "target": target,
-            "score": score,
-            "risk_level": risk_level,
-            "factors": factors,
-            "recommendations": recommendations + ai_recommendations,
-            "monitoring_points": monitoring_points + ai_monitoring_points,
-            "ai_insights": ai_insights,
-            "ai_available": ai_available,
-            "timestamp": datetime.now().isoformat(),
-        }
+        response = create_standard_response(
+            {
+                "risk_type": risk_type,
+                "target": target,
+                "score": score,
+                "risk_level": risk_level,
+                "factors": factors,
+                "recommendations": recommendations + ai_recommendations,
+                "monitoring_points": monitoring_points + ai_monitoring_points,
+                "ai_insights": ai_insights + result_ai_insights,
+                "ai_available": ai_available,
+            },
+            wallet_address=wallet_address,
+        )
 
         return response
     except Exception as e:
@@ -411,8 +618,8 @@ async def analyze_wallet_market_risk(
             try:
                 logger.info(f"出错时使用演示数据: 钱包市场风险分析 {wallet_address}")
                 return demo_service.get_wallet_market_risk(wallet_address)
-            except:
-                pass
+            except Exception as demo_err:
+                logger.warning(f"使用演示数据也失败: {str(demo_err)}")
         # 如果无法使用演示数据，返回错误信息
         raise HTTPException(status_code=500, detail=f"分析钱包市场风险失败: {str(e)}")
 
@@ -440,18 +647,26 @@ async def get_wallet_alerts(
         alerts = await blockchain_service.get_wallet_alerts(wallet_address)
 
         # 构建响应
-        response = {
-            "wallet_address": wallet_address,
-            "alerts": alerts,
-            "alert_count": len(alerts),
-            "timestamp": datetime.now().isoformat(),
-            "is_demo_data": False,
-        }
+        response = create_standard_response(
+            {
+                "alerts": alerts,
+                "alert_count": len(alerts),
+            },
+            wallet_address=wallet_address,
+        )
 
         return response
     except Exception as e:
         logger.error(f"获取钱包警报时出错: {str(e)}")
-        return {"error": f"获取钱包警报失败: {str(e)}"}
+        # 如果是演示模式，尝试返回演示数据
+        if settings.DEMO_MODE:
+            try:
+                logger.info(f"出错时使用演示数据: 钱包警报 {wallet_address}")
+                return demo_service.get_wallet_alerts(wallet_address)
+            except Exception as demo_err:
+                logger.warning(f"使用演示数据也失败: {str(demo_err)}")
+        # 统一使用HTTPException
+        raise HTTPException(status_code=500, detail=f"获取钱包警报失败: {str(e)}")
 
 
 @router.get("/{wallet_address}/scenario-simulation")
@@ -498,7 +713,29 @@ async def simulate_market_scenario(
             wallet_address, scenario, blockchain_service
         )
 
-        return simulation_result
+        # 确保响应格式一致 - 使用safe_get处理不同类型的结果对象
+        if not safe_get(simulation_result, "timestamp"):
+            if isinstance(simulation_result, dict):
+                simulation_result["timestamp"] = datetime.now().isoformat()
+
+        if not safe_get(simulation_result, "is_demo_data"):
+            if isinstance(simulation_result, dict):
+                simulation_result["is_demo_data"] = False
+
+        return create_standard_response(
+            simulation_result, wallet_address=wallet_address
+        )
     except Exception as e:
         logger.error(f"模拟市场情景时出错: {str(e)}")
-        return {"error": f"模拟市场情景失败: {str(e)}"}
+        # 如果是演示模式，尝试返回演示数据
+        if settings.DEMO_MODE:
+            try:
+                logger.info(
+                    f"出错时使用演示数据: 市场情景模拟 {wallet_address}, 情景: {scenario}"
+                )
+                return demo_service.get_market_scenario_simulation(
+                    wallet_address, scenario
+                )
+            except Exception as demo_err:
+                logger.warning(f"使用演示数据也失败: {str(demo_err)}")
+        # 统一使用HTTPException

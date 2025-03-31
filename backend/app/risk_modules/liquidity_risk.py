@@ -7,6 +7,8 @@ import logging
 from app.models.domain.risk import RiskFactor, RiskType, RiskAnalysisResult
 from app.risk_modules.base import RiskAnalyzerBase
 from app.services.recommendation_service import RecommendationService
+from app.core.utility import safe_get  # 导入safe_get函数
+import copy
 
 
 class LiquidityRiskAnalyzer(RiskAnalyzerBase):
@@ -109,7 +111,7 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
         return risk_factors
 
     async def _analyze_asset_liquidity(
-        self, positions: List[Dict[str, Any]]
+        self, positions: List[Any]
     ) -> Optional[RiskFactor]:
         """分析资产流动性风险"""
         try:
@@ -123,28 +125,30 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
 
             # 遍历协议positions
             for protocol_position in positions:
-                inner_positions = protocol_position.get("positions", [])
+                inner_positions = safe_get(protocol_position, "positions", [])
 
                 # 遍历每个协议中的具体资产positions
                 for pos in inner_positions:
-                    position_amount = pos.get("amount", 0)
+                    position_amount = safe_get(pos, "amount", 0)
                     total_value += position_amount
 
                     # 优先从tokenList获取更精确的代币信息
-                    if pos.get("tokenList"):
+                    if safe_get(pos, "tokenList"):
                         # 使用基类方法过滤代币列表
                         filtered_tokens = self.filter_token_list(
-                            pos.get("tokenList", [])
+                            safe_get(pos, "tokenList", [])
                         )
 
                         for token in filtered_tokens:
-                            token_symbol = token.get("tokenSymbol", "")
+                            token_symbol = safe_get(token, "tokenSymbol", "")
                             if not token_symbol:
                                 continue
 
                             # 计算代币价值
-                            if token.get("currencyAmount"):
-                                token_value = float(token.get("currencyAmount", "0"))
+                            if safe_get(token, "currencyAmount"):
+                                token_value = float(
+                                    safe_get(token, "currencyAmount", "0")
+                                )
                             else:
                                 # 如果没有明确的价值，按比例分配
                                 token_value = (
@@ -159,7 +163,7 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                             assets[token_symbol] += token_value
                     else:
                         # 如果没有tokenList，使用资产名称
-                        asset = pos.get("asset", "Unknown").split("/")[
+                        asset = safe_get(pos, "asset", "Unknown").split("/")[
                             0
                         ]  # 处理流动性池资产格式
 
@@ -310,7 +314,7 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
             return None
 
     async def _analyze_protocol_liquidity(
-        self, positions: List[Dict[str, Any]]
+        self, positions: List[Any]
     ) -> Optional[RiskFactor]:
         """分析协议流动性风险"""
         try:
@@ -323,15 +327,15 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
 
             # 处理嵌套的positions结构
             for protocol_position in positions:
-                protocol = protocol_position.get("protocol", "Unknown")
-                inner_positions = protocol_position.get("positions", [])
+                protocol = safe_get(protocol_position, "protocol", "Unknown")
+                inner_positions = safe_get(protocol_position, "positions", [])
 
                 if protocol not in protocol_values:
                     protocol_values[protocol] = 0
 
                 # 累加该协议下所有position的金额
                 for pos in inner_positions:
-                    amount = pos.get("amount", 0)
+                    amount = safe_get(pos, "amount", 0)
                     protocol_values[protocol] += amount
 
             # 计算总价值
@@ -388,9 +392,7 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
 
             for protocol, amount in protocol_values.items():
                 # 尝试从区块链服务获取协议流动性数据
-                protocol_data = await self.blockchain_service.get_protocol_data(
-                    protocol
-                )
+                protocol_data = await self.blockchain_service.get_protocol(protocol)
 
                 # 如果获取到协议数据，使用它计算风险评分
                 if protocol_data:
@@ -473,7 +475,7 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
             return None
 
     async def _analyze_investment_type_liquidity(
-        self, positions: List[Dict[str, Any]]
+        self, positions: List[Any]
     ) -> Optional[RiskFactor]:
         """分析投资类型流动性风险"""
         try:
@@ -487,21 +489,40 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
 
             # 遍历协议positions
             for protocol_position in positions:
-                inner_positions = protocol_position.get("positions", [])
+                inner_positions = safe_get(protocol_position, "positions", [])
 
                 # 遍历每个协议中的具体资产positions
                 for pos in inner_positions:
-                    invest_type = pos.get("invest_type", 0)
-                    invest_type_name = pos.get("invest_type_name", "未知类型")
-                    amount = pos.get("amount", 0)
-                    total_value += amount
+                    # 获取投资类型，默认为"spot"（现货）
+                    invest_type = safe_get(pos, "invest_type", 1)
 
-                    if invest_type not in investment_type_values:
-                        investment_type_values[invest_type] = {
-                            "amount": 0,
-                            "name": invest_type_name,
-                        }
-                    investment_type_values[invest_type]["amount"] += amount
+                    # 将数字类型转换为可读的类型名称
+                    if isinstance(invest_type, int):
+                        if invest_type == 1:
+                            invest_type_name = "spot"
+                        elif invest_type == 2:
+                            invest_type_name = "liquidity_pool"
+                        elif invest_type == 3:
+                            invest_type_name = "lending"
+                        elif invest_type == 4:
+                            invest_type_name = "staking"
+                        elif invest_type == 5:
+                            invest_type_name = "leveraged"
+                        elif invest_type == 6:
+                            invest_type_name = "borrowed"
+                        else:
+                            invest_type_name = "other"
+                    else:
+                        invest_type_name = str(invest_type)
+
+                    # 获取资产价值
+                    amount = safe_get(pos, "amount", 0)
+
+                    # 累加到投资类型映射中
+                    if invest_type_name not in investment_type_values:
+                        investment_type_values[invest_type_name] = 0
+                    investment_type_values[invest_type_name] += amount
+                    total_value += amount
 
             if total_value == 0:
                 self.logger.warning("投资组合总价值为0，无法分析投资类型流动性风险")
@@ -513,12 +534,13 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                     # 准备AI分析的数据
                     ai_input_data = {
                         "investment_types": {
-                            str(k): {
-                                "name": v["name"],
-                                "weight": v["amount"] / total_value,
-                                "amount": v["amount"],
+                            invest_type_name: {
+                                "name": invest_type_name,
+                                "weight": investment_type_values[invest_type_name]
+                                / total_value,
+                                "amount": investment_type_values[invest_type_name],
                             }
-                            for k, v in investment_type_values.items()
+                            for invest_type_name in investment_type_values
                         },
                         "analysis_type": "investment_type_liquidity",
                     }
@@ -555,28 +577,25 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                     # 如果AI分析失败，继续使用传统方法
 
             # 如果AI分析失败或不可用，使用传统方法
-            # 投资类型流动性评分映射（0-100，越高风险越大）
-            investment_type_liquidity_scores = {
-                1: 20,  # 存币 - 低风险
-                2: 50,  # 流动性池 - 中高风险
-                3: 60,  # 挖矿 - 中高风险
-                4: 70,  # 机枪池 - 高风险
-                5: 40,  # 质押 - 中等风险
-                6: 30,  # 借贷 - 中低风险
-                0: 60,  # 未知 - 中高风险
-            }
-
             weighted_investment_type_liquidity_score = 0
             investment_types_data = []
 
-            for invest_type, data in investment_type_values.items():
-                amount = data["amount"]
-                name = data["name"]
+            # 投资类型流动性评分映射（0-100，越高风险越大）
+            investment_type_liquidity_scores = {
+                "spot": 20,  # 现货 - 低风险
+                "liquidity_pool": 50,  # 流动性池 - 中高风险
+                "lending": 30,  # 借贷 - 中低风险
+                "staking": 40,  # 质押 - 中等风险
+                "leveraged": 70,  # 杠杆 - 高风险
+                "borrowed": 60,  # 借入 - 中高风险
+                "other": 60,  # 其他 - 中高风险
+            }
 
+            for invest_type_name, amount in investment_type_values.items():
                 # 获取投资类型流动性评分
                 liquidity_score = investment_type_liquidity_scores.get(
-                    invest_type, 60
-                )  # 默认中高风险
+                    invest_type_name, 60  # 默认中高风险
+                )
 
                 # 计算加权评分
                 weight = amount / total_value
@@ -584,8 +603,8 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
 
                 investment_types_data.append(
                     {
-                        "invest_type": invest_type,
-                        "name": name,
+                        "invest_type": invest_type_name,
+                        "name": invest_type_name,
                         "amount": amount,
                         "liquidity_score": liquidity_score,
                         "weight": weight,
@@ -621,7 +640,7 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
             return None
 
     async def _analyze_liquidity_pool_risk(
-        self, positions: List[Dict[str, Any]]
+        self, positions: List[Any]
     ) -> Optional[RiskFactor]:
         """分析流动性池风险"""
         try:
@@ -630,13 +649,25 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
 
             # 遍历协议positions
             for protocol_position in positions:
-                protocol = protocol_position.get("protocol", "Unknown")
-                inner_positions = protocol_position.get("positions", [])
+                protocol = safe_get(protocol_position, "protocol", "Unknown")
+                inner_positions = safe_get(protocol_position, "positions", [])
 
                 # 遍历每个协议中的具体资产positions
                 for pos in inner_positions:
-                    # 复制必要的字段，添加protocol信息（如果pos中没有）
-                    lp_pos = pos.copy()
+                    # 创建新的字典，添加protocol信息（如果pos中没有）
+                    if isinstance(pos, dict):
+                        lp_pos = pos.copy()
+                    else:
+                        # 处理PlatformAsset对象，创建新的dict
+                        lp_pos = {
+                            "protocol": safe_get(pos, "protocol", protocol),
+                            "asset": safe_get(pos, "asset", "Unknown"),
+                            "amount": safe_get(pos, "amount", 0),
+                            "invest_type": safe_get(pos, "invest_type", 1),
+                            "apy": safe_get(pos, "apy", None),
+                            "tokenList": safe_get(pos, "tokenList", []),
+                        }
+
                     if "protocol" not in lp_pos:
                         lp_pos["protocol"] = protocol
 
@@ -647,7 +678,7 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                 return None
 
             # 计算流动性池总价值
-            total_lp_value = sum(pos.get("amount", 0) for pos in lp_positions)
+            total_lp_value = sum(safe_get(pos, "amount", 0) for pos in lp_positions)
 
             # 如果总价值为0，返回None
             if total_lp_value == 0:
@@ -660,19 +691,19 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                     # 准备AI分析的数据
                     pools_data = []
                     for pos in lp_positions:
-                        protocol = pos.get("protocol", "Unknown")
-                        asset = pos.get("asset", "Unknown")
-                        amount = pos.get("amount", 0)
+                        protocol = safe_get(pos, "protocol", "Unknown")
+                        asset = safe_get(pos, "asset", "Unknown")
+                        amount = safe_get(pos, "amount", 0)
                         weight = amount / total_lp_value if total_lp_value > 0 else 0
 
                         # 提取代币列表
-                        token_list = pos.get("tokenList", [])
+                        token_list = safe_get(pos, "tokenList", [])
                         tokens = []
                         valid_tokens = []  # 用于风险计算的有效代币
 
                         if token_list:
                             for token in token_list:
-                                token_symbol = token.get("tokenSymbol", "")
+                                token_symbol = safe_get(token, "tokenSymbol", "")
                                 tokens.append(token_symbol)  # 保留所有代币用于显示
 
                                 # 使用基类方法检查是否应排除该代币
@@ -753,13 +784,13 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
             # 分析每个流动性池
             pool_risks = []
             for pos in lp_positions:
-                protocol = pos.get("protocol", "Unknown")
-                asset = pos.get("asset", "Unknown")
-                amount = pos.get("amount", 0)
+                protocol = safe_get(pos, "protocol", "Unknown")
+                asset = safe_get(pos, "asset", "Unknown")
+                amount = safe_get(pos, "amount", 0)
                 weight = amount / total_lp_value if total_lp_value > 0 else 0
 
                 # 提取代币列表
-                token_list = pos.get("tokenList", [])
+                token_list = safe_get(pos, "tokenList", [])
 
                 # 计算池子风险
                 pool_risk = 50  # 默认中等风险

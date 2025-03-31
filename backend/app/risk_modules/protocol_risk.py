@@ -10,6 +10,8 @@ import time
 import numpy as np
 from datetime import datetime
 from app.services.recommendation_service import RecommendationService
+from app.core.utility import safe_get  # 导入safe_get函数
+import copy
 
 
 class ProtocolRiskAnalyzer(RiskAnalyzerBase):
@@ -140,7 +142,7 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
         # 按协议分组
         protocols = {}
         for pos in positions:
-            protocol = pos.get("protocol", "unknown")
+            protocol = safe_get(pos, "protocol", "unknown")
             if protocol not in protocols:
                 protocols[protocol] = []
             protocols[protocol].append(pos)
@@ -1065,7 +1067,7 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
         # 根据风险因子生成建议
         for factor in risk_factors:
             # 协议安全风险建议
-            if factor.factor_name == "协议安全风险":
+            if factor.name == "协议安全风险":
                 if factor.score > 70:
                     recommendations.append(
                         f"建议避免投资{protocol_name}，该协议安全风险极高"
@@ -1119,19 +1121,19 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
 
         # 根据风险因子生成监控点
         for factor in risk_factors:
-            if factor.factor_name == "协议安全风险" and factor.score > 40:
+            if factor.name == "协议安全风险" and factor.score > 40:
                 monitoring_points.append(f"关注{protocol_name}的安全审计状态和更新")
                 monitoring_points.append(f"监控{protocol_name}的安全事件和漏洞报告")
 
-            if factor.factor_name == "协议治理风险" and factor.score > 40:
+            if factor.name == "协议治理风险" and factor.score > 40:
                 monitoring_points.append(f"关注{protocol_name}的治理提案和投票情况")
                 monitoring_points.append(f"监控{protocol_name}的治理结构变化")
 
-            if factor.factor_name == "协议历史风险" and factor.score > 40:
+            if factor.name == "协议历史风险" and factor.score > 40:
                 monitoring_points.append(f"跟踪{protocol_name}的TVL变化趋势")
                 monitoring_points.append(f"监控{protocol_name}的用户增长情况")
 
-            if factor.factor_name == "协议复杂性风险" and factor.score > 40:
+            if factor.name == "协议复杂性风险" and factor.score > 40:
                 monitoring_points.append(f"关注{protocol_name}的合约升级和功能变更")
                 monitoring_points.append(f"监控{protocol_name}的技术架构变化")
 

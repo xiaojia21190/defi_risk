@@ -29,7 +29,7 @@ class RecommendationService:
         recommendations = []
 
         for factor in risk_factors:
-            if factor.factor_name == "集中度风险":
+            if factor.name == "集中度风险":
                 if factor.score > 70:
                     recommendations.append(
                         "投资组合资产过于集中，建议大幅分散投资到更多不同的资产"
@@ -44,7 +44,7 @@ class RecommendationService:
                         "投资组合资产分散度良好，继续保持当前的多元化投资策略"
                     )
 
-            elif factor.factor_name == "波动性风险":
+            elif factor.name == "波动性风险":
                 if factor.score > 70:
                     recommendations.append(
                         "投资组合波动性风险较高，建议增加稳定币比例或使用对冲策略"
@@ -59,7 +59,7 @@ class RecommendationService:
                         "投资组合波动性风险较低，继续保持当前的风险管理策略"
                     )
 
-            elif factor.factor_name == "趋势风险":
+            elif factor.name == "趋势风险":
                 if factor.score > 70:
                     recommendations.append(
                         "当前市场趋势对投资组合不利，建议适当降低风险敞口"
@@ -92,7 +92,7 @@ class RecommendationService:
         recommendations = []
 
         for factor in risk_factors:
-            if factor.factor_name == "资产流动性风险":
+            if factor.name == "资产流动性风险":
                 if factor.score > 70:
                     recommendations.append(
                         "投资组合包含过多低流动性资产，建议增加高流动性资产比例"
@@ -109,7 +109,7 @@ class RecommendationService:
                         "投资组合流动性状况良好，继续保持对市场流动性的关注"
                     )
 
-            elif factor.factor_name == "协议流动性风险":
+            elif factor.name == "协议流动性风险":
                 if factor.score > 70:
                     recommendations.append(
                         "所选择的DeFi协议流动性风险较高，建议分散投资到多个协议"
@@ -152,7 +152,7 @@ class RecommendationService:
         recommendations = []
 
         for factor in risk_factors:
-            if factor.factor_name == "协议安全风险":
+            if factor.name == "协议安全风险":
                 if factor.score > 70:
                     recommendations.append(
                         f"{protocol_name}的安全风险较高，建议限制投资金额或寻找替代方案"
@@ -169,7 +169,7 @@ class RecommendationService:
                         f"{protocol_name}具有良好的安全记录，继续关注其安全状况"
                     )
 
-            elif factor.factor_name == "协议治理风险":
+            elif factor.name == "协议治理风险":
                 if factor.score > 70:
                     recommendations.append(
                         f"{protocol_name}的治理风险较高，建议谨慎投资并密切关注治理决策"
@@ -204,15 +204,15 @@ class RecommendationService:
         recommendations = []
 
         for factor in risk_factors:
-            if factor.factor_name == "审计状态" and factor.score > 60:
+            if factor.name == "审计状态" and factor.score > 60:
                 recommendations.append("优先选择经过多次安全审计的协议进行投资")
                 recommendations.append("考虑购买智能合约保险以降低安全风险")
 
-            elif factor.factor_name == "代码质量" and factor.score > 60:
+            elif factor.name == "代码质量" and factor.score > 60:
                 recommendations.append("关注协议的代码质量和开发团队的技术实力")
                 recommendations.append("避免投资代码质量较差的新兴协议")
 
-            elif factor.factor_name == "漏洞历史" and factor.score > 60:
+            elif factor.name == "漏洞历史" and factor.score > 60:
                 recommendations.append("研究协议的漏洞历史和安全事件处理能力")
                 recommendations.append("减少在历史上多次出现漏洞的协议中的投资")
 
@@ -238,7 +238,7 @@ class RecommendationService:
         recommendations = []
 
         for factor in risk_factors:
-            if factor.factor_name == "资产相关性风险":
+            if factor.name == "资产相关性风险":
                 if factor.score > 70:
                     recommendations.append(
                         "投资组合中资产高度相关，建议大幅增加不同类型资产的配置"
@@ -255,7 +255,7 @@ class RecommendationService:
                         "投资组合资产相关性适中或较低，继续保持多样化策略"
                     )
 
-            elif factor.factor_name == "投资类型相关性风险":
+            elif factor.name == "投资类型相关性风险":
                 if factor.score > 70:
                     recommendations.append(
                         "投资组合中投资类型过于单一，建议增加不同投资类型的多样性"
@@ -327,11 +327,11 @@ class RecommendationService:
         points = []
         for factor in risk_factors:
             if factor.score > 60:
-                if "集中度" in factor.factor_name:
+                if "集中度" in factor.name:
                     points.append("监控投资组合中主要资产的占比变化")
-                elif "波动性" in factor.factor_name:
+                elif "波动性" in factor.name:
                     points.append("监控市场波动性指标（如VIX）的变化")
-                elif "趋势" in factor.factor_name:
+                elif "趋势" in factor.name:
                     points.append("监控市场趋势指标和移动平均线交叉")
         return points
 
@@ -342,9 +342,9 @@ class RecommendationService:
         points = []
         for factor in risk_factors:
             if factor.score > 60:
-                if "资产流动性" in factor.factor_name:
+                if "资产流动性" in factor.name:
                     points.append("监控主要资产的交易量和滑点变化")
-                elif "协议流动性" in factor.factor_name:
+                elif "协议流动性" in factor.name:
                     points.append("监控所使用DeFi协议的TVL变化趋势")
         return points
 
@@ -355,9 +355,9 @@ class RecommendationService:
         points = []
         for factor in risk_factors:
             if factor.score > 60:
-                if "安全" in factor.factor_name:
+                if "安全" in factor.name:
                     points.append("监控协议的安全审计报告和漏洞公告")
-                elif "治理" in factor.factor_name:
+                elif "治理" in factor.name:
                     points.append("监控协议的治理提案和社区投票情况")
         return points
 
@@ -368,9 +368,9 @@ class RecommendationService:
         points = []
         for factor in risk_factors:
             if factor.score > 60:
-                if "审计" in factor.factor_name:
+                if "审计" in factor.name:
                     points.append("监控协议的最新安全审计状态")
-                elif "漏洞" in factor.factor_name:
+                elif "漏洞" in factor.name:
                     points.append("关注协议在主要安全平台上的漏洞报告")
         return points
 
@@ -381,8 +381,8 @@ class RecommendationService:
         points = []
         for factor in risk_factors:
             if factor.score > 60:
-                if "资产相关性" in factor.factor_name:
+                if "资产相关性" in factor.name:
                     points.append("定期计算投资组合中主要资产对的相关系数")
-                elif "投资类型" in factor.factor_name:
+                elif "投资类型" in factor.name:
                     points.append("监控不同投资类型资产的收益相关性变化")
         return points

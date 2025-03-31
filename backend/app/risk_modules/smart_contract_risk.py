@@ -5,6 +5,9 @@
 from typing import Dict, List, Any, Optional
 from app.models.domain.risk import RiskFactor, RiskType
 from app.risk_modules.base import RiskAnalyzerBase
+from app.services.recommendation_service import RecommendationService
+from app.core.utility import safe_get  # 导入safe_get函数
+import copy
 
 
 class SmartContractRiskAnalyzer(RiskAnalyzerBase):
@@ -75,10 +78,10 @@ class SmartContractRiskAnalyzer(RiskAnalyzerBase):
         # 按协议分组
         protocols = {}
         for pos in positions:
-            protocol = pos.get("protocol", "Unknown")
+            protocol = safe_get(pos, "protocol", "Unknown")
             if protocol not in protocols:
                 protocols[protocol] = 0
-            protocols[protocol] += pos.get("amount", 0)
+            protocols[protocol] += safe_get(pos, "amount", 0)
 
         # 分析审计风险
         audit_risk = await self._analyze_audit_risk(protocols)

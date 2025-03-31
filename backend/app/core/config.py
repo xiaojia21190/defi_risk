@@ -12,7 +12,7 @@ class Settings:
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
 
     # 演示模式设置
-    DEMO_MODE: bool = os.getenv("DEMO_MODE", "True").lower() == "true"
+    DEMO_MODE: bool = False
     DEMO_ACCOUNTS: List[Dict[str, str]] = [
         {
             "address": "0xdemo1234567890abcdef1234567890abcdef123456",

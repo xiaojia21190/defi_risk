@@ -19,6 +19,7 @@ class MarketRiskResult:
     factors: List[RiskFactor] = None
     recommendations: List[str] = None
     monitoring_points: List[str] = None
+    ai_insights: List[str] = None
 
     def __post_init__(self):
         if self.factors is None:
@@ -27,6 +28,8 @@ class MarketRiskResult:
             self.recommendations = []
         if self.monitoring_points is None:
             self.monitoring_points = []
+        if self.ai_insights is None:
+            self.ai_insights = []
 
 
 class RiskEngine:
@@ -51,7 +54,9 @@ class RiskEngine:
         if ai_service and hasattr(ai_service, "get_predictor"):
             self.ai_predictor = ai_service.get_predictor()
 
-        self.logger.info(f"风险引擎初始化完成: blockchain_service={blockchain_service}, ai_service={ai_service}")
+        self.logger.info(
+            f"风险引擎初始化完成: blockchain_service={blockchain_service}, ai_service={ai_service}"
+        )
 
     def register_analyzer(self, risk_type: str, analyzer):
         """
@@ -797,15 +802,93 @@ class RiskEngine:
             total_value = 0.0
 
             for position in positions:
-                asset_name = position.get("asset", "unknown")
-                asset_value = float(position.get("usd_value", 0))
+                # 检查对象类型，根据不同类型处理
+                is_dict = isinstance(position, dict)
 
-                if asset_name in assets:
-                    assets[asset_name] += asset_value
+                # 检查是否为嵌套结构（协议包含多个positions）
+                if (
+                    is_dict
+                    and "positions" in position
+                    and isinstance(position["positions"], list)
+                ):
+                    # 处理嵌套结构
+                    inner_positions = position.get("positions", [])
+                    for pos in inner_positions:
+                        try:
+                            # 检查内部位置对象类型
+                            pos_is_dict = isinstance(pos, dict)
+
+                            # 根据对象类型获取资产名称和价值
+                            if pos_is_dict:
+                                asset_name = pos.get("asset", "unknown")
+                                # 尝试获取usd_value，如果不存在则使用amount字段
+                                asset_value = float(
+                                    pos.get("usd_value", pos.get("amount", 0))
+                                )
+                            else:
+                                # 假设是PlatformAsset或类似对象，直接访问属性
+                                asset_name = getattr(pos, "asset", "unknown")
+                                # 尝试获取usd_value，如果不存在则使用amount字段
+                                asset_value = float(
+                                    getattr(pos, "usd_value", getattr(pos, "amount", 0))
+                                )
+
+                            # 处理资产名称
+                            if (
+                                isinstance(asset_name, str) and "/" in asset_name
+                            ):  # 处理类似 "ETH/USDC" 格式的资产名称
+                                asset_name = asset_name.split("/")[0]  # 使用主资产
+
+                            # 累加资产价值
+                            if asset_name in assets:
+                                assets[asset_name] += asset_value
+                            else:
+                                assets[asset_name] = asset_value
+
+                            total_value += asset_value
+                        except (ValueError, TypeError, AttributeError) as e:
+                            self.logger.warning(
+                                f"处理位置数据时出错: {str(e)}, position: {pos}"
+                            )
                 else:
-                    assets[asset_name] = asset_value
+                    # 处理非嵌套结构
+                    try:
+                        # 根据对象类型获取资产名称和价值
+                        if is_dict:
+                            asset_name = position.get("asset", "unknown")
+                            # 尝试获取usd_value，如果不存在则使用amount字段
+                            asset_value = float(
+                                position.get("usd_value", position.get("amount", 0))
+                            )
+                        else:
+                            # 假设是PlatformAsset或类似对象，直接访问属性
+                            asset_name = getattr(position, "asset", "unknown")
+                            # 尝试获取usd_value，如果不存在则使用amount字段
+                            asset_value = float(
+                                getattr(
+                                    position,
+                                    "usd_value",
+                                    getattr(position, "amount", 0),
+                                )
+                            )
 
-                total_value += asset_value
+                        # 处理资产名称
+                        if (
+                            isinstance(asset_name, str) and "/" in asset_name
+                        ):  # 处理类似 "ETH/USDC" 格式的资产名称
+                            asset_name = asset_name.split("/")[0]  # 使用主资产
+
+                        # 累加资产价值
+                        if asset_name in assets:
+                            assets[asset_name] += asset_value
+                        else:
+                            assets[asset_name] = asset_value
+
+                        total_value += asset_value
+                    except (ValueError, TypeError, AttributeError) as e:
+                        self.logger.warning(
+                            f"处理位置数据时出错: {str(e)}, position类型: {type(position)}"
+                        )
 
             # 计算资产集中度
             concentration_data = {
@@ -821,10 +904,22 @@ class RiskEngine:
                 if self.ai_predictor and hasattr(
                     self.ai_predictor, "analyze_concentration_risk"
                 ):
-                    concentration_risk = (
-                        await self.ai_predictor.analyze_concentration_risk(
-                            concentration_data
-                        )
+                    # 修改数据结构，转换为字典格式而不是列表格式
+                    assets_dict = (
+                        {
+                            item["name"]: item["value"] / total_value
+                            for item in concentration_data["assets"]
+                        }
+                        if total_value > 0
+                        else {}
+                    )
+                    concentration_data_dict = {
+                        "assets": assets_dict,
+                        "total_value": total_value,
+                    }
+
+                    concentration_risk = self.ai_predictor.analyze_concentration_risk(
+                        concentration_data_dict
                     )
 
                     # 创建集中度风险因子
@@ -947,6 +1042,72 @@ class RiskEngine:
             else:
                 result.score = 50.0  # 默认中等风险
 
+            # 添加AI洞察内容 - 新增的部分
+            # 基于风险因素生成AI洞察
+            if len(result.factors) > 0:
+                # 确保ai_insights已初始化
+                if not result.ai_insights:
+                    result.ai_insights = []
+
+                # 根据总体风险分数生成总体洞察
+                if result.score < 30:
+                    result.ai_insights.append(
+                        f"您的投资组合市场风险较低(评分:{result.score:.1f})，整体风险状况良好"
+                    )
+                elif result.score < 50:
+                    result.ai_insights.append(
+                        f"您的投资组合市场风险适中(评分:{result.score:.1f})，保持合理平衡"
+                    )
+                elif result.score < 70:
+                    result.ai_insights.append(
+                        f"您的投资组合市场风险偏高(评分:{result.score:.1f})，建议适当调整"
+                    )
+                else:
+                    result.ai_insights.append(
+                        f"您的投资组合市场风险较高(评分:{result.score:.1f})，需要注意风险控制"
+                    )
+
+                # 针对每个风险因素添加具体洞察
+                for factor in result.factors:
+                    if factor.name == "资产集中度风险" and factor.score > 60:
+                        result.ai_insights.append(
+                            f"资产集中度风险偏高({factor.score:.1f})，建议增加资产多样性"
+                        )
+                    elif factor.name == "资产相关性风险" and factor.score > 60:
+                        result.ai_insights.append(
+                            f"资产相关性风险偏高({factor.score:.1f})，建议投资相关性较低的资产"
+                        )
+                    elif factor.name == "市场波动风险" and factor.score > 60:
+                        result.ai_insights.append(
+                            f"市场波动风险明显({factor.score:.1f})，市场可能即将进入动荡期"
+                        )
+                    elif "集中" in factor.name and factor.score > 60:
+                        result.ai_insights.append(
+                            f"{factor.name}偏高({factor.score:.1f})，建议优化资产分配"
+                        )
+                    elif "相关" in factor.name and factor.score > 60:
+                        result.ai_insights.append(
+                            f"{factor.name}偏高({factor.score:.1f})，建议关注资产间关联性"
+                        )
+                    elif "波动" in factor.name and factor.score > 60:
+                        result.ai_insights.append(
+                            f"{factor.name}偏高({factor.score:.1f})，建议关注市场趋势变化"
+                        )
+
+                # 添加整体投资组合洞察
+                if len(assets) > 5:
+                    result.ai_insights.append(
+                        f"您的投资组合包含{len(assets)}种资产，多样性较好"
+                    )
+                elif len(assets) > 2:
+                    result.ai_insights.append(
+                        f"您的投资组合包含{len(assets)}种资产，多样性一般"
+                    )
+                else:
+                    result.ai_insights.append(
+                        f"您的投资组合仅包含{len(assets)}种资产，建议增加多样性"
+                    )
+
             # 生成市场风险建议
             if (
                 not result.recommendations
@@ -958,7 +1119,7 @@ class RiskEngine:
                     risk_data = {
                         "risk_factors": [
                             {
-                                "factor_name": factor.factor_name,
+                                "name": factor.name,  # 使用name而不是factor_name
                                 "score": factor.score,
                                 "description": factor.description,
                                 "trend": factor.trend,
@@ -970,7 +1131,7 @@ class RiskEngine:
 
                     # 获取AI建议
                     recommendations = (
-                        await self.ai_predictor.generate_market_risk_recommendations(
+                        self.ai_predictor.generate_market_risk_recommendations(
                             risk_data
                         )
                     )
@@ -993,7 +1154,7 @@ class RiskEngine:
                     risk_data = {
                         "risk_factors": [
                             {
-                                "factor_name": factor.factor_name,
+                                "name": factor.name,  # 使用name而不是factor_name
                                 "score": factor.score,
                                 "description": factor.description,
                                 "trend": factor.trend,
@@ -1005,7 +1166,7 @@ class RiskEngine:
 
                     # 获取AI监控点
                     monitoring_points = (
-                        await self.ai_predictor.generate_market_risk_monitoring_points(
+                        self.ai_predictor.generate_market_risk_monitoring_points(
                             risk_data
                         )
                     )
@@ -1054,6 +1215,7 @@ class RiskEngine:
             result.score = 50.0
             result.recommendations = ["无法完成市场风险分析，请稍后重试"]
             result.monitoring_points = ["监控市场整体波动"]
+            result.ai_insights = ["由于分析过程中出现错误，无法提供详细的市场风险洞察"]
             return result
 
     def create_risk_factor(
@@ -1073,11 +1235,12 @@ class RiskEngine:
         if metadata is None:
             metadata = {}
 
+        # 使用风险类型和因子名称组合成风险因子ID
+        factor_id = f"{risk_type}.{factor_name}"
+
         return RiskFactor(
-            id=str(uuid.uuid4()),
-            risk_type=risk_type,
-            name=factor_name,
-            factor_name=factor_name,
+            id=factor_id,  # 使用组合的ID
+            name=factor_name,  # 只使用name，不使用factor_name
             score=score,
             weight=weight,
             description=description,

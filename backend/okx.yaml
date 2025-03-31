@@ -17,7 +17,7 @@
             {
                 "platformList": [
                     {
-                        "platformName": "Ethena",
+                        "platformName": "Data Ownership Protocol",
                         "analysisPlatformId": 118265,
                         "platformLogo": "https://static.coinall.ltd/cdn/web3/protocol/logo/1702889213278.png/type=png_350_0",
                         "platformColor": "",
@@ -222,7 +222,7 @@
                 "accountId": "278c58bb-5958-4301-a5b6-d670e1d9837f"
             }
         ],
-        "platformName": "ether.fi",
+        "platformName": "sophon",
         "analysisPlatformId": 260,
         "platformLogo": "https://static.coinall.ltd/cdn/invest/platform/EtherFi.png",
         "platformUrl": "https://www.ether.fi/"

@@ -239,8 +239,145 @@ class DemoDataService:
         protocols_data = self.get_protocols()
         protocols_map = {p["name"]: p for p in protocols_data["protocols"]}
 
+        # 为指定的测试钱包地址生成特定头寸数据
+        if wallet_address == "0x881896A2E1D65f5dfA4d23Bf6b917cE703ed068b":
+            # 特定的协议数据
+            positions = [
+                {
+                    "protocol": "Aethir",
+                    "total_assets": 24.853047218058176,
+                    "total_debts": 0,
+                    "leverage": 1,
+                    "positions": [
+                        {
+                            "protocol": "Aethir",
+                            "asset": "ATH",
+                            "amount": 24.853047218058176,
+                            "invest_type": 5,
+                            "apy": None,
+                            "tokenList": [
+                                {
+                                    "tokenSymbol": "ATH",
+                                    "tokenLogo": "https://static.coinall.ltd/cdn/web3/currency/token/1-0xbe0ed4138121ecfc5c0e56b40517da27e6c5226b-97.png/type=default_350_0",
+                                    "coinAmount": "700",
+                                    "currencyAmount": "20.6723120784516392",
+                                    "tokenPrecision": 18,
+                                    "tokenAddress": "0xbe0ed4138121ecfc5c0e56b40517da27e6c5226b",
+                                    "network": "ETH",
+                                },
+                                {
+                                    "tokenSymbol": "ATH",
+                                    "tokenType": "reward",
+                                    "tokenLogo": "https://static.coinall.ltd/cdn/web3/currency/token/1-0xbe0ed4138121ecfc5c0e56b40517da27e6c5226b-97.png/type=default_350_0",
+                                    "coinAmount": "141.566873923846617599",
+                                    "currencyAmount": "4.180735139606535478423888582881597544",
+                                    "tokenPrecision": 18,
+                                    "tokenAddress": "0xbe0ed4138121ecfc5c0e56b40517da27e6c5226b",
+                                    "network": "ETH",
+                                },
+                                {
+                                    "tokenSymbol": "$MICRO",
+                                    "tokenType": "reward",
+                                    "tokenLogo": "https://static.coinall.ltd/cdn/web3/currency/token/1-0x8cedb0680531d26e62abdbd0f4c5428b7fdc26d5-97.png/type=default_350_0?v=1737438768635",
+                                    "coinAmount": "0",
+                                    "currencyAmount": "0",
+                                    "tokenPrecision": 18,
+                                    "tokenAddress": "0x8cedb0680531d26e62abdbd0f4c5428b7fdc26d5",
+                                    "network": "ETH",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "protocol": "Data Ownership Protocol",
+                    "total_assets": 7.873041229406134,
+                    "total_debts": 0,
+                    "leverage": 1,
+                    "positions": [
+                        {
+                            "protocol": "Data Ownership Protocol",
+                            "asset": "DOP",
+                            "amount": 7.873041229406134,
+                            "invest_type": 5,
+                            "apy": None,
+                            "tokenList": [
+                                {
+                                    "tokenSymbol": "DOP",
+                                    "tokenLogo": "https://static.coinall.ltd/cdn/web3/currency/token/1-0x97a9a15168c22b3c137e6381037e1499c8ad0978.png/type=default_350_0",
+                                    "coinAmount": "18823.556555002779517212",
+                                    "currencyAmount": "7.348927005958289431130504714770158588",
+                                    "tokenPrecision": 18,
+                                    "tokenAddress": "0x97a9a15168c22b3c137e6381037e1499c8ad0978",
+                                    "network": "ETH",
+                                },
+                                {
+                                    "tokenSymbol": "DOP",
+                                    "tokenType": "reward",
+                                    "tokenLogo": "https://static.coinall.ltd/cdn/web3/currency/token/1-0x97a9a15168c22b3c137e6381037e1499c8ad0978.png/type=default_350_0",
+                                    "coinAmount": "1342.46723614931240325",
+                                    "currencyAmount": "0.52411422344784457827242483007770925",
+                                    "tokenPrecision": 18,
+                                    "tokenAddress": "0x97a9a15168c22b3c137e6381037e1499c8ad0978",
+                                    "network": "ETH",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "protocol": "sophon",
+                    "total_assets": 0,
+                    "total_debts": 0,
+                    "leverage": 0,
+                    "positions": [],
+                },
+            ]
+
+            # 自定义的协议信息
+            protocols_used = [
+                {
+                    "name": "Aethir",
+                    "chain": "Ethereum",
+                    "tvl": [],
+                    "supported_assets": ["ETH", "USDC"],
+                    "features": ["借贷", "流动性挖矿"],
+                    "description": "Powerful GPU compute solutions on-demand.",
+                },
+                {
+                    "name": "Data Ownership Protocol",
+                    "chain": "Unknown",
+                    "tvl": 0,
+                    "supported_assets": ["ETH", "USDC"],
+                    "features": ["借贷", "流动性挖矿"],
+                    "description": "Data Ownership Protocol是一个DeFi协议",
+                },
+                {
+                    "name": "sophon",
+                    "chain": "Unknown",
+                    "tvl": 0,
+                    "supported_assets": ["ETH", "USDC"],
+                    "features": ["借贷", "流动性挖矿"],
+                    "description": "sophon是一个DeFi协议",
+                },
+            ]
+
+            data = {
+                "wallet_address": wallet_address,
+                "positions": positions,
+                "total_value_usd": 32.726088447464306,
+                "position_count": len(positions),
+                "protocols": protocols_used,
+                "protocol_count": len(protocols_used),
+                "timestamp": datetime.now().isoformat(),
+                "is_demo_data": True,
+            }
+
+            self._demo_data_cache[cache_key] = data
+            return data
+
         # 为演示账户1生成特定的头寸数据
-        if wallet_address == "0xdemo1234567890abcdef1234567890abcdef123456":
+        elif wallet_address == "0xdemo1234567890abcdef1234567890abcdef123456":
             positions = [
                 {
                     "protocol": "Aave",
@@ -403,12 +540,160 @@ class DemoDataService:
         if cache_key in self._demo_data_cache:
             return self._demo_data_cache[cache_key]
 
-        # 获取钱包头寸
+        # 获取钱包头寸数据
         positions_data = self.get_wallet_positions(wallet_address)
-        positions = positions_data["positions"]
+        positions = positions_data.get("positions", [])
+        position_count = positions_data.get("position_count", 0)
 
-        # 为演示账户1生成中等风险分析
-        if wallet_address == "0xdemo1234567890abcdef1234567890abcdef123456":
+        # 为指定的测试钱包地址生成特定风险分析
+        if wallet_address == "0x881896A2E1D65f5dfA4d23Bf6b917cE703ed068b":
+            risk_score = 35  # 较低风险
+            risk_level = "低风险"
+
+            risk_factors = [
+                {
+                    "factor": "资产集中度",
+                    "score": 50,
+                    "weight": 0.25,
+                    "description": "投资组合中Aethir占比较高(约76%)，增加了单一协议风险。",
+                },
+                {
+                    "factor": "质押协议风险",
+                    "score": 40,
+                    "weight": 0.2,
+                    "description": "Aethir是一个新兴协议，可能面临验证者风险和智能合约风险。",
+                },
+                {
+                    "factor": "总资产规模",
+                    "score": 20,
+                    "weight": 0.15,
+                    "description": "总资产价值较小($32.73)，总体风险敞口有限。",
+                },
+                {
+                    "factor": "杠杆风险",
+                    "score": 10,
+                    "weight": 0.15,
+                    "description": "无杠杆头寸，降低了市场波动带来的风险。",
+                },
+                {
+                    "factor": "协议安全性",
+                    "score": 35,
+                    "weight": 0.15,
+                    "description": "所持有的协议已经过安全审计，但仍存在智能合约风险。",
+                },
+                {
+                    "factor": "质押流动性风险",
+                    "score": 40,
+                    "weight": 0.1,
+                    "description": "质押资产存在一定的解除质押期，可能影响流动性。",
+                },
+            ]
+
+            recommendations = [
+                "考虑分散投资到不同类型的质押协议",
+                "关注Aethir和Data Ownership Protocol的安全更新和审计报告",
+                "定期检查质押资产的解质押期和流动性状况",
+                "考虑增加Aave等成熟DeFi协议的资产配置以平衡风险",
+            ]
+
+            data = {
+                "wallet_address": wallet_address,
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "risk_factors": risk_factors,
+                "recommendations": recommendations,
+                "risk_metrics": {
+                    "market_risk_score": 30,
+                    "protocol_risk_score": 40,
+                    "liquidity_risk_score": 35,
+                    "concentration_risk_score": 50,
+                    "smart_contract_risk_score": 38,  # 新增：智能合约风险评分
+                    "token_economics_risk_score": 42,  # 新增：代币经济模型风险评分
+                },
+                "positions_summary": {
+                    "total_value": positions_data["total_value_usd"],
+                    "position_count": position_count,
+                    "protocols": ["Aethir", "Data Ownership Protocol", "sophon"],
+                    "assets": ["ATH", "DOP"],
+                },
+                "warnings": [
+                    "投资组合中质押协议占比较高，建议多样化",
+                    "ATH代币的流动性较低，可能面临退出困难",  # 新增：流动性风险警告
+                ],
+                "monitoring_points": [
+                    "关注Aethir协议的开发和安全状况",
+                    "关注DOP稳定币的锚定状态",
+                    "监控ATH代币的交易量变化",  # 新增：监控点
+                    "关注新兴协议的安全审计报告更新",  # 新增：监控点
+                ],
+                "detailed_analysis": {  # 新增：详细分析部分
+                    "liquidity_analysis": {
+                        "ATH": {
+                            "daily_volume": "$245,000",
+                            "market_depth": "低",
+                            "slippage_risk": "高",
+                            "exchange_listings": ["DEX只有Uniswap V3"],
+                            "risk_level": "高",
+                        },
+                        "DOP": {
+                            "daily_volume": "$1,250,000",
+                            "market_depth": "中",
+                            "slippage_risk": "中",
+                            "exchange_listings": ["Uniswap V3", "Balancer"],
+                            "risk_level": "中",
+                        },
+                    },
+                    "smart_contract_security": {
+                        "Aethir": {
+                            "audit_count": 1,
+                            "last_audit_date": "2023-12-15",
+                            "audit_firms": ["BlockSec"],
+                            "known_issues": 2,
+                            "risk_level": "中高",
+                        },
+                        "Data Ownership Protocol": {
+                            "audit_count": 2,
+                            "last_audit_date": "2024-01-10",
+                            "audit_firms": ["CertiK", "PeckShield"],
+                            "known_issues": 1,
+                            "risk_level": "中",
+                        },
+                        "sophon": {
+                            "audit_count": 0,
+                            "last_audit_date": null,
+                            "audit_firms": [],
+                            "known_issues": 0,
+                            "risk_level": "未知",
+                        },
+                    },
+                    "token_economics": {
+                        "ATH": {
+                            "total_supply": "100,000,000",
+                            "circulating_supply": "12,500,000",
+                            "inflation_rate": "15% 年通胀",
+                            "token_utility": "平台治理和手续费折扣",
+                            "vesting_schedule": "团队解锁期为4年",
+                            "risk_level": "中高",
+                        },
+                        "DOP": {
+                            "total_supply": "1,000,000,000",
+                            "circulating_supply": "150,000,000",
+                            "inflation_rate": "8% 年通胀",
+                            "token_utility": "质押奖励和协议治理",
+                            "vesting_schedule": "早期投资者锁定期为2年",
+                            "risk_level": "中",
+                        },
+                    },
+                },
+                "timestamp": datetime.now().isoformat(),
+                "is_demo_data": True,
+            }
+
+            self._demo_data_cache[cache_key] = data
+            return data
+
+        # 为演示账户1生成低风险分析
+        elif wallet_address == "0xdemo1234567890abcdef1234567890abcdef123456":
             risk_score = 65
             risk_level = "中等"
             risk_factors = [
@@ -574,7 +859,7 @@ class DemoDataService:
             "recommendations": recommendations,
             "positions_summary": {
                 "total_value": positions_data["total_value_usd"],
-                "position_count": positions_data["position_count"],
+                "position_count": position_count,
                 "protocols": list(set(p["protocol"] for p in positions)),
                 "assets": list(set(p["asset"] for p in positions)),
             },
@@ -591,8 +876,64 @@ class DemoDataService:
         if cache_key in self._demo_data_cache:
             return self._demo_data_cache[cache_key]
 
+        # 为特定的测试钱包地址生成定制警报
+        if wallet_address == "0x881896A2E1D65f5dfA4d23Bf6b917cE703ed068b":
+            alerts = [
+                {
+                    "id": f"concentration-{int(datetime.now().timestamp())}",
+                    "type": "concentration",
+                    "severity": "warning",
+                    "protocol": "Aethir",
+                    "asset": "ATH",
+                    "message": "Aethir协议占比过高(76%)，增加了单一协议风险",
+                    "timestamp": datetime.now().isoformat(),
+                    "details": {
+                        "percentage": 76,
+                        "threshold": 50,
+                        "recommendation": "考虑分散投资到其他成熟DeFi协议以降低集中度风险",
+                    },
+                },
+                {
+                    "id": f"emerging-token-{int(datetime.now().timestamp())}",
+                    "type": "emerging_risk",
+                    "severity": "info",
+                    "protocol": "",
+                    "asset": "ATH,DOP",
+                    "message": "投资组合中包含新兴代币，可能存在较高波动性",
+                    "timestamp": datetime.now().isoformat(),
+                    "details": {
+                        "tokens": ["ATH", "DOP"],
+                        "recommendation": "密切关注新兴代币的市场动态和项目发展",
+                    },
+                },
+                {
+                    "id": f"total-value-{int(datetime.now().timestamp())}",
+                    "type": "tvl",
+                    "severity": "info",
+                    "protocol": "",
+                    "asset": "",
+                    "message": "投资组合总值较小($32.73)，风险敞口有限",
+                    "timestamp": datetime.now().isoformat(),
+                    "details": {
+                        "total_value": 32.73,
+                        "recommendation": "可以考虑这是试验性质的投资组合，适合尝试新的DeFi策略",
+                    },
+                },
+            ]
+
+            data = {
+                "wallet_address": wallet_address,
+                "alerts": alerts,
+                "alert_count": len(alerts),
+                "timestamp": datetime.now().isoformat(),
+                "is_demo_data": True,
+            }
+
+            self._demo_data_cache[cache_key] = data
+            return data
+
         # 为演示账户1生成特定警报
-        if wallet_address == "0xdemo1234567890abcdef1234567890abcdef123456":
+        elif wallet_address == "0xdemo1234567890abcdef1234567890abcdef123456":
             alerts = [
                 {
                     "id": "alert-001",
@@ -1065,106 +1406,442 @@ class DemoDataService:
     def get_market_scenario_simulation(
         self, wallet_address: str, scenario: str = "market_crash"
     ) -> Dict[str, Any]:
-        """
-        获取市场情景模拟数据
+        """获取市场情景模拟
 
-        Args:
+        参数:
             wallet_address: 钱包地址
-            scenario: 市场情景类型，可选值：market_crash, bull_run, defi_hack, regulatory_crackdown
+            scenario: 市场情景类型
 
-        Returns:
-            Dict: 情景模拟结果
+        返回:
+            市场情景模拟结果
         """
-        cache_key = f"scenario_{wallet_address}_{scenario}"
+        cache_key = f"market_scenario_{wallet_address}_{scenario}"
         if cache_key in self._demo_data_cache:
             return self._demo_data_cache[cache_key]
 
-        # 确保情景类型有效
-        valid_scenarios = ["market_crash", "bull_run", "defi_hack", "regulatory_crackdown"]
-        if scenario not in valid_scenarios:
-            scenario = "market_crash"
-
-        # 为不同情景生成不同的数据
-        scenario_effects = {
+        # 场景数据
+        scenario_data = {
             "market_crash": {
-                "title": "市场崩盘情景",
-                "description": "模拟加密货币市场急剧下跌50-70%的情景",
-                "impact_level": "高",
-                "duration": "2-4周",
-                "asset_changes": {"ETH": -0.6, "BTC": -0.5, "USDT": -0.02, "USDC": -0.01},
-                "risk_change": 35,
+                "title": "市场崩盘",
+                "description": "加密市场整体下跌50%的极端情景",
+                "impact_level": "严重",
+                "duration": "短期至中期",
+                "asset_impacts": {
+                    "ATH": -0.65,  # ATH下跌65%
+                    "DOP": -0.60,  # DOP下跌60%
+                    "ETH": -0.50,
+                    "BTC": -0.45,
+                    "USDC": 0,
+                    "USDT": 0,
+                    "DAI": -0.01,
+                    "AAVE": -0.55,
+                    "UNI": -0.60,
+                    "COMP": -0.58,
+                    "MKR": -0.52,
+                    "SNX": -0.65,
+                },
             },
             "bull_run": {
-                "title": "牛市情景",
-                "description": "模拟加密货币市场强劲上涨50-100%的情景",
-                "impact_level": "中",
-                "duration": "2-3个月",
-                "asset_changes": {"ETH": 0.8, "BTC": 0.7, "USDT": 0.01, "USDC": 0.01},
-                "risk_change": -10,
+                "title": "牛市行情",
+                "description": "加密市场整体上涨100%的乐观情景",
+                "impact_level": "积极",
+                "duration": "中期至长期",
+                "asset_impacts": {
+                    "ATH": 1.8,  # ATH上涨180%
+                    "DOP": 2.0,  # DOP上涨200%
+                    "ETH": 1.2,
+                    "BTC": 0.8,
+                    "USDC": 0,
+                    "USDT": 0,
+                    "DAI": 0.01,
+                    "AAVE": 1.5,
+                    "UNI": 1.8,
+                    "COMP": 1.6,
+                    "MKR": 1.3,
+                    "SNX": 2.2,
+                },
             },
             "defi_hack": {
                 "title": "DeFi黑客事件",
-                "description": "模拟主要DeFi协议遭受黑客攻击的情景",
-                "impact_level": "高",
-                "duration": "1-2周",
-                "asset_changes": {"ETH": -0.2, "AAVE": -0.4, "UNI": -0.35, "COMP": -0.45},
-                "risk_change": 25,
+                "description": "主要DeFi协议遭遇安全漏洞攻击的情景",
+                "impact_level": "中度至严重",
+                "duration": "短期",
+                "asset_impacts": {
+                    "ATH": -0.3,  # ATH下跌30%
+                    "DOP": -0.25,  # DOP下跌25%
+                    "ETH": -0.15,
+                    "BTC": -0.05,
+                    "USDC": -0.02,
+                    "USDT": -0.02,
+                    "DAI": -0.03,
+                    "AAVE": -0.4,
+                    "UNI": -0.35,
+                    "COMP": -0.38,
+                    "MKR": -0.3,
+                    "SNX": -0.42,
+                },
             },
             "regulatory_crackdown": {
                 "title": "监管打击",
-                "description": "模拟全球主要国家对加密货币实施严格监管的情景",
-                "impact_level": "中高",
-                "duration": "1-3个月",
-                "asset_changes": {"ETH": -0.3, "BTC": -0.25, "USDT": -0.05, "USDC": -0.03},
-                "risk_change": 20,
+                "description": "全球主要国家加强加密资产监管的情景",
+                "impact_level": "中度",
+                "duration": "中期至长期",
+                "asset_impacts": {
+                    "ATH": -0.4,  # ATH下跌40%
+                    "DOP": -0.45,  # DOP下跌45%
+                    "ETH": -0.3,
+                    "BTC": -0.25,
+                    "USDC": -0.05,
+                    "USDT": -0.05,
+                    "DAI": -0.04,
+                    "AAVE": -0.38,
+                    "UNI": -0.42,
+                    "COMP": -0.4,
+                    "MKR": -0.35,
+                    "SNX": -0.48,
+                },
             },
         }
 
-        scenario_data = scenario_effects[scenario]
+        # 获取钱包数据
+        positions_data = self.get_wallet_positions(wallet_address)
+        positions = positions_data.get("positions", [])
+
+        # 获取风险数据
+        risk_data = self.analyze_wallet_risk(wallet_address)
+        original_risk_score = risk_data.get("risk_score", 50)
+
+        # 为指定的测试钱包地址生成特定场景模拟
+        if wallet_address == "0x881896A2E1D65f5dfA4d23Bf6b917cE703ed068b":
+            # 获取所选场景数据
+            selected_scenario = scenario_data.get(
+                scenario, scenario_data["market_crash"]
+            )
+            asset_impacts = selected_scenario["asset_impacts"]
+
+            # 计算场景前的总值
+            total_value_before = positions_data.get("total_value_usd", 32.73)
+
+            # 模拟场景对每个头寸的影响
+            impacted_positions = []
+            total_value_after = 0
+
+            for position in positions:
+                if "positions" in position and position["positions"]:
+                    # 处理嵌套的positions结构
+                    for sub_position in position["positions"]:
+                        asset = sub_position.get("asset", "")
+                        amount_before = sub_position.get("amount", 0)
+
+                        # 应用资产影响率，没有特定的资产影响则使用默认值
+                        impact_rate = asset_impacts.get(
+                            asset, -0.5 if scenario == "market_crash" else 0.8
+                        )
+                        amount_after = amount_before * (1 + impact_rate)
+
+                        impacted_positions.append(
+                            {
+                                "protocol": sub_position.get("protocol", ""),
+                                "asset": asset,
+                                "amount_before": amount_before,
+                                "amount_after": amount_after,
+                                "change_percentage": impact_rate * 100,
+                            }
+                        )
+
+                        total_value_after += amount_after
+                else:
+                    # 简单结构，直接处理头寸本身
+                    protocol = position.get("protocol", "")
+                    total_assets = position.get("total_assets", 0)
+
+                    # 假设协议中主要持有的代币是该协议的原生代币
+                    asset = protocol
+                    impact_rate = asset_impacts.get(
+                        asset, -0.5 if scenario == "market_crash" else 0.8
+                    )
+                    assets_after = total_assets * (1 + impact_rate)
+
+                    # 只添加非空头寸
+                    if total_assets > 0:
+                        impacted_positions.append(
+                            {
+                                "protocol": protocol,
+                                "asset": asset,
+                                "amount_before": total_assets,
+                                "amount_after": assets_after,
+                                "change_percentage": impact_rate * 100,
+                            }
+                        )
+
+                        total_value_after += assets_after
+
+            # 调整风险分数
+            if scenario == "market_crash":
+                # 市场崩盘会增加风险
+                new_risk_score = min(original_risk_score + 20, 100)
+            elif scenario == "bull_run":
+                # 牛市可能降低某些风险
+                new_risk_score = max(original_risk_score - 10, 0)
+            elif scenario == "defi_hack":
+                # DeFi黑客事件增加风险
+                new_risk_score = min(original_risk_score + 15, 100)
+            else:  # regulatory_crackdown
+                # 监管风险增加
+                new_risk_score = min(original_risk_score + 12, 100)
+
+            # 构建结果
+            result = {
+                "wallet_address": wallet_address,
+                "scenario": scenario,
+                "scenario_info": {
+                    "title": selected_scenario["title"],
+                    "description": selected_scenario["description"],
+                    "impact_level": selected_scenario["impact_level"],
+                    "duration": selected_scenario["duration"],
+                    "probability": "中",  # 新增：事件发生概率
+                    "leading_indicators": (
+                        [  # 新增：先行指标
+                            "市场恐慧指数低于20",
+                            "主要国家央行加息",
+                            "主流交易所交易量下降30%以上",
+                        ]
+                        if scenario == "market_crash"
+                        else (
+                            [
+                                "市场恐慧指数高于80",
+                                "机构资金大量流入",
+                                "链上活动明显增加",
+                            ]
+                            if scenario == "bull_run"
+                            else (
+                                ["社交媒体上DeFi黑客事件讨论增加", "闪电贷交易量激增"]
+                                if scenario == "defi_hack"
+                                else [
+                                    "主要国家发布加密监管政策草案",
+                                    "交易所合规性要求提高",
+                                ]
+                            )
+                        )
+                    ),
+                },
+                "portfolio_impact": {
+                    "total_value_before": total_value_before,
+                    "total_value_after": total_value_after,
+                    "change_amount": total_value_after - total_value_before,
+                    "change_percentage": (
+                        (
+                            (total_value_after - total_value_before)
+                            / total_value_before
+                            * 100
+                        )
+                        if total_value_before > 0
+                        else 0
+                    ),
+                    "positions": impacted_positions,
+                    "liquidity_impact": {  # 新增：流动性影响
+                        "slippage_increase": (
+                            "高" if scenario == "market_crash" else "低"
+                        ),
+                        "exit_difficulty": (
+                            "ATH代币可能面临无法及时退出的风险"
+                            if scenario in ["market_crash", "defi_hack"]
+                            else "正常"
+                        ),
+                        "swap_options": (
+                            ["Curve", "Uniswap"]
+                            if scenario != "defi_hack"
+                            else ["仅Uniswap"]
+                        ),
+                    },
+                    "protocol_specific_impacts": [  # 新增：协议特定影响
+                        {
+                            "protocol": "Aethir",
+                            "impact_details": (
+                                "在市场崩盘情景下，Aethir协议的ATH代币可能面临较大抛售压力，流动性池可能枯竭"
+                                if scenario == "market_crash"
+                                else (
+                                    "随着市场升温，Aethir的用户增长和需求可能提高代币价值"
+                                    if scenario == "bull_run"
+                                    else (
+                                        "如果安全漏洞影响Aethir，可能导致资产损失或临时冻结"
+                                        if scenario == "defi_hack"
+                                        else "监管打击可能导致Aethir必须调整业务模式，影响代币实用性"
+                                    )
+                                )
+                            ),
+                            "risk_level": (
+                                "高"
+                                if scenario in ["market_crash", "defi_hack"]
+                                else "中"
+                            ),
+                        },
+                        {
+                            "protocol": "Data Ownership Protocol",
+                            "impact_details": (
+                                "作为一个相对新兴的协议，市场下跌可能严重影响DOP代币价格和流动性"
+                                if scenario == "market_crash"
+                                else (
+                                    "DOP可能受益于增长的市场关注度和采用率"
+                                    if scenario == "bull_run"
+                                    else (
+                                        "智能合约漏洞可能导致数据或资金损失"
+                                        if scenario == "defi_hack"
+                                        else "数据隐私监管可能对协议的核心功能产生特殊影响"
+                                    )
+                                )
+                            ),
+                            "risk_level": (
+                                "中高"
+                                if scenario in ["market_crash", "regulatory_crackdown"]
+                                else "中"
+                            ),
+                        },
+                    ],
+                },
+                "risk_impact": {
+                    "risk_score_before": original_risk_score,
+                    "risk_score_after": new_risk_score,
+                    "change": new_risk_score - original_risk_score,
+                    "risk_factors_impact": [  # 新增：风险因素影响细节
+                        {
+                            "factor": "资产集中度风险",
+                            "before": 50,
+                            "after": (
+                                65
+                                if scenario == "market_crash"
+                                else (45 if scenario == "bull_run" else 55)
+                            ),
+                            "impact": (
+                                "市场下跌会放大单一资产集中风险"
+                                if scenario == "market_crash"
+                                else (
+                                    "牛市可能暂时掩盖集中度风险，但长期风险仍存在"
+                                    if scenario == "bull_run"
+                                    else "安全事件/监管变化突显多样化的重要性"
+                                )
+                            ),
+                        },
+                        {
+                            "factor": "流动性风险",
+                            "before": 35,
+                            "after": (
+                                70
+                                if scenario == "market_crash"
+                                else (30 if scenario == "bull_run" else 50)
+                            ),
+                            "impact": (
+                                "极端市场环境下小币种流动性可能完全枯竭"
+                                if scenario == "market_crash"
+                                else (
+                                    "市场活跃度提高，流动性风险降低"
+                                    if scenario == "bull_run"
+                                    else "安全事件/监管变化可能导致交易所下架或限制交易"
+                                )
+                            ),
+                        },
+                    ],
+                },
+                "action_plan": {  # 新增：行动计划部分
+                    "immediate_actions": [
+                        (
+                            "设置止损单，限制下行风险"
+                            if scenario == "market_crash"
+                            else (
+                                "考虑获利了结一部分头寸"
+                                if scenario == "bull_run"
+                                else "暂停在涉事协议的额外投资"
+                            )
+                        ),
+                        (
+                            "增加稳定币比例，准备抄底机会"
+                            if scenario == "market_crash"
+                            else (
+                                "重新平衡投资组合，确保风险可控"
+                                if scenario == "bull_run"
+                                else "检查协议的安全更新和公告"
+                            )
+                        ),
+                    ],
+                    "mid_term_strategy": [
+                        "在市场稳定后，分散投资到不同资产类别和协议",
+                        "增加非相关资产配置，提高投资组合韧性",
+                    ],
+                    "technical_adjustments": [
+                        "调整Aethir的仓位，降低ATH代币比例至30%以下",
+                        "考虑添加Aave或Compound等成熟协议以分散风险",
+                    ],
+                },
+                "recommendations": self._generate_scenario_recommendations(scenario),
+                "timestamp": datetime.now().isoformat(),
+                "is_demo_data": True,
+            }
+
+            self._demo_data_cache[cache_key] = result
+            return result
+
+        # 对于其他钱包，使用通用逻辑
+        # 获取场景信息
+        if scenario not in scenario_data:
+            scenario = "market_crash"  # 默认使用市场崩盘场景
+        selected_scenario = scenario_data[scenario]
 
         # 获取钱包头寸
-        positions = self.get_wallet_positions(wallet_address)["positions"]
+        positions = positions_data.get("positions", [])
+        original_risk = self.analyze_wallet_risk(wallet_address)
 
         # 计算情景对投资组合的影响
-        asset_changes = scenario_data["asset_changes"]
+        asset_impacts = selected_scenario["asset_impacts"]
         impacted_positions = []
         total_value_before = 0
         total_value_after = 0
 
         for position in positions:
-            asset = position["asset"]
-            usd_value = position["usd_value"]
+            protocol = position.get("protocol", "Unknown")
+            asset = position.get("asset", "ETH")
+            usd_value = position.get("usd_value", position.get("amount", 0))
             total_value_before += usd_value
 
             # 计算变化
-            change_ratio = asset_changes.get(asset, -0.2)  # 默认-20%
+            change_ratio = asset_impacts.get(asset, -0.2)  # 默认-20%
             new_value = usd_value * (1 + change_ratio)
             total_value_after += new_value
 
             impacted_positions.append(
                 {
+                    "protocol": protocol,
                     "asset": asset,
-                    "protocol": position["protocol"],
-                    "original_value": usd_value,
-                    "new_value": new_value,
-                    "change_ratio": change_ratio,
-                    "change_amount": new_value - usd_value,
+                    "value_before": usd_value,
+                    "value_after": new_value,
+                    "change_percentage": change_ratio * 100,
                 }
             )
 
-        # 生成风险分析数据
-        original_risk = self.analyze_wallet_risk(wallet_address)
+        # 计算风险变化
         original_risk_score = original_risk["risk_score"]
-        new_risk_score = min(100, max(10, original_risk_score + scenario_data["risk_change"]))
+        # 根据场景调整风险分数
+        if scenario == "market_crash":
+            risk_change = 35
+        elif scenario == "bull_run":
+            risk_change = -10
+        elif scenario == "defi_hack":
+            risk_change = 25
+        else:  # regulatory_crackdown
+            risk_change = 20
+
+        new_risk_score = min(100, max(10, original_risk_score + risk_change))
+
+        # 生成场景特定建议
+        recommendations = self._generate_scenario_recommendations(scenario)
 
         result = {
             "wallet_address": wallet_address,
             "scenario": scenario,
             "scenario_info": {
-                "title": scenario_data["title"],
-                "description": scenario_data["description"],
-                "impact_level": scenario_data["impact_level"],
-                "duration": scenario_data["duration"],
+                "title": selected_scenario["title"],
+                "description": selected_scenario["description"],
+                "impact_level": selected_scenario["impact_level"],
+                "duration": selected_scenario["duration"],
             },
             "portfolio_impact": {
                 "total_value_before": total_value_before,
@@ -1182,7 +1859,7 @@ class DemoDataService:
                 "risk_score_after": new_risk_score,
                 "change": new_risk_score - original_risk_score,
             },
-            "recommendations": self._generate_scenario_recommendations(scenario),
+            "recommendations": recommendations,
             "timestamp": datetime.now().isoformat(),
             "is_demo_data": True,
         }
@@ -1191,29 +1868,96 @@ class DemoDataService:
         return result
 
     def get_wallet_market_risk(self, wallet_address: str) -> Dict[str, Any]:
-        """
-        获取钱包市场风险分析数据
+        """获取钱包市场风险分析
 
-        Args:
+        参数:
             wallet_address: 钱包地址
 
-        Returns:
-            Dict: 市场风险分析结果
+        返回:
+            市场风险分析结果
         """
         cache_key = f"market_risk_{wallet_address}"
         if cache_key in self._demo_data_cache:
             return self._demo_data_cache[cache_key]
 
-        logger.info(f"生成钱包市场风险分析演示数据: {wallet_address}")
+        # 为指定的测试钱包地址生成特定市场风险分析
+        if wallet_address == "0x881896A2E1D65f5dfA4d23Bf6b917cE703ed068b":
+            factors = [
+                {
+                    "name": "资产集中度风险",
+                    "score": 50,
+                    "weight": 0.4,
+                    "description": "投资组合中Aethir占比约76%，增加了单一资产风险",
+                    "trend": "稳定",
+                    "data_points": [
+                        {"asset": "ATH", "percentage": 0.76},
+                        {"asset": "DOP", "percentage": 0.24},
+                    ],
+                },
+                {
+                    "name": "质押与稳定币相关性风险",
+                    "score": 30,
+                    "weight": 0.3,
+                    "description": "质押资产(ATH)与稳定币(DOP)相关性低，有较好的多样化效果",
+                    "trend": "稳定",
+                    "data_points": [
+                        {"asset_pair": "ATH-DOP", "correlation": 0.2},
+                    ],
+                },
+                {
+                    "name": "质押市场风险",
+                    "score": 45,
+                    "weight": 0.3,
+                    "description": "质押资产在验证者减少或网络问题时可能面临价格波动",
+                    "trend": "稳定",
+                    "data_points": [{"volatility_index": 45}],
+                },
+            ]
 
-        # 获取钱包基本风险数据作为基础
-        basic_risk = self.analyze_wallet_risk(wallet_address)
+            data = {
+                "risk_type": "MARKET",
+                "target": "portfolio",
+                "score": 42,
+                "risk_level": "MEDIUM-LOW",
+                "factors": factors,
+                "recommendations": [
+                    "考虑增加稳定币比例以平衡质押资产风险",
+                    "减少Aethir在投资组合中的占比",
+                    "关注ETH 2.0相关的网络更新和变化",
+                    "考虑引入一些Aave等成熟DeFi协议的资产",
+                ],
+                "monitoring_points": [
+                    "监控Aethir代币的价格波动",
+                    "关注DOP稳定币的锚定状态",
+                    "定期检查质押资产的解质押期和流动性状况",
+                ],
+                "ai_insights": [],
+                "ai_available": True,
+                "timestamp": datetime.now().isoformat(),
+                "is_demo_data": True,
+            }
 
-        # 生成市场特定的风险因素
-        market_risk_score = basic_risk.get("risk_metrics", {}).get("market_risk_score", random.randint(30, 70))
+            self._demo_data_cache[cache_key] = data
+            return data
 
-        # 生成市场风险因素
-        factors = [
+        # 为其他钱包生成随机市场风险数据
+        risk_score = random.randint(40, 70)
+
+        risk_levels = {
+            (0, 50): "低",
+            (50, 70): "中等",
+            (70, 85): "高",
+            (85, 100): "极高",
+        }
+        risk_level = next(
+            (
+                level
+                for (lower, upper), level in risk_levels.items()
+                if lower <= risk_score < upper
+            ),
+            "中等",
+        )
+        risk_factors = [
             {
                 "name": "资产集中度风险",
                 "score": random.randint(30, 80),
@@ -1224,7 +1968,7 @@ class DemoDataService:
                     {"asset": "ETH", "percentage": random.uniform(0.5, 0.7)},
                     {"asset": "USDC", "percentage": random.uniform(0.1, 0.2)},
                     {"asset": "其他", "percentage": random.uniform(0.1, 0.3)},
-                ]
+                ],
             },
             {
                 "name": "资产相关性风险",
@@ -1235,7 +1979,7 @@ class DemoDataService:
                 "data_points": [
                     {"asset_pair": "ETH-BTC", "correlation": random.uniform(0.7, 0.9)},
                     {"asset_pair": "ETH-Alts", "correlation": random.uniform(0.6, 0.8)},
-                ]
+                ],
             },
             {
                 "name": "市场波动风险",
@@ -1243,8 +1987,8 @@ class DemoDataService:
                 "weight": 0.3,
                 "description": f"当前市场波动性{random.choice(['较高', '中等', '较低'])}",
                 "trend": random.choice(["上升", "稳定", "下降"]),
-                "data_points": [{"volatility_index": random.randint(40, 80)}]
-            }
+                "data_points": [{"volatility_index": random.randint(40, 80)}],
+            },
         ]
 
         # 生成市场风险建议
@@ -1254,10 +1998,10 @@ class DemoDataService:
             "考虑在当前价格区间设置分批止盈点，锁定部分收益",
             "对于高波动性资产，设置15%的止损位，控制下行风险",
             "增加低相关性资产，提高投资组合的多样性",
-            "关注市场整体趋势变化，避免在下跌趋势中追加投资"
+            "关注市场整体趋势变化，避免在下跌趋势中追加投资",
         ]
         random.shuffle(recommendations)
-        recommendations = recommendations[:random.randint(3, 5)]
+        recommendations = recommendations[: random.randint(3, 5)]
 
         # 生成市场风险监控点
         monitoring_points = [
@@ -1266,25 +2010,25 @@ class DemoDataService:
             "监控市场恐惧与贪婪指数，当指数低于20或高于80时重新评估仓位",
             "追踪主要资产间的相关性变化，特别是ETH-BTC对的相关系数",
             "关注主要持仓资产的交易量变化，交易量突增可能预示价格波动",
-            "定期评估投资组合的整体波动率，与市场基准进行比较"
+            "定期评估投资组合的整体波动率，与市场基准进行比较",
         ]
         random.shuffle(monitoring_points)
-        monitoring_points = monitoring_points[:random.randint(3, 5)]
+        monitoring_points = monitoring_points[: random.randint(3, 5)]
 
         # 构建结果
         result = {
             "wallet_address": wallet_address,
             "risk_type": "MARKET",
             "target": "portfolio",
-            "score": market_risk_score,
-            "risk_level": "HIGH" if market_risk_score > 70 else "MEDIUM" if market_risk_score > 40 else "LOW",
-            "factors": factors,
+            "score": risk_score,
+            "risk_level": risk_level,
+            "factors": risk_factors,
             "recommendations": recommendations,
             "monitoring_points": monitoring_points,
             "ai_insights": ["AI分析显示当前市场处于波动阶段，建议保持谨慎并设置止损"],
             "ai_available": True,
             "timestamp": datetime.now().isoformat(),
-            "is_demo_data": True
+            "is_demo_data": True,
         }
 
         self._demo_data_cache[cache_key] = result
@@ -1300,7 +2044,7 @@ class DemoDataService:
                 "增加抵押品，防止清算",
                 "分散资产到不同类型的加密货币",
                 "暂时减少流动性挖矿敞口",
-                "关注市场底部信号，为反弹做准备"
+                "关注市场底部信号，为反弹做准备",
             ],
             "bull_run": [
                 "定期获利了结，锁定部分盈利",
@@ -1309,7 +2053,7 @@ class DemoDataService:
                 "考虑对冲策略，防范突然回调",
                 "重新平衡投资组合，确保风险可控",
                 "为可能的回调准备现金储备",
-                "设置不同价格区间的获利目标"
+                "设置不同价格区间的获利目标",
             ],
             "defi_hack": [
                 "分散资产到多个协议，降低单一协议风险",
@@ -1318,7 +2062,7 @@ class DemoDataService:
                 "考虑使用去中心化保险产品",
                 "保持一部分资产在非托管钱包中",
                 "定期审核智能合约的安全状况",
-                "关注社区对协议安全性的讨论"
+                "关注社区对协议安全性的讨论",
             ],
             "regulatory_crackdown": [
                 "关注各国监管动态，适时调整投资策略",
@@ -1327,8 +2071,8 @@ class DemoDataService:
                 "准备应急撤离计划，确保资金安全",
                 "关注交易所的合规状况",
                 "减少匿名币种的敞口",
-                "关注监管友好型的DeFi协议发展"
-            ]
+                "关注监管友好型的DeFi协议发展",
+            ],
         }
 
         # 获取对应场景的建议列表
@@ -1336,7 +2080,7 @@ class DemoDataService:
 
         # 随机选择4-6条建议
         random.shuffle(scenario_recs)
-        return scenario_recs[:random.randint(4, 6)]
+        return scenario_recs[: random.randint(4, 6)]
 
 
 # 创建全局演示数据服务实例

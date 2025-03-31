@@ -32,7 +32,11 @@ from app.models.domain.risk import (
 logger = logging.getLogger("defi_risk.blockchain_service")
 
 # 使用settings中的代理设置
-proxies = {"http": settings.PROXY_URL, "https": settings.PROXY_URL} if settings.PROXY_URL else None
+proxies = (
+    {"http": settings.PROXY_URL, "https": settings.PROXY_URL}
+    if settings.PROXY_URL
+    else None
+)
 
 from defillama import DefiLlama
 
@@ -212,11 +216,11 @@ class BlockchainService:
             self._http_session = None
 
         # 关闭web3连接
-        if hasattr(self.web3.provider, 'close'):
+        if hasattr(self.web3.provider, "close"):
             self.web3.provider.close()
 
         # 关闭DeFi Llama客户端
-        if hasattr(self.defi_llama_client, 'close'):
+        if hasattr(self.defi_llama_client, "close"):
             await self.defi_llama_client.close()
 
         logger.info("区块链服务已关闭")
@@ -396,7 +400,10 @@ class BlockchainService:
                     self.logger.info(
                         f"成功从OKX API获取到 {len(okx_positions)} 个协议的头寸数据"
                     )
-                    # 直接返回OKX API获取的头寸数据
+                    # 缓存获取到的数据
+                    self.logger.info(f"缓存钱包头寸数据: {wallet_address}")
+                    self.historical_data_cache.set(cache_key, okx_positions, "1d")
+                    # 返回OKX API获取的头寸数据
                     return okx_positions
                 else:
                     self.logger.warning("OKX API未返回有效头寸数据，将使用基础方法")
@@ -407,6 +414,11 @@ class BlockchainService:
             self.logger.info("使用基础方法获取有限的协议头寸数据")
             # 合并结果
             all_positions = []
+
+            # 如果获取到了结果，缓存数据
+            if all_positions:
+                self.logger.info(f"缓存基础方法获取的钱包头寸数据: {wallet_address}")
+                self.historical_data_cache.set(cache_key, all_positions, "1d")
 
             return all_positions
         except Exception as e:
@@ -2548,3 +2560,292 @@ class BlockchainService:
         except Exception as e:
             logger.error(f"分析协议安全风险时出错: {str(e)}")
             # 使用后备方法...
+
+    async def get_token_trend(self, asset: str) -> Optional[Dict]:
+        """
+        获取资产的市场趋势数据
+
+        Args:
+            asset: 资产符号或ID
+
+        Returns:
+            Dict: 包含趋势数据的字典，包括趋势方向和强度
+        """
+        try:
+            self.logger.info(f"获取{asset}的市场趋势数据")
+
+            # 检查缓存
+            cache_key = f"token_trend_{asset}"
+            cache_interval = "1h"  # 1小时缓存
+            cached_data = self.historical_data_cache.get(cache_key, cache_interval)
+
+            if cached_data is not None:
+                self.logger.info(f"从缓存获取{asset}的趋势数据")
+                return cached_data
+
+            # 获取历史数据
+            historical_data = await self.get_asset_historical_data(asset)
+            if historical_data is None or historical_data.empty:
+                self.logger.warning(f"无法获取{asset}的历史数据")
+                return None
+
+            # 获取24小时数据
+            data_24h = await self._get_coingecko_24h_data(asset)
+
+            # 计算趋势指标
+            # 1. 计算移动平均线
+            if len(historical_data) >= 7:
+                ma7 = historical_data["price"].rolling(window=7).mean().iloc[-1]
+            else:
+                ma7 = historical_data["price"].mean()
+
+            if len(historical_data) >= 30:
+                ma30 = historical_data["price"].rolling(window=30).mean().iloc[-1]
+            else:
+                ma30 = historical_data["price"].mean()
+
+            current_price = historical_data["price"].iloc[-1]
+
+            # 2. 计算相对强弱指标 (RSI)
+            if len(historical_data) >= 14:
+                delta = historical_data["price"].diff()
+                up = delta.clip(lower=0)
+                down = -1 * delta.clip(upper=0)
+                ema_up = up.ewm(span=14, adjust=False).mean()
+                ema_down = down.ewm(span=14, adjust=False).mean()
+                rs = ema_up / ema_down
+                rsi = 100 - (100 / (1 + rs.iloc[-1]))
+            else:
+                rsi = 50  # 默认值
+
+            # 3. 计算MACD
+            if len(historical_data) >= 26:
+                ema12 = historical_data["price"].ewm(span=12, adjust=False).mean()
+                ema26 = historical_data["price"].ewm(span=26, adjust=False).mean()
+                macd = ema12 - ema26
+                signal = macd.ewm(span=9, adjust=False).mean()
+                macd_histogram = macd - signal
+                macd_value = macd.iloc[-1]
+                macd_signal = signal.iloc[-1]
+                macd_hist = macd_histogram.iloc[-1]
+            else:
+                macd_value = 0
+                macd_signal = 0
+                macd_hist = 0
+
+            # 4. 计算趋势方向和强度
+            trend_factors = []
+
+            # 价格与移动平均线的关系
+            if current_price > ma7 > ma30:
+                trend_factors.append(1)  # 强烈上升趋势
+            elif current_price > ma7:
+                trend_factors.append(0.5)  # 短期上升趋势
+            elif current_price < ma7 < ma30:
+                trend_factors.append(-1)  # 强烈下降趋势
+            elif current_price < ma7:
+                trend_factors.append(-0.5)  # 短期下降趋势
+            else:
+                trend_factors.append(0)  # 横盘
+
+            # RSI指标
+            if rsi > 70:
+                trend_factors.append(0.5)  # 超买区域，可能反转向下
+            elif rsi < 30:
+                trend_factors.append(-0.5)  # 超卖区域，可能反转向上
+            elif rsi > 50:
+                trend_factors.append(0.3)  # 偏强
+            elif rsi < 50:
+                trend_factors.append(-0.3)  # 偏弱
+            else:
+                trend_factors.append(0)  # 中性
+
+            # MACD指标
+            if macd_value > 0 and macd_hist > 0:
+                trend_factors.append(1)  # 强烈上升趋势
+            elif macd_value > 0:
+                trend_factors.append(0.5)  # 上升趋势
+            elif macd_value < 0 and macd_hist < 0:
+                trend_factors.append(-1)  # 强烈下降趋势
+            elif macd_value < 0:
+                trend_factors.append(-0.5)  # 下降趋势
+            else:
+                trend_factors.append(0)  # 中性
+
+            # 24小时价格变化
+            if data_24h:
+                price_change_24h = data_24h.get("price_change_percent", 0)
+                if price_change_24h > 5:
+                    trend_factors.append(1)  # 强烈上涨
+                elif price_change_24h > 2:
+                    trend_factors.append(0.5)  # 上涨
+                elif price_change_24h < -5:
+                    trend_factors.append(-1)  # 强烈下跌
+                elif price_change_24h < -2:
+                    trend_factors.append(-0.5)  # 下跌
+                else:
+                    trend_factors.append(0)  # 稳定
+
+            # 计算趋势方向（-1到1，负值表示下降趋势，正值表示上升趋势）
+            trend_direction = sum(trend_factors) / len(trend_factors)
+
+            # 计算趋势强度（0到1，0表示弱趋势，1表示强趋势）
+            trend_strength = abs(trend_direction)
+
+            # 准备返回数据
+            trend_data = {
+                "trend_direction": trend_direction,
+                "trend_strength": trend_strength,
+                "price_change_1d": (
+                    data_24h.get("price_change_percent", 0) if data_24h else 0
+                ),
+                "price_change_7d": (
+                    (
+                        current_price
+                        / historical_data["price"].iloc[-min(7, len(historical_data))]
+                        - 1
+                    )
+                    * 100
+                    if len(historical_data) >= 2
+                    else 0
+                ),
+                "price_change_30d": (
+                    (
+                        current_price
+                        / historical_data["price"].iloc[-min(30, len(historical_data))]
+                        - 1
+                    )
+                    * 100
+                    if len(historical_data) >= 2
+                    else 0
+                ),
+                "current_price": current_price,
+                "ma7": ma7,
+                "ma30": ma30,
+                "rsi": rsi,
+                "macd": macd_value,
+                "macd_signal": macd_signal,
+                "macd_histogram": macd_hist,
+            }
+
+            # 将结果存入缓存
+            self.historical_data_cache.set(cache_key, trend_data, cache_interval)
+
+            return trend_data
+
+        except Exception as e:
+            self.logger.error(f"获取{asset}的趋势数据失败: {str(e)}")
+            return {
+                "trend_direction": 0,
+                "trend_strength": 0,
+                "price_change_1d": 0,
+                "price_change_7d": 0,
+                "price_change_30d": 0,
+                "error": str(e),
+            }
+
+    async def get_token_historical_prices(
+        self, asset: str, days: int = 30
+    ) -> Optional[Dict[str, List[float]]]:
+        """
+        获取代币的历史价格数据
+
+        Args:
+            asset: 资产符号或ID
+            days: 获取多少天的数据
+
+        Returns:
+            Dict: 包含日期和价格的字典，格式为{'dates': [...], 'prices': [...]}
+        """
+        try:
+            self.logger.info(f"获取{asset}的历史价格数据")
+
+            # 检查缓存
+            cache_key = f"token_historical_prices_{asset}_{days}"
+            cache_interval = "1h"  # 1小时缓存
+            cached_data = self.historical_data_cache.get(cache_key, cache_interval)
+
+            if cached_data is not None:
+                self.logger.info(f"从缓存获取{asset}的历史价格数据")
+                return cached_data
+
+            # 使用get_asset_historical_data获取历史数据
+            historical_data = await self.get_asset_historical_data(asset)
+
+            if historical_data is None or historical_data.empty:
+                self.logger.warning(f"无法获取{asset}的历史数据")
+                return None
+
+            # 限制数据点数量
+            if len(historical_data) > days:
+                historical_data = historical_data.tail(days)
+
+            # 转换为需要的格式
+            dates = historical_data["timestamp"].dt.strftime("%Y-%m-%d").tolist()
+            prices = historical_data["price"].tolist()
+
+            # 准备返回数据
+            price_data = {"dates": dates, "prices": prices}
+
+            # 存入缓存
+            self.historical_data_cache.set(cache_key, price_data, cache_interval)
+
+            return price_data
+
+        except Exception as e:
+            self.logger.error(f"获取{asset}的历史价格数据失败: {str(e)}")
+            return None
+
+    async def get_asset_liquidity(self, asset: str) -> Optional[Dict[str, Any]]:
+        """
+        获取资产的流动性数据，包括交易量、市值等
+
+        Args:
+            asset: 资产符号或ID
+
+        Returns:
+            Dict: 包含流动性数据的字典（交易量、市值等）
+        """
+        try:
+            self.logger.info(f"获取{asset}的流动性数据")
+
+            # 检查缓存
+            cache_key = f"asset_liquidity_{asset}"
+            cache_interval = "15m"  # 15分钟缓存
+            cached_data = self.historical_data_cache.get(cache_key, cache_interval)
+
+            if cached_data is not None:
+                self.logger.info(f"从缓存获取{asset}的流动性数据")
+                return cached_data
+
+            # 使用_get_coingecko_24h_data获取市场数据
+            market_data = await self._get_coingecko_24h_data(asset)
+
+            if market_data is None:
+                self.logger.warning(f"无法获取{asset}的市场数据")
+                return None
+
+            # 提取流动性相关数据
+            liquidity_data = {
+                "volume_24h": market_data.get("volume", 0),
+                "market_cap": market_data.get("market_cap", 0),
+                "volume_to_mcap_ratio": 0.0,
+                "price": market_data.get("price", 0),
+                "price_change_24h": market_data.get("price_change_percent", 0),
+                "last_updated": market_data.get("last_updated", ""),
+            }
+
+            # 计算交易量/市值比率
+            if liquidity_data["market_cap"] > 0:
+                liquidity_data["volume_to_mcap_ratio"] = (
+                    liquidity_data["volume_24h"] / liquidity_data["market_cap"]
+                )
+
+            # 存入缓存
+            self.historical_data_cache.set(cache_key, liquidity_data, cache_interval)
+
+            return liquidity_data
+
+        except Exception as e:
+            self.logger.error(f"获取{asset}的流动性数据失败: {str(e)}")
+            return None

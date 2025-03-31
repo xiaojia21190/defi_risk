@@ -9,6 +9,7 @@ from app.models.domain.risk import RiskFactor, RiskType, RiskAnalysisResult
 from app.risk_modules.base import RiskAnalyzerBase
 from app.services.recommendation_service import RecommendationService
 import numpy as np
+from app.core.utility import safe_get
 
 
 class MarketRiskAnalyzer(RiskAnalyzerBase):
@@ -146,49 +147,50 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
         return risk_factors
 
     async def _analyze_concentration_risk(
-        self, positions: List[Dict[str, Any]]
+        self, positions: List[Any]
     ) -> Optional[RiskFactor]:
         """分析市场集中度风险"""
         try:
-            # 使用区块链服务获取资产数据
-            if not self.blockchain_service:
-                self.logger.warning("区块链服务未初始化，无法获取资产数据")
-                return None
+            # 使用HHI指数分析资产和协议集中度
+            # HHI指数=各实体占比的平方和，范围0-10000，越大表示越集中
 
-            # 按资产和协议分组
-            assets = {}  # 资产 -> 金额映射
-            protocols = {}  # 协议 -> 金额映射
+            assets = {}
+            protocols = {}
             total_value = 0
 
             # 处理嵌套的positions结构
             for protocol_position in positions:
-                protocol = protocol_position.get("protocol", "Unknown")
-                inner_positions = protocol_position.get("positions", [])
+                protocol = safe_get(protocol_position, "protocol", "Unknown")
+                inner_positions = safe_get(protocol_position, "positions", [])
 
+                # 初始化协议价值
                 if protocol not in protocols:
                     protocols[protocol] = 0
 
                 # 遍历每个协议中的具体资产positions
                 for pos in inner_positions:
-                    position_amount = pos.get("amount", 0)
-                    protocols[protocol] += position_amount
+                    # 获取资产价值
+                    position_amount = safe_get(pos, "amount", 0)
                     total_value += position_amount
+                    protocols[protocol] += position_amount
 
                     # 优先从tokenList获取更精确的代币信息
-                    if pos.get("tokenList"):
+                    if safe_get(pos, "tokenList"):
                         # 使用基类方法过滤代币列表
                         filtered_tokens = self.filter_token_list(
-                            pos.get("tokenList", [])
+                            safe_get(pos, "tokenList", [])
                         )
 
                         for token in filtered_tokens:
-                            token_symbol = token.get("tokenSymbol", "")
+                            token_symbol = safe_get(token, "tokenSymbol", "")
                             if not token_symbol:
                                 continue
 
                             # 计算代币价值
-                            if token.get("currencyAmount"):
-                                token_value = float(token.get("currencyAmount", "0"))
+                            if safe_get(token, "currencyAmount"):
+                                token_value = float(
+                                    safe_get(token, "currencyAmount", "0")
+                                )
                             else:
                                 # 如果没有明确的价值，按比例分配
                                 token_value = (
@@ -203,7 +205,7 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                             assets[token_symbol] += token_value
                     else:
                         # 如果没有tokenList，使用资产名称
-                        asset = pos.get("asset", "Unknown").split("/")[
+                        asset = safe_get(pos, "asset", "Unknown").split("/")[
                             0
                         ]  # 处理流动性池资产格式
 
@@ -362,7 +364,7 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
             return None
 
     async def _analyze_volatility_risk(
-        self, positions: List[Dict[str, Any]]
+        self, positions: List[Any]
     ) -> Optional[RiskFactor]:
         """分析市场波动性风险"""
         try:
@@ -377,28 +379,30 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
 
             # 处理嵌套的positions结构
             for protocol_position in positions:
-                inner_positions = protocol_position.get("positions", [])
+                inner_positions = safe_get(protocol_position, "positions", [])
 
                 # 遍历每个协议中的具体资产positions
                 for pos in inner_positions:
-                    position_amount = pos.get("amount", 0)
+                    position_amount = safe_get(pos, "amount", 0)
                     total_value += position_amount
 
                     # 优先从tokenList获取更精确的代币信息
-                    if pos.get("tokenList"):
+                    if safe_get(pos, "tokenList"):
                         # 使用基类方法过滤代币列表
                         filtered_tokens = self.filter_token_list(
-                            pos.get("tokenList", [])
+                            safe_get(pos, "tokenList", [])
                         )
 
                         for token in filtered_tokens:
-                            token_symbol = token.get("tokenSymbol", "")
+                            token_symbol = safe_get(token, "tokenSymbol", "")
                             if not token_symbol:
                                 continue
 
                             # 计算代币价值
-                            if token.get("currencyAmount"):
-                                token_value = float(token.get("currencyAmount", "0"))
+                            if safe_get(token, "currencyAmount"):
+                                token_value = float(
+                                    safe_get(token, "currencyAmount", "0")
+                                )
                             else:
                                 # 如果没有明确的价值，按比例分配
                                 token_value = (
@@ -413,7 +417,7 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                             assets[token_symbol] += token_value
                     else:
                         # 如果没有tokenList，使用资产名称
-                        asset = pos.get("asset", "Unknown").split("/")[
+                        asset = safe_get(pos, "asset", "Unknown").split("/")[
                             0
                         ]  # 处理流动性池资产格式
 
@@ -532,12 +536,10 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
             self.logger.error(f"分析市场波动性风险时出错: {str(e)}")
             return None
 
-    async def _analyze_trend_risk(
-        self, positions: List[Dict[str, Any]]
-    ) -> Optional[RiskFactor]:
+    async def _analyze_trend_risk(self, positions: List[Any]) -> Optional[RiskFactor]:
         """分析市场趋势风险"""
         try:
-            # 使用区块链服务获取资产数据
+            # 使用区块链服务获取资产趋势数据
             if not self.blockchain_service:
                 self.logger.warning("区块链服务未初始化，无法获取资产趋势数据")
                 return None
@@ -548,28 +550,30 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
 
             # 处理嵌套的positions结构
             for protocol_position in positions:
-                inner_positions = protocol_position.get("positions", [])
+                inner_positions = safe_get(protocol_position, "positions", [])
 
                 # 遍历每个协议中的具体资产positions
                 for pos in inner_positions:
-                    position_amount = pos.get("amount", 0)
+                    position_amount = safe_get(pos, "amount", 0)
                     total_value += position_amount
 
                     # 优先从tokenList获取更精确的代币信息
-                    if pos.get("tokenList"):
+                    if safe_get(pos, "tokenList"):
                         # 使用基类方法过滤代币列表
                         filtered_tokens = self.filter_token_list(
-                            pos.get("tokenList", [])
+                            safe_get(pos, "tokenList", [])
                         )
 
                         for token in filtered_tokens:
-                            token_symbol = token.get("tokenSymbol", "")
+                            token_symbol = safe_get(token, "tokenSymbol", "")
                             if not token_symbol:
                                 continue
 
                             # 计算代币价值
-                            if token.get("currencyAmount"):
-                                token_value = float(token.get("currencyAmount", "0"))
+                            if safe_get(token, "currencyAmount"):
+                                token_value = float(
+                                    safe_get(token, "currencyAmount", "0")
+                                )
                             else:
                                 # 如果没有明确的价值，按比例分配
                                 token_value = (
@@ -584,7 +588,7 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                             assets[token_symbol] += token_value
                     else:
                         # 如果没有tokenList，使用资产名称
-                        asset = pos.get("asset", "Unknown").split("/")[
+                        asset = safe_get(pos, "asset", "Unknown").split("/")[
                             0
                         ]  # 处理流动性池资产格式
 
@@ -783,11 +787,11 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
             return None
 
     async def _analyze_correlation_risk(
-        self, positions: List[Dict[str, Any]]
+        self, positions: List[Any]
     ) -> Optional[RiskFactor]:
         """分析市场相关性风险"""
         try:
-            # 使用区块链服务获取资产数据
+            # 使用区块链服务获取资产相关性数据
             if not self.blockchain_service:
                 self.logger.warning("区块链服务未初始化，无法获取资产相关性数据")
                 return None
@@ -798,28 +802,30 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
 
             # 处理嵌套的positions结构
             for protocol_position in positions:
-                inner_positions = protocol_position.get("positions", [])
+                inner_positions = safe_get(protocol_position, "positions", [])
 
                 # 遍历每个协议中的具体资产positions
                 for pos in inner_positions:
-                    position_amount = pos.get("amount", 0)
+                    position_amount = safe_get(pos, "amount", 0)
                     total_value += position_amount
 
                     # 优先从tokenList获取更精确的代币信息
-                    if pos.get("tokenList"):
+                    if safe_get(pos, "tokenList"):
                         # 使用基类方法过滤代币列表
                         filtered_tokens = self.filter_token_list(
-                            pos.get("tokenList", [])
+                            safe_get(pos, "tokenList", [])
                         )
 
                         for token in filtered_tokens:
-                            token_symbol = token.get("tokenSymbol", "")
+                            token_symbol = safe_get(token, "tokenSymbol", "")
                             if not token_symbol:
                                 continue
 
                             # 计算代币价值
-                            if token.get("currencyAmount"):
-                                token_value = float(token.get("currencyAmount", "0"))
+                            if safe_get(token, "currencyAmount"):
+                                token_value = float(
+                                    safe_get(token, "currencyAmount", "0")
+                                )
                             else:
                                 # 如果没有明确的价值，按比例分配
                                 token_value = (
@@ -834,7 +840,7 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                             assets[token_symbol] += token_value
                     else:
                         # 如果没有tokenList，使用资产名称
-                        asset = pos.get("asset", "Unknown").split("/")[
+                        asset = safe_get(pos, "asset", "Unknown").split("/")[
                             0
                         ]  # 处理流动性池资产格式
 
@@ -1037,7 +1043,7 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
             risk_data = {
                 "risk_factors": [
                     {
-                        "factor_name": factor.factor_name,
+                        "name": factor.name,
                         "score": factor.score,
                         "description": factor.description,
                         "trend": factor.trend,

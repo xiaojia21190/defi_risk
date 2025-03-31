@@ -26,7 +26,8 @@ class JsonFormatter(logging.Formatter):
         if record.exc_info:
             log_record["exception"] = self.formatException(record.exc_info)
 
-        return json.dumps(log_record)
+        # 设置ensure_ascii=False，确保中文不被转义为Unicode序列
+        return json.dumps(log_record, ensure_ascii=False)
 
 
 def setup_logging():

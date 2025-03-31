@@ -9,6 +9,8 @@ from typing import Dict, List, Any, Optional, Tuple
 import json
 from app.core.config import settings
 from openai import OpenAI
+from app.models.domain.risk import RiskFactor
+import asyncio
 
 logger = logging.getLogger("defi_risk.ai_predictor")
 
@@ -34,7 +36,10 @@ class AiPredictor:
                 self.logger.warning("未设置OpenAI API密钥，AI预测功能将受限")
         except Exception as e:
             self.logger.error(f"初始化OpenAI客户端失败: {str(e)}")
-        # 可以在这里添加模型加载或其他初始化逻辑
+
+        # 移除在初始化时创建CorrelationRiskAnalyzer实例
+        # 相关性分析器将在需要时延迟创建
+        self._correlation_analyzer = None
 
     def analyze_defi_protocol_risk(
         self, protocol_data: Dict[str, Any]
@@ -1418,7 +1423,7 @@ class AiPredictor:
                 "data_points": [],
             }
 
-    def analyze_correlation_risk(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    async def analyze_correlation_risk(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         分析相关性风险
 
@@ -1434,23 +1439,232 @@ class AiPredictor:
             # 提取相关类型
             correlation_type = data.get("correlation_type", "asset_correlation")
 
+            # 根据相关类型分别处理
             if correlation_type == "asset_correlation":
-                return self._analyze_asset_correlation(data)
+                # 使用相关性风险分析器进行资产相关性分析
+                result = await self._analyze_asset_correlation(data)
             elif correlation_type == "protocol_correlation":
-                return self._analyze_protocol_correlation(data)
+                # 使用相关性风险分析器进行协议相关性分析
+                result = await self._analyze_protocol_correlation(data)
             elif correlation_type == "investment_type_correlation":
-                return self._analyze_investment_type_correlation(data)
+                # 使用相关性风险分析器进行投资类型相关性分析
+                result = await self._analyze_investment_type_correlation(data)
             else:
-                return self._analyze_asset_correlation(data)  # 默认分析资产相关性
+                # 默认分析资产相关性
+                result = await self._analyze_asset_correlation(data)
+
+            return result
 
         except Exception as e:
             self.logger.error(f"分析相关性风险失败: {str(e)}")
             return {
-                "risk_score": 50,
+                "score": 50,
                 "description": f"相关性分析过程中出错: {str(e)}",
                 "trend": "未知",
                 "data_points": [],
             }
+
+    async def _analyze_asset_correlation(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        分析资产相关性风险
+
+        Args:
+            data: 包含资产数据的字典
+
+        Returns:
+            Dict: 资产相关性风险分析结果
+        """
+        try:
+            self.logger.info("分析资产相关性风险")
+
+            # 提取资产列表和头寸数据
+            assets = set(data.get("assets", []))
+            positions = data.get("positions", [])
+
+            # 如果资产列表和头寸数据都不足，无法进行相关性分析
+            if (not assets or len(assets) < 2) and (not positions):
+                self.logger.warning("检测到的资产少于2个，无法进行资产相关性分析")
+                return {
+                    "score": 30,
+                    "description": "投资组合中资产种类较少，相关性风险较低",
+                    "trend": "稳定",
+                    "data_points": [],
+                    "recommendations": ["增加资产多样性以降低集中风险"],
+                    "monitoring_points": ["关注单一资产的价格波动"],
+                }
+
+            # 准备数据
+            if not positions and assets:
+                # 如果没有位置信息但有资产列表，创建模拟位置
+                mock_positions = []
+                for asset in assets:
+                    mock_position = {
+                        "asset": asset,
+                        "amount": 1000,  # 假设每个资产价值相等
+                        "protocol": "unknown",
+                    }
+                    mock_positions.append(mock_position)
+
+                # 创建一个协议位置字典，包含所有模拟位置
+                protocol_position = {"protocol": "mixed", "positions": mock_positions}
+
+                positions = [protocol_position]
+
+            # 获取相关性分析器以分析资产相关性
+            correlation_analyzer = self._get_correlation_analyzer()
+
+            if correlation_analyzer is None:
+                self.logger.error("无法获取相关性分析器，使用简化的资产相关性分析")
+                return self._fallback_asset_correlation_analysis(assets)
+
+            # 使用await代替asyncio.run，并传递positions而不是assets
+            try:
+                risk_factor = await correlation_analyzer._analyze_asset_correlation(
+                    positions
+                )
+            except Exception as analyzer_error:
+                self.logger.error(
+                    f"调用相关性分析器分析资产相关性失败: {str(analyzer_error)}"
+                )
+                return self._fallback_asset_correlation_analysis(assets)
+
+            # 如果 correlation_analyzer 返回了有效的风险因子
+            if risk_factor:
+                try:
+                    # 使用await代替asyncio.run
+                    recommendations = await correlation_analyzer.get_recommendations(
+                        [risk_factor]
+                    )
+                    monitoring_points = (
+                        await correlation_analyzer.get_monitoring_points([risk_factor])
+                    )
+
+                    return {
+                        "score": risk_factor.score,
+                        "description": risk_factor.description,
+                        "trend": risk_factor.trend,
+                        "data_points": risk_factor.data_points,
+                        "recommendations": recommendations,
+                        "monitoring_points": monitoring_points,
+                    }
+                except Exception as e:
+                    self.logger.error(f"处理风险因子结果时出错: {str(e)}")
+                    # 如果处理结果出错，也使用简化实现
+                    return self._fallback_asset_correlation_analysis(assets)
+            else:
+                # 如果没有有效的风险因子，使用简化实现
+                return self._fallback_asset_correlation_analysis(assets)
+
+        except Exception as e:
+            self.logger.error(f"分析资产相关性风险失败: {str(e)}")
+            return {
+                "score": 50,
+                "description": f"资产相关性分析过程中出错: {str(e)}",
+                "trend": "未知",
+                "data_points": [],
+                "recommendations": ["关注资产之间的相关性，避免投资高度相关的资产"],
+                "monitoring_points": ["监控主要资产对之间的价格关联变化"],
+            }
+
+    def _fallback_asset_correlation_analysis(self, assets) -> Dict[str, Any]:
+        """
+        简化的资产相关性分析实现，用于在正常分析方法失败时提供基本分析
+
+        Args:
+            assets: 资产集合
+
+        Returns:
+            Dict: 简化的资产相关性风险分析结果
+        """
+        self.logger.info("使用简化的资产相关性分析")
+
+        # 模拟常见资产相关性关系（实际应通过历史数据计算）
+        common_correlations = {
+            ("BTC", "ETH"): 0.85,
+            ("ETH", "BNB"): 0.75,
+            ("BTC", "BNB"): 0.7,
+            ("USDC", "USDT"): 0.98,
+            ("USDC", "DAI"): 0.95,
+            ("USDT", "DAI"): 0.94,
+            ("BTC", "USDC"): 0.2,
+            ("ETH", "USDC"): 0.25,
+            ("BTC", "SOL"): 0.65,
+            ("ETH", "SOL"): 0.72,
+        }
+
+        # 检测高相关性资产对
+        high_correlation_pairs = []
+        asset_list = list(assets)
+
+        for i in range(len(asset_list)):
+            for j in range(i + 1, len(asset_list)):
+                asset1 = asset_list[i]
+                asset2 = asset_list[j]
+
+                # 查找已知相关性或赋予默认值
+                correlation = 0.5  # 默认中等相关性
+
+                # 检查两种排序方式
+                if (asset1, asset2) in common_correlations:
+                    correlation = common_correlations[(asset1, asset2)]
+                elif (asset2, asset1) in common_correlations:
+                    correlation = common_correlations[(asset2, asset1)]
+
+                # 如果相关性高，添加到高相关性对列表
+                if correlation > 0.7:
+                    high_correlation_pairs.append(
+                        {
+                            "asset_pair": f"{asset1}-{asset2}",
+                            "correlation": round(correlation, 2),
+                        }
+                    )
+
+        # 计算相关性风险评分
+        total_pairs = (len(asset_list) * (len(asset_list) - 1)) / 2
+        high_corr_percentage = (
+            len(high_correlation_pairs) / total_pairs if total_pairs > 0 else 0
+        )
+
+        risk_score = 0
+
+        if high_corr_percentage >= 0.75:
+            risk_score = 85
+            description = "投资组合资产高度相关，系统性风险较高"
+        elif high_corr_percentage >= 0.5:
+            risk_score = 65
+            description = "投资组合资产相关性中等偏高，存在一定系统性风险"
+        elif high_corr_percentage >= 0.25:
+            risk_score = 45
+            description = "投资组合资产相关性中等，系统性风险适中"
+        else:
+            risk_score = 25
+            description = "投资组合资产相关性较低，系统性风险可控"
+
+        # 生成建议
+        recommendations = []
+        if high_corr_percentage >= 0.5:
+            recommendations.append(
+                "考虑增加与现有资产相关性低的资产，如传统资产或不同区块链的代币"
+            )
+            recommendations.append("避免增加与BTC/ETH高度相关的代币，降低系统性风险")
+        else:
+            recommendations.append("继续保持当前的资产多样化策略")
+
+        # 生成监控点
+        monitoring_points = []
+        if high_correlation_pairs:
+            pair_list = ", ".join([p["asset_pair"] for p in high_correlation_pairs[:3]])
+            monitoring_points.append(f"密切关注高相关性资产对的价格变动: {pair_list}")
+        monitoring_points.append("定期评估投资组合中各资产的相关性变化")
+
+        return {
+            "score": risk_score,
+            "description": description,
+            "trend": "稳定",
+            "data_points": high_correlation_pairs,
+            "recommendations": recommendations,
+            "monitoring_points": monitoring_points,
+        }
 
     def analyze_portfolio_risk(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1713,7 +1927,7 @@ class AiPredictor:
         根据风险因子生成市场风险建议
 
         Args:
-            data: 包含风险因子的数据，格式为 {"risk_factors": [{"factor_name": "...", "score": 75, ...}, ...]}
+            data: 包含风险因子的数据，格式为 {"risk_factors": [{"name": "...", "score": 75, ...}, ...]}
 
         Returns:
             Dict: 包含建议列表的结果
@@ -1737,7 +1951,7 @@ class AiPredictor:
 
             # 根据风险因子生成建议
             for factor in risk_factors:
-                factor_name = factor.get("factor_name", "")
+                factor_name = factor.get("name", "")
                 score = factor.get("score", 50)
 
                 if "集中度" in factor_name:
@@ -1893,7 +2107,7 @@ class AiPredictor:
         根据风险因子生成市场风险监控点
 
         Args:
-            data: 包含风险因子的数据，格式为 {"risk_factors": [{"factor_name": "...", "score": 75, ...}, ...]}
+            data: 包含风险因子的数据，格式为 {"risk_factors": [{"name": "...", "score": 75, ...}, ...]}
 
         Returns:
             Dict: 包含监控点列表的结果
@@ -1906,9 +2120,9 @@ class AiPredictor:
             if not risk_factors:
                 return {
                     "monitoring_points": [
-                        "定期检查市场整体状况和宏观经济指标",
-                        "关注重要的市场事件和政策变化",
-                        "定期评估投资组合的风险收益特征",
+                        "监控市场趋势指标，如BTC和ETH的价格走势",
+                        "关注市场主要指数和恐惧贪婪指数变化",
+                        "监控投资组合中各资产的价格相关性变化",
                     ]
                 }
 
@@ -1917,7 +2131,7 @@ class AiPredictor:
 
             # 根据风险因子生成监控点
             for factor in risk_factors:
-                factor_name = factor.get("factor_name", "")
+                factor_name = factor.get("name", "")
                 score = factor.get("score", 50)
                 data_points = factor.get("data_points", [])
 
@@ -2354,3 +2568,444 @@ class AiPredictor:
                 "trend": "稳定",
                 "data_points": [],
             }
+
+    def _get_correlation_analyzer(self):
+        """
+        懒加载方式初始化相关性分析器，避免循环引用问题
+
+        Returns:
+            CorrelationRiskAnalyzer: 相关性风险分析器实例
+        """
+        try:
+            if (
+                not hasattr(self, "_correlation_analyzer")
+                or self._correlation_analyzer is None
+            ):
+                # 延迟导入以避免循环引用
+                from app.risk_modules.correlation_risk import CorrelationRiskAnalyzer
+
+                self._correlation_analyzer = CorrelationRiskAnalyzer()
+                self.logger.info("成功初始化相关性风险分析器")
+
+            return self._correlation_analyzer
+
+        except ImportError as e:
+            self.logger.error(f"导入 CorrelationRiskAnalyzer 失败: {str(e)}")
+            # 创建后备实现
+            self._create_fallback_correlation_analyzer()
+            return self._correlation_analyzer
+
+        except Exception as e:
+            self.logger.error(f"初始化相关性风险分析器失败: {str(e)}")
+            # 创建后备实现
+            self._create_fallback_correlation_analyzer()
+            return self._correlation_analyzer
+
+    def _create_fallback_correlation_analyzer(self):
+        """
+        创建后备的相关性风险分析器实现，用于在正常初始化失败时提供基本功能
+        """
+        from app.models.domain.risk import RiskFactor, RiskType
+
+        # 创建一个简单的对象，实现必要的方法
+        class FallbackCorrelationAnalyzer:
+            async def _analyze_asset_correlation(self, positions):
+                # 返回简单的资产相关性风险因子
+                return RiskFactor(
+                    id=f"{RiskType.CORRELATION.name}.资产相关性",
+                    name="资产相关性风险",
+                    score=50.0,
+                    weight=0.4,
+                    description="使用后备分析器计算的资产相关性风险",
+                    trend="稳定",
+                    data_points=[],
+                    metadata={},
+                )
+
+            async def _analyze_protocol_correlation(self, positions):
+                # 返回简单的协议相关性风险因子
+                return RiskFactor(
+                    id=f"{RiskType.CORRELATION.name}.协议相关性",
+                    name="协议相关性风险",
+                    score=45.0,
+                    weight=0.3,
+                    description="使用后备分析器计算的协议相关性风险",
+                    trend="稳定",
+                    data_points=[],
+                    metadata={},
+                )
+
+            async def _analyze_investment_type_correlation(self, positions):
+                # 返回简单的投资类型相关性风险因子
+                return RiskFactor(
+                    id=f"{RiskType.CORRELATION.name}.投资类型相关性",
+                    name="投资类型相关性风险",
+                    score=40.0,
+                    weight=0.3,
+                    description="使用后备分析器计算的投资类型相关性风险",
+                    trend="稳定",
+                    data_points=[],
+                    metadata={},
+                )
+
+            async def get_recommendations(self, risk_factors):
+                return ["分散投资以降低相关性风险"]
+
+            async def get_monitoring_points(self, risk_factors):
+                return ["监控主要资产对之间的相关性变化"]
+
+        self._correlation_analyzer = FallbackCorrelationAnalyzer()
+        self.logger.warning("使用后备相关性风险分析器实现")
+
+    async def _analyze_protocol_correlation(
+        self, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        分析协议相关性风险
+
+        Args:
+            data: 包含协议数据的字典
+
+        Returns:
+            Dict: 协议相关性风险分析结果
+        """
+        try:
+            self.logger.info("分析协议相关性风险")
+
+            # 提取协议列表和头寸数据
+            protocols = data.get("protocols", [])
+            positions = data.get("positions", [])
+
+            # 如果协议列表和头寸数据都不足，无法进行相关性分析
+            if (not protocols or len(protocols) < 2) and (not positions):
+                self.logger.warning("检测到的协议少于2个，无法进行协议相关性分析")
+                return {
+                    "score": 30,
+                    "description": "投资组合中协议种类较少，相关性风险较低",
+                    "trend": "稳定",
+                    "data_points": [],
+                    "recommendations": [
+                        "考虑分散投资到不同的DeFi协议以降低协议集中风险"
+                    ],
+                    "monitoring_points": ["关注当前协议的安全性和更新"],
+                }
+
+            # 准备数据
+            if not positions and protocols:
+                # 如果有协议列表但没有头寸信息，创建模拟头寸
+                mock_positions = []
+                for protocol in protocols:
+                    protocol_position = {
+                        "protocol": protocol,
+                        "positions": [
+                            {
+                                "asset": "UNKNOWN",
+                                "amount": 1000,  # 假设每个协议价值相等
+                                "protocol": protocol,
+                            }
+                        ],
+                    }
+                    mock_positions.append(protocol_position)
+                positions = mock_positions
+
+            # 获取相关性分析器并使用它分析协议相关性
+            correlation_analyzer = self._get_correlation_analyzer()
+
+            if correlation_analyzer is None:
+                self.logger.error("无法获取相关性分析器，使用简化的协议相关性分析")
+                return self._fallback_protocol_correlation_analysis(protocols)
+
+            # 使用await代替asyncio.run
+            try:
+                risk_factor = await correlation_analyzer._analyze_protocol_correlation(
+                    positions
+                )
+            except Exception as analyzer_error:
+                self.logger.error(
+                    f"调用相关性分析器分析协议相关性失败: {str(analyzer_error)}"
+                )
+                return self._fallback_protocol_correlation_analysis(protocols)
+
+            # 如果 correlation_analyzer 返回了有效的风险因子
+            if risk_factor:
+                try:
+                    # 使用await代替asyncio.run
+                    recommendations = await correlation_analyzer.get_recommendations(
+                        [risk_factor]
+                    )
+                    monitoring_points = (
+                        await correlation_analyzer.get_monitoring_points([risk_factor])
+                    )
+
+                    return {
+                        "score": risk_factor.score,
+                        "description": risk_factor.description,
+                        "trend": risk_factor.trend,
+                        "data_points": risk_factor.data_points,
+                        "recommendations": recommendations,
+                        "monitoring_points": monitoring_points,
+                    }
+                except Exception as e:
+                    self.logger.error(f"处理协议相关性风险因子结果时出错: {str(e)}")
+                    return self._fallback_protocol_correlation_analysis(protocols)
+            else:
+                # 如果 correlation_analyzer 没有返回有效的风险因子，使用简化实现
+                return self._fallback_protocol_correlation_analysis(protocols)
+
+        except Exception as e:
+            self.logger.error(f"分析协议相关性风险失败: {str(e)}")
+            return {
+                "score": 50,
+                "description": "协议相关性分析过程中出错",
+                "trend": "未知",
+                "data_points": [],
+                "recommendations": ["分散投资到不同类型的DeFi协议，降低协议相关性风险"],
+                "monitoring_points": ["关注协议间的依赖关系和集成情况"],
+            }
+
+    def _fallback_protocol_correlation_analysis(self, protocols) -> Dict[str, Any]:
+        """
+        简化的协议相关性分析实现，用于在正常分析方法失败时提供基本分析
+
+        Args:
+            protocols: 协议列表
+
+        Returns:
+            Dict: 简化的协议相关性风险分析结果
+        """
+        self.logger.info("使用简化的协议相关性分析")
+
+        # 如果协议数量太少，返回低风险
+        if len(protocols) < 3:
+            return {
+                "score": 35,
+                "description": "投资组合中协议数量较少，相关性风险适中",
+                "trend": "稳定",
+                "data_points": [],
+                "recommendations": ["考虑分散投资到更多不同类型的DeFi协议"],
+                "monitoring_points": ["关注当前协议之间的依赖关系"],
+            }
+
+        # 对于多个协议，返回中等风险
+        return {
+            "score": 45,
+            "description": "协议相关性风险中等，建议关注协议间依赖关系",
+            "trend": "稳定",
+            "data_points": [],
+            "recommendations": ["分散投资到不同类型的DeFi协议，降低协议相关性风险"],
+            "monitoring_points": ["关注协议间的依赖关系和集成情况"],
+        }
+
+    async def _analyze_investment_type_correlation(
+        self, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        分析投资类型相关性风险
+
+        Args:
+            data: 包含投资类型数据的字典
+
+        Returns:
+            Dict: 投资类型相关性风险分析结果
+        """
+        try:
+            self.logger.info("分析投资类型相关性风险")
+
+            # 提取投资类型和头寸数据
+            investment_types = data.get("investment_types", {})
+            positions = data.get("positions", [])
+
+            # 如果数据不足，无法进行相关性分析
+            if (not investment_types or len(investment_types) < 2) and (not positions):
+                self.logger.warning(
+                    "检测到的投资类型少于2个，无法进行投资类型相关性分析"
+                )
+                return {
+                    "score": 30,
+                    "description": "投资组合中投资类型较少，相关性风险较低",
+                    "trend": "稳定",
+                    "data_points": [],
+                    "recommendations": ["考虑尝试不同的投资策略以分散风险"],
+                    "monitoring_points": ["关注当前投资类型的表现"],
+                }
+
+            # 准备数据
+            if not positions and investment_types:
+                # 如果有投资类型信息但没有头寸，创建模拟头寸
+                mock_positions = []
+                for invest_type, type_info in investment_types.items():
+                    # 获取投资类型名称
+                    invest_type_name = (
+                        type_info.get("name")
+                        if isinstance(type_info, dict)
+                        else (
+                            self._get_invest_type_name(int(invest_type))
+                            if invest_type.isdigit()
+                            else "未知类型"
+                        )
+                    )
+
+                    # 创建模拟头寸
+                    protocol_position = {
+                        "protocol": "mixed",
+                        "positions": [
+                            {
+                                "asset": "UNKNOWN",
+                                "amount": 1000,  # 假设每个投资类型价值相等
+                                "invest_type": (
+                                    int(invest_type) if invest_type.isdigit() else 0
+                                ),
+                                "invest_type_name": invest_type_name,
+                            }
+                        ],
+                    }
+                    mock_positions.append(protocol_position)
+                positions = mock_positions
+
+            # 获取相关性分析器并使用它分析投资类型相关性
+            correlation_analyzer = self._get_correlation_analyzer()
+
+            if correlation_analyzer is None:
+                self.logger.error("无法获取相关性分析器，使用简化的投资类型相关性分析")
+                return self._fallback_investment_type_correlation_analysis(
+                    investment_types
+                )
+
+            # 使用await代替asyncio.run
+            try:
+                risk_factor = (
+                    await correlation_analyzer._analyze_investment_type_correlation(
+                        positions
+                    )
+                )
+            except Exception as analyzer_error:
+                self.logger.error(
+                    f"调用相关性分析器分析投资类型相关性失败: {str(analyzer_error)}"
+                )
+                return self._fallback_investment_type_correlation_analysis(
+                    investment_types
+                )
+
+            # 如果 correlation_analyzer 返回了有效的风险因子
+            if risk_factor:
+                try:
+                    # 使用await代替asyncio.run
+                    recommendations = await correlation_analyzer.get_recommendations(
+                        [risk_factor]
+                    )
+                    monitoring_points = (
+                        await correlation_analyzer.get_monitoring_points([risk_factor])
+                    )
+
+                    return {
+                        "score": risk_factor.score,
+                        "description": risk_factor.description,
+                        "trend": risk_factor.trend,
+                        "data_points": risk_factor.data_points,
+                        "recommendations": recommendations,
+                        "monitoring_points": monitoring_points,
+                    }
+                except Exception as e:
+                    self.logger.error(f"处理投资类型风险因子结果时出错: {str(e)}")
+                    return self._fallback_investment_type_correlation_analysis(
+                        investment_types
+                    )
+            else:
+                # 如果 correlation_analyzer 没有返回有效的风险因子，使用简化实现
+                return self._fallback_investment_type_correlation_analysis(
+                    investment_types
+                )
+
+        except Exception as e:
+            self.logger.error(f"分析投资类型相关性风险失败: {str(e)}")
+            return {
+                "score": 50,
+                "description": "投资类型相关性分析过程中出错",
+                "trend": "未知",
+                "data_points": [],
+                "recommendations": ["考虑增加不同类型的投资策略，降低相关性风险"],
+                "monitoring_points": ["定期评估不同投资类型的相关性"],
+            }
+
+    def _fallback_investment_type_correlation_analysis(
+        self, investment_types
+    ) -> Dict[str, Any]:
+        """
+        简化的投资类型相关性分析实现，用于在正常分析方法失败时提供基本分析
+
+        Args:
+            investment_types: 投资类型字典
+
+        Returns:
+            Dict: 简化的投资类型相关性风险分析结果
+        """
+        self.logger.info("使用简化的投资类型相关性分析")
+
+        # 投资类型的常见相关性（简化模型）
+        type_correlations = {
+            ("流动性挖矿", "单币存款"): 0.6,
+            ("流动性挖矿", "借贷"): 0.4,
+            ("单币存款", "借贷"): 0.5,
+            ("杠杆交易", "期权"): 0.75,
+            ("杠杆交易", "借贷"): 0.65,
+            ("期权", "借贷"): 0.45,
+        }
+
+        # 如果投资类型数量太少，返回低风险
+        if len(investment_types) < 3:
+            return {
+                "score": 35,
+                "description": "投资组合中投资类型较少，相关性风险适中",
+                "trend": "稳定",
+                "data_points": [],
+                "recommendations": ["考虑尝试更多样化的投资策略"],
+                "monitoring_points": ["关注当前投资类型间的风险传导"],
+            }
+
+        # 提取投资类型名称
+        type_names = []
+        for invest_type, type_info in investment_types.items():
+            type_name = (
+                type_info.get("name")
+                if isinstance(type_info, dict)
+                else f"类型{invest_type}"
+            )
+            type_names.append(type_name)
+
+        # 评估相关性风险
+        high_correlation_count = 0
+        for i in range(len(type_names)):
+            for j in range(i + 1, len(type_names)):
+                type1 = type_names[i]
+                type2 = type_names[j]
+
+                # 查找已知相关性
+                correlation = 0.4  # 默认中等相关性
+                if (type1, type2) in type_correlations:
+                    correlation = type_correlations[(type1, type2)]
+                elif (type2, type1) in type_correlations:
+                    correlation = type_correlations[(type2, type1)]
+
+                if correlation > 0.6:
+                    high_correlation_count += 1
+
+        # 根据高相关性数量评估风险
+        if high_correlation_count > 2:
+            score = 65
+            description = "投资类型相关性较高，存在风险集中问题"
+            recommendations = ["考虑分散投资到相关性较低的不同投资类型"]
+            monitoring_points = ["关注高相关性投资类型间的风险传导"]
+        else:
+            score = 40
+            description = "投资类型多样化程度适中，风险相对平衡"
+            recommendations = ["考虑增加不同类型的投资策略，提高组合韧性"]
+            monitoring_points = ["监控不同投资类型在极端市场环境下的表现相关性"]
+
+        return {
+            "score": score,
+            "description": description,
+            "trend": "稳定",
+            "data_points": [],
+            "recommendations": recommendations,
+            "monitoring_points": monitoring_points,
+        }

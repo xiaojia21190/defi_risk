@@ -25,6 +25,7 @@ from app.models.domain.ai import AiAnalysis, AiPrediction, AiInsight, AiRequest
 from app.core.config import settings
 import requests
 from app.services.ai_predictor import AiPredictor
+import inspect
 
 
 logger = logging.getLogger("defi_risk.ai_service")
@@ -752,7 +753,8 @@ class AiService:
                 # 将分析类型传递给数据
                 correlation_data = data.copy()
                 correlation_data["correlation_type"] = analysis_type
-                result = predictor.analyze_correlation_risk(correlation_data)
+                # 显式使用await调用协程函数
+                result = await predictor.analyze_correlation_risk(correlation_data)
 
             # 检查是否有直接映射的方法
             elif analysis_type in ANALYSIS_METHOD_MAPPING:
@@ -761,7 +763,12 @@ class AiService:
                     getattr(predictor, method_name)
                 ):
                     method = getattr(predictor, method_name)
-                    result = method(data)
+                    # 检查方法是否是协程函数
+                    if inspect.iscoroutinefunction(method):
+                        result = await method(data)
+                    else:
+                        # 普通函数直接调用，不使用await
+                        result = method(data)
 
             # 处理协议历史分析
             elif analysis_type == "protocol_history":
@@ -769,7 +776,9 @@ class AiService:
                     # 添加分析类型标记
                     protocol_data = data.copy()
                     protocol_data["analysis_focus"] = "history"
-                    result = predictor.analyze_defi_protocol_risk(protocol_data)
+                    result = predictor.analyze_defi_protocol_risk(
+                        protocol_data
+                    )  # 这是普通函数
                 else:
                     result = self._get_default_result(analysis_type)
 
@@ -777,7 +786,7 @@ class AiService:
             elif hasattr(predictor, "analyze_generic") and callable(
                 getattr(predictor, "analyze_generic")
             ):
-                result = predictor.analyze_generic(analysis_type, data)
+                result = predictor.analyze_generic(analysis_type, data)  # 这是普通函数
 
             # 如果没有合适的方法，使用OpenAI API
             else:

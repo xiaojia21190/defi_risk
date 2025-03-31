@@ -3,11 +3,8 @@ from typing import Dict, List, Any, Optional
 import logging
 from app.models.domain.risk import (
     RiskFactor,
-    RiskAssessment,
     RiskAnalysisResult,
-    RiskType,
 )
-from app.services.ai_predictor import AiPredictor
 
 
 class RiskAnalyzerBase(ABC):
