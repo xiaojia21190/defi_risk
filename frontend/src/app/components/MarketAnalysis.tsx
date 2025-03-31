@@ -107,7 +107,7 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ marketPredictions, load
   return (
     <Card className="relative w-full">
       <CardHeader>
-        <div className="flex justify-between items-center">
+        <div className="flex items-center justify-between">
           <div>
             <CardTitle>市场分析</CardTitle>
             <CardDescription>{selectedAsset} 市场趋势和预测</CardDescription>
@@ -119,27 +119,29 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ marketPredictions, load
                 setSelectedAsset(e.target.value);
                 onAssetSelect(e.target.value);
               }}
-              className="px-3 py-1 text-sm rounded-md border border-input bg-background"
+              className="px-3 py-1 text-sm border rounded-md border-input bg-background"
             >
               <option value="ETH">ETH</option>
+              <option value="BTC">BTC</option>
+              <option value="USDC">USDC</option>
             </select>
           </div>
         </div>
       </CardHeader>
       <CardContent>
         {isLoading ? (
-          <div className="flex flex-col justify-center items-center py-12">
-            <Loader2 className="mb-4 w-10 h-10 animate-spin text-primary" />
+          <div className="flex flex-col items-center justify-center py-12">
+            <Loader2 className="w-10 h-10 mb-4 animate-spin text-primary" />
             <p className="text-muted-foreground">加载市场数据中...</p>
           </div>
         ) : (
           <div className="space-y-6">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              <div className="p-4 rounded-lg border bg-card/50">
+              <div className="p-4 border rounded-lg bg-card/50">
                 <div className="mb-1 text-sm text-muted-foreground">价格趋势</div>
                 <div className="flex items-center">
-                  <Badge variant={priceChange > 0 ? "default" : priceChange < 0 ? "destructive" : "secondary"} className="flex gap-1 items-center">
-                    <span className="flex gap-1 items-center">
+                  <Badge variant={priceChange > 0 ? "default" : priceChange < 0 ? "destructive" : "secondary"} className="flex items-center gap-1">
+                    <span className="flex items-center gap-1">
                       {getTrendIcon(priceChange)}
                       {priceChange > 0 ? "看涨" : priceChange < 0 ? "看跌" : "中性"}
                     </span>
@@ -148,17 +150,17 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ marketPredictions, load
                 <div className="mt-2 text-xs text-muted-foreground">24h变化: {priceChange.toFixed(2)}%</div>
               </div>
 
-              <div className="p-4 rounded-lg border bg-card/50">
+              <div className="p-4 border rounded-lg bg-card/50">
                 <div className="mb-1 text-sm text-muted-foreground">预测价格</div>
                 <div className="flex items-center">
-                  <Badge variant="default" className="flex gap-1 items-center">
-                    <span className="flex gap-1 items-center">{formatCurrency(prediction?.predictions[0]?.value || 0)}</span>
+                  <Badge variant="default" className="flex items-center gap-1">
+                    <span className="flex items-center gap-1">{formatCurrency(prediction?.predictions[0]?.value || 0)}</span>
                   </Badge>
                 </div>
                 <div className="mt-2 text-xs text-muted-foreground">置信度: {(prediction?.confidence * 100).toFixed(1)}%</div>
               </div>
 
-              <div className="p-4 rounded-lg border bg-card/50">
+              <div className="p-4 border rounded-lg bg-card/50">
                 <div className="mb-1 text-sm text-muted-foreground">当前价格</div>
                 <div className="text-sm font-medium">{formatCurrency(Object.values(prediction?.price_history.price || {}).pop() || 0)}</div>
                 <div className="mt-2 text-xs text-muted-foreground">更新时间: {new Date(prediction?.timestamp || "").toLocaleString()}</div>
@@ -166,7 +168,7 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ marketPredictions, load
             </div>
 
             <div>
-              <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium">价格走势</h3>
                 <div className="flex gap-2">
                   <Button variant={timeFrame === "24h" ? "default" : "outline"} size="sm" onClick={() => setTimeFrame("24h")}>
@@ -220,11 +222,11 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ marketPredictions, load
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
               <div>
                 <h3 className="mb-4 text-lg font-medium">市场洞察</h3>
-                <div className="p-4 rounded-lg border bg-card/50">
+                <div className="p-4 border rounded-lg bg-card/50">
                   <div className="space-y-2">
                     {prediction?.insights && prediction.insights.length > 0 ? (
                       prediction.insights.map((insight, index) => (
-                        <div key={index} className="flex gap-2 items-start">
+                        <div key={index} className="flex items-start gap-2">
                           <div className="min-w-4 mt-0.5">
                             <div className="w-1.5 h-1.5 rounded-full bg-primary" />
                           </div>
@@ -240,11 +242,11 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ marketPredictions, load
 
               <div>
                 <h3 className="mb-4 text-lg font-medium">投资建议</h3>
-                <div className="p-4 rounded-lg border bg-card/50">
+                <div className="p-4 border rounded-lg bg-card/50">
                   <div className="space-y-2">
                     {prediction?.recommendations && prediction.recommendations.length > 0 ? (
                       prediction.recommendations.map((recommendation, index) => (
-                        <div key={index} className="flex gap-2 items-start">
+                        <div key={index} className="flex items-start gap-2">
                           <div className="min-w-4 mt-0.5">
                             <div className="w-1.5 h-1.5 rounded-full bg-primary" />
                           </div>

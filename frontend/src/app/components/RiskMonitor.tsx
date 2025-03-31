@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Portfolio, MarketPrediction, WalletRiskAssessment } from "../services/api";
+import { Portfolio, MarketPrediction, WalletRiskAssessment, WalletMarketRisk } from "../services/api";
 import { AlertTriangle, Shield, TrendingDown, Zap, BarChart3, DollarSign, Percent, ChartBar, Target, Wallet, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -20,12 +20,13 @@ interface Position {
 interface RiskMonitorProps {
   portfolio: Portfolio;
   riskAnalysis?: WalletRiskAssessment | null;
+  marketRisk?: WalletMarketRisk | null;
   analyzing: boolean;
   completed: boolean;
   onAnalyze: () => Promise<void>;
 }
 
-const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, analyzing, completed, onAnalyze }) => {
+const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, marketRisk, analyzing, completed, onAnalyze }) => {
   if (!portfolio) {
     return (
       <Card>
@@ -71,7 +72,25 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, anal
 
   // 处理风险因素数据
   const getRiskFactors = () => {
-    // 如果有来自API的风险因素，优先使用这些数据
+    // 如果有市场风险数据，优先使用它
+    if (marketRisk?.factors && marketRisk.factors.length > 0) {
+      return marketRisk.factors.map((factor) => {
+        const severity = factor.score > 60 ? "high" : factor.score > 30 ? "medium" : "low";
+        const icon = severity === "high" ? <AlertTriangle className="w-4 h-4" /> : severity === "medium" ? <BarChart3 className="w-4 h-4" /> : <Shield className="w-4 h-4" />;
+
+        return {
+          name: factor.name,
+          description: factor.description,
+          severity,
+          icon,
+          score: factor.score,
+          weight: factor.weight,
+          trend: factor.trend,
+        };
+      });
+    }
+
+    // 如果有来自API的风险因素，使用这些数据
     if (riskAnalysis?.risk_factors && riskAnalysis.risk_factors.length > 0) {
       return riskAnalysis.risk_factors.map((factor) => {
         const severity = factor.score > 60 ? "high" : factor.score > 30 ? "medium" : "low";
@@ -168,6 +187,45 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, anal
 
   const riskFactors = getRiskFactors();
 
+  // 获取监控点
+  const getMonitoringPoints = () => {
+    if (marketRisk?.monitoring_points && marketRisk.monitoring_points.length > 0) {
+      return marketRisk.monitoring_points;
+    }
+
+    if (riskAnalysis?.monitoring_points && riskAnalysis.monitoring_points.length > 0) {
+      return riskAnalysis.monitoring_points;
+    }
+
+    return ["定期评估投资组合风险", "关注资产相关性变化", "监控市场波动情况", "关注杠杆头寸风险"];
+  };
+
+  // 获取AI洞察
+  const getAiInsights = () => {
+    if (marketRisk?.ai_insights && marketRisk.ai_insights.length > 0) {
+      return marketRisk.ai_insights;
+    }
+
+    return [];
+  };
+
+  // 获取建议
+  const getRecommendations = () => {
+    if (marketRisk?.recommendations && marketRisk.recommendations.length > 0) {
+      return marketRisk.recommendations;
+    }
+
+    if (riskAnalysis?.recommendations && riskAnalysis.recommendations.length > 0) {
+      return riskAnalysis.recommendations;
+    }
+
+    if (portfolio?.recommendations && portfolio.recommendations.length > 0) {
+      return portfolio.recommendations;
+    }
+
+    return [];
+  };
+
   if (!portfolio.risk_level) {
     return (
       <Card>
@@ -198,196 +256,246 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, anal
     <Card>
       <CardHeader>
         <CardTitle>详细风险分析</CardTitle>
-        <CardDescription>
-          当前风险等级: <Badge variant={color as any}>{level}</Badge>
-        </CardDescription>
+        <CardDescription>{marketRisk ? `${marketRisk.risk_type} 类型风险分析，目标: ${marketRisk.target}` : "投资组合综合风险分析"}</CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="space-y-6">
-          {/* 风险分数和等级 */}
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium">风险等级</p>
-              <div className="flex items-center gap-2">
-                <h3 className="text-2xl font-bold">{portfolio.risk_level}</h3>
-                {riskAnalysis?.risk_score !== undefined && (
-                  <Badge variant="outline" className="text-sm">
-                    风险评分: {riskAnalysis.risk_score}/100
-                  </Badge>
-                )}
-              </div>
-            </div>
-            <Button onClick={onAnalyze} disabled={analyzing} variant="outline" size="sm">
-              {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4 mr-2" />}
-              {analyzing ? "分析中..." : "重新分析"}
-            </Button>
-          </div>
-
-          {/* 风险进度条 */}
-          <div className="mb-4">
-            <div className="w-full bg-muted/30 rounded-full h-2.5 mb-2">
-              <div className={`h-2.5 rounded-full ${color === "destructive" ? "bg-destructive" : color === "warning" ? "bg-warning" : "bg-success"}`} style={{ width: `${riskScore * 100}%` }} />
-            </div>
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>低风险</span>
-              <span>中风险</span>
-              <span>高风险</span>
+      <CardContent className="space-y-6">
+        {/* 风险分数和等级 */}
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium">风险等级</p>
+            <div className="flex items-center gap-2">
+              <h3 className="text-2xl font-bold">{portfolio.risk_level}</h3>
+              {riskAnalysis?.risk_score !== undefined && (
+                <Badge variant="outline" className="text-sm">
+                  风险评分: {riskAnalysis.risk_score}/100
+                </Badge>
+              )}
             </div>
           </div>
+          <Button onClick={onAnalyze} disabled={analyzing} variant="outline" size="sm">
+            {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4 mr-2" />}
+            {analyzing ? "分析中..." : "重新分析"}
+          </Button>
+        </div>
 
-          {/* 风险因素 */}
-          {riskFactors.length > 0 && (
-            <div>
-              <h3 className="mb-3 text-sm font-medium">风险因素</h3>
-              <div className="space-y-3">
-                {riskFactors.map((factor, index) => (
-                  <div key={index} className={`p-3 rounded-lg border ${factor.severity === "high" ? "border-destructive/50 bg-destructive/10" : factor.severity === "medium" ? "border-warning/50 bg-warning/10" : "border-success/50 bg-success/10"}`}>
-                    <div className="flex items-start justify-between">
-                      <div className="flex gap-3 items-start">
-                        <div className={`p-1.5 rounded-full ${factor.severity === "high" ? "bg-destructive/20 text-destructive" : factor.severity === "medium" ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}`}>{factor.icon}</div>
-                        <div>
-                          <h4 className="text-sm font-medium">{factor.name}</h4>
-                          <p className="mt-1 text-xs text-muted-foreground">{factor.description}</p>
-                        </div>
+        {/* 风险进度条 */}
+        <div className="mb-4">
+          <div className="w-full bg-muted/30 rounded-full h-2.5 mb-2">
+            <div className={`h-2.5 rounded-full ${color === "destructive" ? "bg-destructive" : color === "warning" ? "bg-warning" : "bg-success"}`} style={{ width: `${riskScore * 100}%` }} />
+          </div>
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>低风险</span>
+            <span>中风险</span>
+            <span>高风险</span>
+          </div>
+        </div>
+
+        {/* 风险因素 */}
+        {riskFactors.length > 0 && (
+          <div>
+            <h3 className="mb-3 text-sm font-medium">风险因素</h3>
+            <div className="space-y-3">
+              {riskFactors.map((factor, index) => (
+                <div key={index} className={`p-3 rounded-lg border ${factor.severity === "high" ? "border-destructive/50 bg-destructive/10" : factor.severity === "medium" ? "border-warning/50 bg-warning/10" : "border-success/50 bg-success/10"}`}>
+                  <div className="flex items-start justify-between">
+                    <div className="flex gap-3 items-start">
+                      <div className={`p-1.5 rounded-full ${factor.severity === "high" ? "bg-destructive/20 text-destructive" : factor.severity === "medium" ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}`}>{factor.icon}</div>
+                      <div>
+                        <h4 className="text-sm font-medium">{factor.name}</h4>
+                        <p className="mt-1 text-xs text-muted-foreground">{factor.description}</p>
                       </div>
-                      <div className="flex flex-col items-end">
-                        <Badge variant="outline" className={`${factor.score > 60 ? "border-destructive text-destructive" : factor.score > 30 ? "border-amber-500 text-amber-500" : "border-green-500 text-green-500"}`}>
-                          {factor.score}/100
+                    </div>
+                    <div className="flex flex-col items-end">
+                      <Badge variant="outline" className={`${factor.score > 60 ? "border-destructive text-destructive" : factor.score > 30 ? "border-amber-500 text-amber-500" : "border-green-500 text-green-500"}`}>
+                        {factor.score}/100
+                      </Badge>
+                      <p className="mt-1 text-xs text-muted-foreground">权重: {(factor.weight * 100).toFixed(0)}%</p>
+                      {factor.trend && (
+                        <Badge variant="outline" className="mt-1">
+                          {factor.trend === "上升" ? "↑ " : factor.trend === "下降" ? "↓ " : "→ "}
+                          {factor.trend}
                         </Badge>
-                        <p className="mt-1 text-xs text-muted-foreground">权重: {(factor.weight * 100).toFixed(0)}%</p>
-                        {factor.trend && (
-                          <Badge variant="outline" className="mt-1">
-                            {factor.trend === "上升" ? "↑ " : factor.trend === "下降" ? "↓ " : "→ "}
-                            {factor.trend}
-                          </Badge>
-                        )}
-                      </div>
+                      )}
                     </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
+        )}
 
-          {/* 风险指标 */}
-          {riskAnalysis?.risk_metrics && Object.keys(riskAnalysis.risk_metrics).length > 0 && (
-            <div>
-              <h3 className="mb-3 text-sm font-medium">风险指标</h3>
-              <div className="grid grid-cols-2 gap-3">
-                {Object.entries(riskAnalysis.risk_metrics).map(([key, value], index) => (
-                  <div key={index} className="p-3 rounded-md border">
-                    <p className="text-xs text-muted-foreground">{key}</p>
-                    <p className="text-sm font-medium">{value}</p>
-                  </div>
-                ))}
-              </div>
+        {/* 风险指标 */}
+        {riskAnalysis?.risk_metrics && Object.keys(riskAnalysis.risk_metrics).length > 0 && (
+          <div>
+            <h3 className="mb-3 text-sm font-medium">风险指标</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {Object.entries(riskAnalysis.risk_metrics).map(([key, value], index) => (
+                <div key={index} className="p-3 rounded-md border">
+                  <p className="text-xs text-muted-foreground">{key}</p>
+                  <p className="text-sm font-medium">{value}</p>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
+        )}
 
-          {/* 优化建议 */}
-          {portfolio.recommendations && portfolio.recommendations.length > 0 && (
-            <div>
-              <h3 className="mb-3 text-sm font-medium">优化建议</h3>
-              <ul className="space-y-2 text-sm">
-                {portfolio.recommendations.map((recommendation, index) => (
-                  <li key={index} className="flex gap-2 items-start">
-                    <div className="min-w-4 mt-0.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-primary" />
-                    </div>
-                    <span className="text-muted-foreground">{recommendation}</span>
+        {/* 显示市场风险的AI洞察 */}
+        {getAiInsights().length > 0 && (
+          <div className="space-y-2">
+            <h3 className="text-lg font-medium">AI 洞察</h3>
+            <Card className="p-4 border-l-4 border-l-primary">
+              <ul className="list-disc pl-5 space-y-1">
+                {getAiInsights().map((insight, index) => (
+                  <li key={index} className="text-sm">
+                    {insight}
                   </li>
                 ))}
               </ul>
-            </div>
-          )}
+            </Card>
+          </div>
+        )}
 
-          {/* 预警信息 */}
-          {riskAnalysis?.warnings && riskAnalysis.warnings.length > 0 && (
-            <div>
-              <h3 className="mb-3 text-sm font-medium">预警信息</h3>
-              <div className="space-y-2">
-                {riskAnalysis.warnings.map((warning, index) => (
-                  <Alert key={index} variant="destructive" className="py-2">
-                    <AlertTriangle className="w-4 h-4" />
-                    <AlertDescription>{warning}</AlertDescription>
-                  </Alert>
-                ))}
+        {/* 风险建议 */}
+        <div className="space-y-2">
+          <h3 className="text-lg font-medium">风险管理建议</h3>
+          <Card className="p-4 border-l-4 border-l-primary">
+            <ul className="list-disc pl-5 space-y-1">
+              {getRecommendations().map((recommendation, index) => (
+                <li key={index} className="text-sm">
+                  {recommendation}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </div>
+
+        {/* 风险监控点 */}
+        <div className="space-y-2">
+          <h3 className="text-lg font-medium">关键监控点</h3>
+          <Card className="p-4 border-l-4 border-l-primary">
+            <ul className="list-disc pl-5 space-y-1">
+              {getMonitoringPoints().map((point, index) => (
+                <li key={index} className="text-sm">
+                  {point}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </div>
+
+        {/* 头寸摘要信息 */}
+        {riskAnalysis?.positions_summary && (
+          <div>
+            <h3 className="mb-3 text-sm font-medium">头寸摘要</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 rounded-md border">
+                <p className="text-xs text-muted-foreground">总价值</p>
+                <p className="text-sm font-medium">${riskAnalysis.positions_summary.total_value.toLocaleString()}</p>
+              </div>
+              <div className="p-3 rounded-md border">
+                <p className="text-xs text-muted-foreground">头寸数量</p>
+                <p className="text-sm font-medium">{riskAnalysis.positions_summary.position_count}</p>
               </div>
             </div>
-          )}
 
-          {/* 监控点 */}
-          {riskAnalysis?.monitoring_points && riskAnalysis.monitoring_points.length > 0 && (
-            <div>
-              <h3 className="mb-3 text-sm font-medium">监控点</h3>
-              <Table>
-                <TableBody>
-                  {riskAnalysis.monitoring_points.map((point, index) => (
-                    <TableRow key={index}>
-                      <TableCell className="text-sm">{point}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
+            {riskAnalysis.positions_summary.protocols.length > 0 && (
+              <div className="mt-3">
+                <p className="text-xs text-muted-foreground">协议 ({riskAnalysis.positions_summary.protocols.length})</p>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {riskAnalysis.positions_summary.protocols.map((protocol, index) => {
+                    // 尝试查找该协议的资产，以获取其图标
+                    let protocolLogo = "";
+                    if (portfolio && portfolio.positions) {
+                      const protocolPosition = portfolio.positions.find((pos) => pos.protocol === protocol);
+                      if (protocolPosition && protocolPosition.tokenList && protocolPosition.tokenList.length > 0) {
+                        protocolLogo = protocolPosition.tokenList[0].tokenLogo;
+                      }
+                    }
 
-          {/* 头寸摘要信息 */}
-          {riskAnalysis?.positions_summary && (
-            <div>
-              <h3 className="mb-3 text-sm font-medium">头寸摘要</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 rounded-md border">
-                  <p className="text-xs text-muted-foreground">总价值</p>
-                  <p className="text-sm font-medium">${riskAnalysis.positions_summary.total_value.toLocaleString()}</p>
-                </div>
-                <div className="p-3 rounded-md border">
-                  <p className="text-xs text-muted-foreground">头寸数量</p>
-                  <p className="text-sm font-medium">{riskAnalysis.positions_summary.position_count}</p>
-                </div>
-              </div>
+                    // 协议图标的颜色映射
+                    const protocolColors: { [key: string]: string } = {
+                      Aethir: "bg-blue-100",
+                      "Data Ownership Protocol": "bg-green-100",
+                      sophon: "bg-purple-100",
+                    };
 
-              {riskAnalysis.positions_summary.protocols.length > 0 && (
-                <div className="mt-3">
-                  <p className="text-xs text-muted-foreground">协议 ({riskAnalysis.positions_summary.protocols.length})</p>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {riskAnalysis.positions_summary.protocols.map((protocol, index) => (
-                      <Badge key={index} variant="secondary" className="text-xs">
+                    return (
+                      <Badge key={index} variant="secondary" className={`text-xs flex items-center gap-1 py-1 px-2 ${!protocolLogo ? protocolColors[protocol] || "" : ""}`}>
+                        {protocolLogo ? (
+                          <img
+                            src={protocolLogo}
+                            alt={`${protocol} logo`}
+                            className="w-4 h-4 rounded-full"
+                            onError={(e) => {
+                              // 如果图片加载失败，隐藏图片元素
+                              (e.target as HTMLImageElement).style.display = "none";
+                            }}
+                          />
+                        ) : (
+                          <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${protocolColors[protocol] || "bg-gray-100"}`}>{protocol.charAt(0)}</div>
+                        )}
                         {protocol}
                       </Badge>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
-              )}
+              </div>
+            )}
 
-              {riskAnalysis.positions_summary.assets.length > 0 && (
-                <div className="mt-3">
-                  <p className="text-xs text-muted-foreground">资产 ({riskAnalysis.positions_summary.assets.length})</p>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {riskAnalysis.positions_summary.assets.map((asset, index) => (
-                      <Badge key={index} variant="outline" className="text-xs">
+            {riskAnalysis.positions_summary.assets.length > 0 && (
+              <div className="mt-3">
+                <p className="text-xs text-muted-foreground">资产 ({riskAnalysis.positions_summary.assets.length})</p>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {riskAnalysis.positions_summary.assets.map((asset, index) => {
+                    // 尝试查找资产的Logo
+                    let assetLogo = "";
+                    if (portfolio && portfolio.positions) {
+                      for (const position of portfolio.positions) {
+                        if (position.tokenList) {
+                          const token = position.tokenList.find((t) => t.tokenSymbol === asset);
+                          if (token && token.tokenLogo) {
+                            assetLogo = token.tokenLogo;
+                            break;
+                          }
+                        }
+                      }
+                    }
+
+                    return (
+                      <Badge key={index} variant="outline" className="text-xs flex items-center gap-1 py-1 px-2">
+                        {assetLogo && (
+                          <img
+                            src={assetLogo}
+                            alt={`${asset} logo`}
+                            className="w-4 h-4 rounded-full"
+                            onError={(e) => {
+                              // 如果图片加载失败，隐藏图片元素
+                              (e.target as HTMLImageElement).style.display = "none";
+                            }}
+                          />
+                        )}
                         {asset}
                       </Badge>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
+        )}
 
-          {/* AI增强标记 */}
-          {riskAnalysis?.ai_enhanced && (
-            <div className="mt-4">
-              <Badge className="bg-blue-600 hover:bg-blue-700">
-                <Zap className="w-3 h-3 mr-1" />
-                AI增强分析
-              </Badge>
-            </div>
-          )}
+        {/* AI增强标记 */}
+        {riskAnalysis?.ai_enhanced && (
+          <div className="mt-4">
+            <Badge className="bg-blue-600 hover:bg-blue-700">
+              <Zap className="w-3 h-3 mr-1" />
+              AI增强分析
+            </Badge>
+          </div>
+        )}
 
-          {/* 分析时间戳 */}
-          {riskAnalysis?.analysis_timestamp && <div className="mt-4 text-xs text-muted-foreground">分析时间: {new Date(riskAnalysis.analysis_timestamp).toLocaleString()}</div>}
-        </div>
+        {/* 分析时间戳 */}
+        {riskAnalysis?.analysis_timestamp && <div className="mt-4 text-xs text-muted-foreground">分析时间: {new Date(riskAnalysis.analysis_timestamp).toLocaleString()}</div>}
       </CardContent>
     </Card>
   );

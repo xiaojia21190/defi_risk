@@ -17,9 +17,10 @@ export interface Position {
   tokenList?: Array<{
     tokenSymbol: string;
     tokenLogo: string;
+    tokenType?: string;
     coinAmount: string;
     currencyAmount: string;
-    tokenPrecision: string;
+    tokenPrecision: string | number;
     tokenAddress: string;
     network: string;
   }>;
@@ -118,7 +119,7 @@ export interface Alert {
   type: string;
   severity: string;
   message: string;
-  timestamp: number;
+  timestamp: string;
   protocol: string;
   asset: string;
   details?: {
@@ -146,7 +147,16 @@ export interface Alert {
     low_price?: number;
     weighted_avg_price?: number;
     volume?: number;
+    data_source?: string;
   };
+}
+
+export interface AlertsResponse {
+  alerts: Alert[];
+  alert_count: number;
+  wallet_address: string;
+  timestamp: string;
+  is_demo_data: boolean;
 }
 
 export interface RiskAssessment {
@@ -198,6 +208,29 @@ export interface WalletRiskAssessment {
   ai_enhanced?: boolean;
   timestamp?: string;
   is_demo_data?: boolean;
+}
+
+// 钱包市场风险接口
+export interface WalletMarketRisk {
+  risk_type: string; // "MARKET"
+  target: string; // "portfolio"
+  score: number;
+  risk_level: string; // "LOW", "MEDIUM", "HIGH"
+  factors: Array<{
+    name: string;
+    score: number;
+    weight: number;
+    description: string;
+    trend: string;
+    data_points: any[];
+  }>;
+  recommendations: string[];
+  monitoring_points: string[];
+  ai_insights: string[];
+  ai_available: boolean;
+  wallet_address: string;
+  timestamp: string;
+  is_demo_data: boolean;
 }
 
 export interface DemoStatus {
@@ -501,8 +534,8 @@ class ApiService {
 
   async getAlerts(address: string): Promise<Alert[]> {
     try {
-      const data = await this.fetchJson<Alert[]>(`/wallet/${address}/alerts`);
-      return data;
+      const response = await this.fetchJson<AlertsResponse>(`/wallet/${address}/alerts`);
+      return response.alerts || [];
     } catch (error) {
       console.error('Error fetching alerts:', error);
       return [];
@@ -515,6 +548,21 @@ class ApiService {
       return data;
     } catch (error) {
       console.error('Error analyzing wallet risk:', error);
+      throw error;
+    }
+  }
+
+  // 获取钱包市场风险分析
+  async getWalletMarketRisk(address: string): Promise<WalletMarketRisk> {
+    if (!address || address === '') {
+      throw new Error('未提供钱包地址');
+    }
+
+    try {
+      const response = await this.fetchJson<any>(`/wallet/${address}/market-risk`);
+      return response;
+    } catch (error) {
+      console.error('获取钱包市场风险分析失败:', error);
       throw error;
     }
   }
@@ -537,7 +585,9 @@ class ApiService {
         throw new Error('Failed to fetch demo alerts');
       }
 
-      return await response.json();
+      const data = await response.json();
+      // 处理新的响应格式，返回alerts数组
+      return data.alerts || data;
     } catch (error) {
       console.error('Error fetching demo alerts:', error);
       throw error;

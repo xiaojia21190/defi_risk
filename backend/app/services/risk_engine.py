@@ -1420,8 +1420,15 @@ class RiskEngine:
 
         Args:
             wallet_address: 钱包地址
-            scenario: 市场情景类型，支持 market_crash(市场崩盘)、bull_run(牛市)、
-                     defi_hack(DeFi黑客事件)、regulatory_crackdown(监管打击)
+            scenario: 市场情景类型，支持:
+                     - market_crash: 市场崩盘
+                     - bull_run: 牛市
+                     - defi_hack: DeFi黑客事件
+                     - regulatory_crackdown: 监管打击
+                     - stablecoin_depeg: 稳定币脱锚
+                     - chain_outage: 公链故障
+                     - liquidity_crisis: 流动性危机
+                     - inflation_surge: 通胀飙升
             blockchain_service: 区块链服务实例，用于获取钱包头寸
 
         Returns:
@@ -1436,6 +1443,10 @@ class RiskEngine:
                 "bull_run",
                 "defi_hack",
                 "regulatory_crackdown",
+                "stablecoin_depeg",
+                "chain_outage",
+                "liquidity_crisis",
+                "inflation_surge",
             ]
             if scenario not in valid_scenarios:
                 self.logger.warning(
@@ -1458,7 +1469,362 @@ class RiskEngine:
                 }
 
             # 计算当前总价值
-            current_total = sum(position.get("usd_value", 0) for position in positions)
+            current_total = 0
+            for position in positions:
+                # 尝试获取usd_value或amount字段
+                if "usd_value" in position:
+                    current_total += float(position.get("usd_value", 0))
+                elif "amount" in position:
+                    current_total += float(position.get("amount", 0))
+                # 处理嵌套结构
+                elif "positions" in position and isinstance(
+                    position["positions"], list
+                ):
+                    for pos in position["positions"]:
+                        if hasattr(pos, "amount"):
+                            current_total += float(pos.amount)
+                        elif isinstance(pos, dict):
+                            current_total += float(pos.get("amount", 0))
+
+            # 创建基础资产价格变化映射
+            # 扩展为更全面的加密资产列表
+            base_assets = {
+                # 主要公链代币
+                "BTC": {
+                    "large_cap": True,
+                    "type": "layer1",
+                    "volatility": 0.8,
+                    "market_corr": 0.9,
+                },
+                "ETH": {
+                    "large_cap": True,
+                    "type": "layer1",
+                    "volatility": 0.9,
+                    "market_corr": 0.95,
+                },
+                "SOL": {
+                    "large_cap": True,
+                    "type": "layer1",
+                    "volatility": 1.2,
+                    "market_corr": 0.85,
+                },
+                "BNB": {
+                    "large_cap": True,
+                    "type": "exchange",
+                    "volatility": 0.85,
+                    "market_corr": 0.8,
+                },
+                "ADA": {
+                    "large_cap": True,
+                    "type": "layer1",
+                    "volatility": 1.1,
+                    "market_corr": 0.8,
+                },
+                "XRP": {
+                    "large_cap": True,
+                    "type": "payment",
+                    "volatility": 0.9,
+                    "market_corr": 0.7,
+                },
+                "AVAX": {
+                    "large_cap": True,
+                    "type": "layer1",
+                    "volatility": 1.25,
+                    "market_corr": 0.85,
+                },
+                "DOT": {
+                    "large_cap": True,
+                    "type": "layer1",
+                    "volatility": 1.15,
+                    "market_corr": 0.8,
+                },
+                "MATIC": {
+                    "large_cap": True,
+                    "type": "layer2",
+                    "volatility": 1.2,
+                    "market_corr": 0.85,
+                },
+                "NEAR": {
+                    "large_cap": False,
+                    "type": "layer1",
+                    "volatility": 1.3,
+                    "market_corr": 0.8,
+                },
+                "FTM": {
+                    "large_cap": False,
+                    "type": "layer1",
+                    "volatility": 1.4,
+                    "market_corr": 0.85,
+                },
+                "ATOM": {
+                    "large_cap": False,
+                    "type": "layer1",
+                    "volatility": 1.1,
+                    "market_corr": 0.8,
+                },
+                # DeFi协议代币
+                "UNI": {
+                    "large_cap": True,
+                    "type": "defi",
+                    "volatility": 1.3,
+                    "market_corr": 0.9,
+                },
+                "AAVE": {
+                    "large_cap": True,
+                    "type": "defi",
+                    "volatility": 1.35,
+                    "market_corr": 0.9,
+                },
+                "COMP": {
+                    "large_cap": False,
+                    "type": "defi",
+                    "volatility": 1.4,
+                    "market_corr": 0.9,
+                },
+                "MKR": {
+                    "large_cap": False,
+                    "type": "defi",
+                    "volatility": 1.3,
+                    "market_corr": 0.85,
+                },
+                "SNX": {
+                    "large_cap": False,
+                    "type": "defi",
+                    "volatility": 1.5,
+                    "market_corr": 0.9,
+                },
+                "CRV": {
+                    "large_cap": False,
+                    "type": "defi",
+                    "volatility": 1.45,
+                    "market_corr": 0.9,
+                },
+                "SUSHI": {
+                    "large_cap": False,
+                    "type": "defi",
+                    "volatility": 1.6,
+                    "market_corr": 0.85,
+                },
+                "BAL": {
+                    "large_cap": False,
+                    "type": "defi",
+                    "volatility": 1.5,
+                    "market_corr": 0.85,
+                },
+                "LINK": {
+                    "large_cap": True,
+                    "type": "oracle",
+                    "volatility": 1.2,
+                    "market_corr": 0.8,
+                },
+                # 稳定币
+                "USDC": {
+                    "large_cap": True,
+                    "type": "stablecoin",
+                    "volatility": 0.05,
+                    "market_corr": 0.1,
+                },
+                "USDT": {
+                    "large_cap": True,
+                    "type": "stablecoin",
+                    "volatility": 0.08,
+                    "market_corr": 0.15,
+                },
+                "DAI": {
+                    "large_cap": True,
+                    "type": "stablecoin",
+                    "volatility": 0.1,
+                    "market_corr": 0.2,
+                },
+                "BUSD": {
+                    "large_cap": True,
+                    "type": "stablecoin",
+                    "volatility": 0.07,
+                    "market_corr": 0.15,
+                },
+                "TUSD": {
+                    "large_cap": False,
+                    "type": "stablecoin",
+                    "volatility": 0.12,
+                    "market_corr": 0.2,
+                },
+                "FRAX": {
+                    "large_cap": False,
+                    "type": "stablecoin",
+                    "volatility": 0.15,
+                    "market_corr": 0.25,
+                },
+                # NFT相关代币
+                "APE": {
+                    "large_cap": False,
+                    "type": "nft",
+                    "volatility": 1.7,
+                    "market_corr": 0.75,
+                },
+                "SAND": {
+                    "large_cap": False,
+                    "type": "metaverse",
+                    "volatility": 1.6,
+                    "market_corr": 0.8,
+                },
+                "MANA": {
+                    "large_cap": False,
+                    "type": "metaverse",
+                    "volatility": 1.6,
+                    "market_corr": 0.8,
+                },
+            }
+
+            # 协议特定影响
+            protocol_impacts = {
+                "Aave": {
+                    "market_crash": {
+                        "risk_multiplier": 1.2,
+                        "liquidation_threshold_change": -0.05,
+                    },
+                    "bull_run": {
+                        "risk_multiplier": 0.8,
+                        "liquidation_threshold_change": 0.02,
+                    },
+                    "defi_hack": {"risk_multiplier": 1.8, "affected_chance": 0.3},
+                    "regulatory_crackdown": {
+                        "risk_multiplier": 1.3,
+                        "compliance_score": 0.7,
+                    },
+                    "stablecoin_depeg": {
+                        "risk_multiplier": 1.4,
+                        "affected_assets": ["USDC", "USDT", "DAI"],
+                    },
+                    "chain_outage": {
+                        "risk_multiplier": 1.1,
+                        "affected_chains": ["Ethereum", "Polygon", "Avalanche"],
+                    },
+                    "liquidity_crisis": {
+                        "risk_multiplier": 1.5,
+                        "withdrawal_haircut": 0.2,
+                    },
+                    "inflation_surge": {
+                        "risk_multiplier": 1.1,
+                        "interest_rate_change": 0.15,
+                    },
+                },
+                "Compound": {
+                    "market_crash": {
+                        "risk_multiplier": 1.25,
+                        "liquidation_threshold_change": -0.04,
+                    },
+                    "bull_run": {
+                        "risk_multiplier": 0.85,
+                        "liquidation_threshold_change": 0.01,
+                    },
+                    "defi_hack": {"risk_multiplier": 1.7, "affected_chance": 0.25},
+                    "regulatory_crackdown": {
+                        "risk_multiplier": 1.35,
+                        "compliance_score": 0.7,
+                    },
+                    "stablecoin_depeg": {
+                        "risk_multiplier": 1.45,
+                        "affected_assets": ["USDC", "DAI"],
+                    },
+                    "chain_outage": {
+                        "risk_multiplier": 1.05,
+                        "affected_chains": ["Ethereum"],
+                    },
+                    "liquidity_crisis": {
+                        "risk_multiplier": 1.4,
+                        "withdrawal_haircut": 0.18,
+                    },
+                    "inflation_surge": {
+                        "risk_multiplier": 1.15,
+                        "interest_rate_change": 0.2,
+                    },
+                },
+                "Uniswap": {
+                    "market_crash": {"risk_multiplier": 1.1, "slippage_increase": 0.15},
+                    "bull_run": {"risk_multiplier": 0.7, "volume_multiplier": 2.0},
+                    "defi_hack": {"risk_multiplier": 1.4, "affected_chance": 0.15},
+                    "regulatory_crackdown": {
+                        "risk_multiplier": 1.5,
+                        "compliance_score": 0.5,
+                    },
+                    "stablecoin_depeg": {
+                        "risk_multiplier": 1.3,
+                        "slippage_increase": 0.3,
+                    },
+                    "chain_outage": {
+                        "risk_multiplier": 1.2,
+                        "affected_chains": ["Ethereum", "Optimism", "Arbitrum"],
+                    },
+                    "liquidity_crisis": {
+                        "risk_multiplier": 1.6,
+                        "slippage_increase": 0.5,
+                    },
+                    "inflation_surge": {
+                        "risk_multiplier": 0.9,
+                        "volume_multiplier": 1.2,
+                    },
+                },
+                "Curve": {
+                    "market_crash": {
+                        "risk_multiplier": 1.1,
+                        "peg_stability_impact": -0.1,
+                    },
+                    "bull_run": {"risk_multiplier": 0.8, "volume_multiplier": 1.5},
+                    "defi_hack": {"risk_multiplier": 1.5, "affected_chance": 0.2},
+                    "regulatory_crackdown": {
+                        "risk_multiplier": 1.4,
+                        "compliance_score": 0.55,
+                    },
+                    "stablecoin_depeg": {
+                        "risk_multiplier": 1.7,
+                        "peg_stability_impact": -0.3,
+                    },
+                    "chain_outage": {
+                        "risk_multiplier": 1.15,
+                        "affected_chains": ["Ethereum", "Optimism", "Fantom"],
+                    },
+                    "liquidity_crisis": {
+                        "risk_multiplier": 1.5,
+                        "withdrawal_haircut": 0.15,
+                    },
+                    "inflation_surge": {
+                        "risk_multiplier": 1.05,
+                        "interest_rate_change": 0.1,
+                    },
+                },
+                # 设置其他协议的默认影响
+                "OTHER": {
+                    "market_crash": {
+                        "risk_multiplier": 1.3,
+                        "liquidation_threshold_change": -0.05,
+                    },
+                    "bull_run": {
+                        "risk_multiplier": 0.9,
+                        "liquidation_threshold_change": 0.0,
+                    },
+                    "defi_hack": {"risk_multiplier": 1.6, "affected_chance": 0.4},
+                    "regulatory_crackdown": {
+                        "risk_multiplier": 1.4,
+                        "compliance_score": 0.5,
+                    },
+                    "stablecoin_depeg": {
+                        "risk_multiplier": 1.5,
+                        "affected_assets": ["All"],
+                    },
+                    "chain_outage": {
+                        "risk_multiplier": 1.2,
+                        "affected_chains": ["All"],
+                    },
+                    "liquidity_crisis": {
+                        "risk_multiplier": 1.5,
+                        "withdrawal_haircut": 0.25,
+                    },
+                    "inflation_surge": {
+                        "risk_multiplier": 1.2,
+                        "interest_rate_change": 0.2,
+                    },
+                },
+            }
 
             # 设置不同情景的参数
             if scenario == "market_crash":
@@ -1466,175 +1832,365 @@ class RiskEngine:
                 description = (
                     "模拟加密市场急剧下跌30-50%的情景下，您的投资组合可能受到的影响"
                 )
-                asset_changes = {
-                    "ETH": -0.45,  # ETH下跌45%
-                    "BTC": -0.40,  # BTC下跌40%
-                    "USDC": -0.02,  # USDC轻微下跌(脱锚风险)
-                    "USDT": -0.05,  # USDT轻微下跌
-                    "DAI": -0.08,  # DAI下跌
-                    "OTHER": -0.50,  # 其他代币下跌50%
-                }
+                asset_changes = {}
+
+                # 根据资产特性动态生成价格变化
+                for asset, properties in base_assets.items():
+                    volatility = properties["volatility"]
+                    market_corr = properties["market_corr"]
+                    asset_type = properties["type"]
+
+                    # 基础下跌幅度，根据资产类型调整
+                    if asset_type == "stablecoin":
+                        # 稳定币轻微受影响
+                        change = -0.02 * volatility
+                    elif asset_type in ["layer1", "layer2"]:
+                        # 公链代币受影响较大
+                        change = -0.4 * volatility * market_corr
+                    elif asset_type == "defi":
+                        # DeFi代币受影响更大
+                        change = -0.5 * volatility * market_corr
+                    elif asset_type in ["metaverse", "nft"]:
+                        # 元宇宙和NFT相关代币受影响最大
+                        change = -0.6 * volatility * market_corr
+                    else:
+                        # 其他代币
+                        change = -0.45 * volatility * market_corr
+
+                    asset_changes[asset] = max(
+                        -0.95, min(0, change)
+                    )  # 限制在0到-95%之间
+
+                # 为未列出的资产设置默认变化率
+                default_change = -0.5
                 liquidation_risk = "高"
                 impermanent_loss = "极高"
+                market_sentiment = "恐慌"
+                market_direction = "下跌"
+                volatility_level = "极高"
 
             elif scenario == "bull_run":
                 title = "牛市情景模拟"
                 description = (
                     "模拟加密市场强势上涨50-100%的情景下，您的投资组合可能获得的收益"
                 )
-                asset_changes = {
-                    "ETH": 0.80,  # ETH上涨80%
-                    "BTC": 0.60,  # BTC上涨60%
-                    "USDC": 0.0,  # 稳定币保持不变
-                    "USDT": 0.0,  # 稳定币保持不变
-                    "DAI": 0.0,  # 稳定币保持不变
-                    "OTHER": 1.20,  # 其他代币上涨120%
-                }
+                asset_changes = {}
+
+                for asset, properties in base_assets.items():
+                    volatility = properties["volatility"]
+                    market_corr = properties["market_corr"]
+                    asset_type = properties["type"]
+
+                    if asset_type == "stablecoin":
+                        # 稳定币保持稳定
+                        change = 0.0
+                    elif asset_type in ["layer1", "layer2"]:
+                        # 公链代币大幅上涨
+                        change = 0.7 * volatility * market_corr
+                    elif asset_type == "defi":
+                        # DeFi代币可能涨得更多
+                        change = 0.9 * volatility * market_corr
+                    elif asset_type in ["metaverse", "nft"]:
+                        # 元宇宙和NFT相关代币涨幅可能最大
+                        change = 1.1 * volatility * market_corr
+                    else:
+                        # 其他代币
+                        change = 0.8 * volatility * market_corr
+
+                    asset_changes[asset] = max(0, min(3.0, change))  # 限制在0到300%之间
+
+                default_change = 0.8
                 liquidation_risk = "极低"
                 impermanent_loss = "中等"
+                market_sentiment = "贪婪"
+                market_direction = "上涨"
+                volatility_level = "高"
 
             elif scenario == "defi_hack":
                 title = "DeFi协议黑客攻击情景模拟"
                 description = (
                     "模拟主要DeFi协议遭受黑客攻击的情景下，您的投资组合可能面临的风险"
                 )
-                asset_changes = {
-                    "ETH": -0.15,  # ETH下跌15%
-                    "BTC": -0.10,  # BTC下跌10%
-                    "USDC": -0.01,  # USDC几乎不变
-                    "USDT": -0.01,  # USDT几乎不变
-                    "DAI": -0.03,  # DAI轻微下跌
-                    "OTHER": -0.25,  # 其他代币下跌25%
-                }
+                asset_changes = {}
+
+                for asset, properties in base_assets.items():
+                    volatility = properties["volatility"]
+                    asset_type = properties["type"]
+
+                    if asset_type == "stablecoin":
+                        # 稳定币轻微受影响
+                        change = -0.01 * volatility
+                    elif asset_type == "defi":
+                        # DeFi代币受影响最大
+                        change = -0.3 * volatility
+                    else:
+                        # 其他代币受到中等影响
+                        change = -0.15 * volatility
+
+                    asset_changes[asset] = max(-0.7, min(0, change))
+
+                default_change = -0.25
                 liquidation_risk = "中等"
                 impermanent_loss = "高"
+                market_sentiment = "恐惧"
+                market_direction = "下跌"
+                volatility_level = "高"
 
-            else:  # regulatory_crackdown
+            elif scenario == "regulatory_crackdown":
                 title = "监管打击情景模拟"
                 description = "模拟全球监管机构对加密货币实施严厉监管的情景下，您的投资组合可能面临的影响"
-                asset_changes = {
-                    "ETH": -0.30,  # ETH下跌30%
-                    "BTC": -0.25,  # BTC下跌25%
-                    "USDC": -0.15,  # USDC下跌15%
-                    "USDT": -0.20,  # USDT下跌20%
-                    "DAI": -0.10,  # DAI下跌10%
-                    "OTHER": -0.40,  # 其他代币下跌40%
-                }
+                asset_changes = {}
+
+                for asset, properties in base_assets.items():
+                    volatility = properties["volatility"]
+                    asset_type = properties["type"]
+
+                    if asset_type == "stablecoin":
+                        # 稳定币受到较大影响，因为监管往往针对稳定币
+                        change = -0.1 * volatility
+                    elif asset_type == "defi":
+                        # DeFi代币受影响较大
+                        change = -0.35 * volatility
+                    elif asset_type == "exchange":
+                        # 交易所代币受到严重影响
+                        change = -0.4 * volatility
+                    else:
+                        # 其他代币
+                        change = -0.25 * volatility
+
+                    asset_changes[asset] = max(-0.8, min(0, change))
+
+                default_change = -0.3
                 liquidation_risk = "高"
                 impermanent_loss = "高"
+                market_sentiment = "恐惧"
+                market_direction = "下跌"
+                volatility_level = "高"
+
+            elif scenario == "stablecoin_depeg":
+                title = "稳定币脱锚情景模拟"
+                description = (
+                    "模拟主要稳定币与美元脱锚的情景下，您的投资组合可能面临的风险"
+                )
+                asset_changes = {}
+
+                # 选择一个主要稳定币作为"脱锚"的目标
+                depeg_target = "USDT"  # 可以是USDC、USDT、DAI等
+
+                for asset, properties in base_assets.items():
+                    volatility = properties["volatility"]
+                    asset_type = properties["type"]
+
+                    if asset == depeg_target:
+                        # 目标稳定币大幅脱锚
+                        change = -0.5
+                    elif asset_type == "stablecoin":
+                        # 其他稳定币受到连带影响
+                        change = -0.1 * volatility
+                    elif asset_type == "defi":
+                        # DeFi代币受到较大影响
+                        change = -0.25 * volatility
+                    else:
+                        # 其他代币
+                        change = -0.15 * volatility
+
+                    asset_changes[asset] = max(-0.95, min(0, change))
+
+                default_change = -0.2
+                liquidation_risk = "极高"
+                impermanent_loss = "极高"
+                market_sentiment = "恐慌"
+                market_direction = "下跌"
+                volatility_level = "极高"
+
+            elif scenario == "chain_outage":
+                title = "公链故障情景模拟"
+                description = (
+                    "模拟主要公链(如Solana或Polygon)发生技术故障或网络拥堵的情景"
+                )
+                asset_changes = {}
+
+                # 选择一个主要公链作为"故障"的目标
+                outage_target = "SOL"  # 可以是ETH、SOL、AVAX等
+                affected_assets = ["SOL", "RAY", "SRM"]  # 受影响的相关生态资产
+
+                for asset, properties in base_assets.items():
+                    volatility = properties["volatility"]
+
+                    if asset == outage_target:
+                        # 目标公链大幅下跌
+                        change = -0.3
+                    elif asset in affected_assets:
+                        # 相关生态资产受到较大影响
+                        change = -0.25 * volatility
+                    else:
+                        # 其他资产轻微受影响
+                        change = -0.05 * volatility
+
+                    asset_changes[asset] = max(-0.6, min(0, change))
+
+                default_change = -0.1
+                liquidation_risk = "中等"
+                impermanent_loss = "中等"
+                market_sentiment = "谨慎"
+                market_direction = "下跌"
+                volatility_level = "中等"
+
+            elif scenario == "liquidity_crisis":
+                title = "流动性危机情景模拟"
+                description = (
+                    "模拟市场流动性枯竭，大量投资者集中抛售导致无法有效成交的情景"
+                )
+                asset_changes = {}
+
+                for asset, properties in base_assets.items():
+                    volatility = properties["volatility"]
+                    market_corr = properties["market_corr"]
+                    large_cap = properties["large_cap"]
+
+                    if large_cap:
+                        # 大市值资产受影响较小
+                        change = -0.2 * volatility * market_corr
+                    else:
+                        # 小市值资产受影响更大
+                        change = -0.4 * volatility * market_corr
+
+                    asset_changes[asset] = max(-0.9, min(0, change))
+
+                default_change = -0.3
+                liquidation_risk = "极高"
+                impermanent_loss = "极高"
+                market_sentiment = "恐慌"
+                market_direction = "下跌"
+                volatility_level = "极高"
+
+            else:  # inflation_surge
+                title = "通胀飙升情景模拟"
+                description = "模拟全球通胀率急剧上升，中央银行大幅加息的情景下，您的投资组合可能面临的影响"
+                asset_changes = {}
+
+                for asset, properties in base_assets.items():
+                    volatility = properties["volatility"]
+                    asset_type = properties["type"]
+
+                    if asset_type == "stablecoin":
+                        # 稳定币价值下降
+                        change = -0.05 * volatility
+                    elif asset == "BTC":
+                        # 比特币作为"数字黄金"可能受益
+                        change = 0.1 * volatility
+                    else:
+                        # 其他资产受到负面影响
+                        change = -0.15 * volatility
+
+                    asset_changes[asset] = max(-0.5, min(0.3, change))
+
+                default_change = -0.1
+                liquidation_risk = "中等"
+                impermanent_loss = "中等"
+                market_sentiment = "谨慎"
+                market_direction = "混合"
+                volatility_level = "高"
 
             # 计算情景下的资产价值变化
             simulated_positions = []
             simulated_total = 0
             liquidations = []
+            protocol_impacts_map = {}
 
+            # 处理每个头寸的模拟
             for position in positions:
-                asset = position.get("asset", "OTHER").upper()
-                if "/" in asset:
-                    asset = asset.split("/")[0]  # 处理类似 "ETH/USDC" 格式的资产名称
-
-                current_value = position.get("usd_value", 0)
-
-                # 获取资产价格变化率
-                change_rate = asset_changes.get(asset, asset_changes.get("OTHER", -0.3))
-
-                # 如果是借贷头寸，检查是否会被清算
-                is_borrowing = position.get("type", "") == "borrowing"
-                health_factor = position.get("health_factor", 2.0)
-
-                new_value = current_value * (1 + change_rate)
-                simulated_total += new_value
-
-                # 检查是否会被清算
-                will_liquidate = False
-                if is_borrowing and health_factor < 1.2 and change_rate < 0:
-                    # 简化模型：如果健康因子低，且市场下跌，则可能被清算
-                    liquidation_chance = min(
-                        0.9, 1.0 - health_factor + abs(change_rate)
+                # 检查是否为嵌套结构
+                if "positions" in position and isinstance(position["positions"], list):
+                    protocol = position.get("protocol", "Unknown")
+                    protocol_impact = protocol_impacts.get(
+                        protocol, protocol_impacts.get("OTHER", {})
                     )
-                    import random
+                    protocol_impacts_map[protocol] = protocol_impact.get(scenario, {})
 
-                    will_liquidate = random.random() < liquidation_chance
+                    # 处理平台级别的头寸（如协议头寸）
+                    platform_simulated_total = 0
+                    platform_current_total = 0
+                    platform_inner_positions = []
 
-                if will_liquidate:
-                    liquidations.append(
-                        {
-                            "asset": position.get("asset", ""),
-                            "protocol": position.get("protocol", ""),
-                            "value_usd": current_value,
-                            "health_factor": health_factor,
-                        }
-                    )
+                    # 遍历内部头寸
+                    for pos in position.get("positions", []):
+                        inner_simulated_value, inner_current_value, inner_position = (
+                            self._simulate_position_value(
+                                pos,
+                                asset_changes,
+                                scenario,
+                                protocol_impact,
+                                default_change,
+                            )
+                        )
+                        if inner_position.get("liquidated", False):
+                            liquidations.append(inner_position)
 
-                simulated_positions.append(
-                    {
-                        "asset": position.get("asset", ""),
-                        "protocol": position.get("protocol", ""),
-                        "type": position.get("type", ""),
-                        "current_value_usd": current_value,
-                        "simulated_value_usd": new_value,
-                        "change_usd": new_value - current_value,
-                        "change_percent": change_rate * 100,
-                        "liquidated": will_liquidate,
-                    }
-                )
+                        platform_simulated_total += inner_simulated_value
+                        platform_current_total += inner_current_value
+                        platform_inner_positions.append(inner_position)
 
-            # 使用AI预测器生成风险缓解建议
-            risk_mitigation = []
-            if self.ai_predictor:
-                try:
-                    # 准备AI分析上下文
-                    analysis_context = {
-                        "scenario": scenario,
-                        "positions": simulated_positions,
-                        "liquidations": liquidations,
-                        "value_change_percent": (
-                            (simulated_total - current_total) / current_total * 100
-                            if current_total > 0
+                    # 计算平台级别的影响
+                    platform_position = {
+                        "protocol": protocol,
+                        "type": "protocol",
+                        "current_value_usd": platform_current_total,
+                        "simulated_value_usd": platform_simulated_total,
+                        "change_usd": platform_simulated_total - platform_current_total,
+                        "change_percent": (
+                            (platform_simulated_total / platform_current_total - 1)
+                            * 100
+                            if platform_current_total > 0
                             else 0
                         ),
+                        "positions": platform_inner_positions,
+                        "risk_multiplier": protocol_impacts_map.get(protocol, {}).get(
+                            "risk_multiplier", 1.0
+                        ),
                     }
-
-                    # 调用AI预测器的analyze_generic方法
-                    ai_result = self.ai_predictor.analyze_generic(
-                        "market_scenario", analysis_context
+                    simulated_positions.append(platform_position)
+                    simulated_total += platform_simulated_total
+                else:
+                    # 单个资产头寸
+                    sim_value, curr_value, sim_position = self._simulate_position_value(
+                        position,
+                        asset_changes,
+                        scenario,
+                        protocol_impacts.get(
+                            position.get("protocol", "Unknown"),
+                            protocol_impacts.get("OTHER", {}),
+                        ),
+                        default_change,
                     )
+                    if sim_position.get("liquidated", False):
+                        liquidations.append(sim_position)
 
-                    if isinstance(ai_result, dict) and "recommendations" in ai_result:
-                        risk_mitigation = ai_result.get("recommendations", [])
-                except Exception as e:
-                    self.logger.error(f"生成AI风险缓解建议时出错: {str(e)}")
+                    simulated_positions.append(sim_position)
+                    simulated_total += sim_value
 
-            # 如果AI未能生成建议，使用默认建议
-            if not risk_mitigation:
-                if scenario == "market_crash":
-                    risk_mitigation = [
-                        "减少借贷头寸，降低杠杆率",
-                        "增加稳定币储备，准备在市场低点买入",
-                        "设置止损点，防止进一步下跌",
-                        "增加抵押品，防止清算",
-                    ]
-                elif scenario == "bull_run":
-                    risk_mitigation = [
-                        "定期获利了结，锁定部分盈利",
-                        "调整资产配置，防止过度集中",
-                        "关注市场情绪指标，警惕市场过热",
-                        "考虑对冲策略，防范突然回调",
-                    ]
-                elif scenario == "defi_hack":
-                    risk_mitigation = [
-                        "分散资产到多个协议，降低单一协议风险",
-                        "优先使用经过多次审计的成熟协议",
-                        "关注协议安全更新和公告",
-                        "考虑使用去中心化保险产品",
-                    ]
-                else:  # regulatory_crackdown
-                    risk_mitigation = [
-                        "关注各国监管动态，适时调整投资策略",
-                        "增加合规性高的资产比例",
-                        "考虑分散到不同司法管辖区的协议",
-                        "准备应急撤离计划，确保资金安全",
-                    ]
+            # 获取风险缓解建议
+            risk_mitigation = self._get_scenario_risk_mitigation(
+                scenario,
+                simulated_positions,
+                liquidations,
+                current_total,
+                simulated_total,
+                wallet_address,
+                protocol_impacts_map,
+            )
+
+            # 根据情景计算市场风险指标
+            market_metrics = self._calculate_market_risk_metrics(
+                scenario,
+                current_total,
+                simulated_total,
+                simulated_positions,
+                liquidations,
+                market_sentiment,
+                market_direction,
+                volatility_level,
+            )
 
             # 组装结果
             result = {
@@ -1655,40 +2211,16 @@ class RiskEngine:
                 "risk_factors": {
                     "liquidation_risk": liquidation_risk,
                     "impermanent_loss": impermanent_loss,
-                    "market_correlation": (
-                        "高" if scenario in ["market_crash", "bull_run"] else "中"
-                    ),
+                    "market_sentiment": market_sentiment,
+                    "market_direction": market_direction,
+                    "volatility_level": volatility_level,
                     "protocol_risk": "高" if scenario == "defi_hack" else "中",
                     "regulatory_risk": (
                         "高" if scenario == "regulatory_crackdown" else "中"
                     ),
                 },
                 "risk_mitigation": risk_mitigation,
-                "simulation_metrics": {
-                    "max_drawdown": (
-                        max(
-                            abs(
-                                (simulated_total - current_total) / current_total * 100
-                            ),
-                            0,
-                        )
-                        if current_total > 0
-                        else 0
-                    ),
-                    "risk_level": (
-                        "高"
-                        if simulated_total < current_total * 0.7
-                        else "中" if simulated_total < current_total else "低"
-                    ),
-                    "affected_protocols": len(
-                        set(
-                            p.get("protocol", "")
-                            for p in simulated_positions
-                            if p.get("change_percent", 0) < -20
-                        )
-                    ),
-                    "liquidation_count": len(liquidations),
-                },
+                "simulation_metrics": market_metrics,
                 "timestamp": datetime.utcnow().isoformat(),
                 "is_ai_enhanced": self.ai_predictor is not None,
             }
@@ -1704,3 +2236,413 @@ class RiskEngine:
                 "error": f"模拟市场情景失败: {str(e)}",
                 "timestamp": datetime.utcnow().isoformat(),
             }
+
+    def _simulate_position_value(
+        self, position, asset_changes, scenario, protocol_impact, default_change
+    ):
+        """
+        模拟头寸价值变化
+
+        Args:
+            position: 头寸对象
+            asset_changes: 资产价格变化
+            scenario: 情景类型
+            protocol_impact: 协议特定影响
+            default_change: 默认价格变化
+
+        Returns:
+            tuple: (模拟价值, 当前价值, 模拟头寸对象)
+        """
+        # 获取资产信息
+        if hasattr(position, "asset"):
+            asset = position.asset
+            current_value = float(position.amount)
+            position_type = getattr(position, "invest_type", 1)
+            protocol = getattr(position, "protocol", "Unknown")
+            health_factor = getattr(position, "health_factor", 2.0)
+        else:
+            asset = position.get("asset", "Unknown")
+            current_value = float(position.get("usd_value", position.get("amount", 0)))
+            position_type = position.get("invest_type", position.get("type", 1))
+            protocol = position.get("protocol", "Unknown")
+            health_factor = position.get("health_factor", 2.0)
+
+        # 处理资产名称，提取主资产
+        if "/" in asset:
+            primary_asset = asset.split("/")[0].upper()
+        else:
+            primary_asset = asset.upper()
+
+        # 获取资产价格变化率
+        change_rate = asset_changes.get(primary_asset)
+        if change_rate is None:
+            # 尝试匹配资产前缀
+            for key in asset_changes:
+                if primary_asset.startswith(key):
+                    change_rate = asset_changes[key]
+                    break
+
+        # 如果仍未找到匹配，使用默认变化率
+        if change_rate is None:
+            change_rate = default_change
+
+        # 获取协议风险倍数
+        risk_multiplier = protocol_impact.get(scenario, {}).get("risk_multiplier", 1.0)
+
+        # 调整价格变化率
+        adjusted_change_rate = change_rate * risk_multiplier
+
+        # 计算新价值
+        new_value = current_value * (1 + adjusted_change_rate)
+
+        # 检查是否为借贷头寸，判断清算风险
+        is_borrowing = False
+        collateral_asset = None
+        debt_asset = None
+
+        # 根据头寸类型判断是否为借贷
+        if isinstance(position_type, int) and position_type == 6:  # 假设6代表借贷
+            is_borrowing = True
+        elif isinstance(position_type, str) and position_type.lower() in [
+            "borrowing",
+            "borrow",
+            "loan",
+            "debt",
+        ]:
+            is_borrowing = True
+
+        # 获取抵押物和债务资产
+        if hasattr(position, "collateral"):
+            collateral_asset = position.collateral
+        elif isinstance(position, dict) and "collateral" in position:
+            collateral_asset = position["collateral"]
+
+        if hasattr(position, "debt"):
+            debt_asset = position.debt
+        elif isinstance(position, dict) and "debt" in position:
+            debt_asset = position["debt"]
+
+        # 清算计算
+        will_liquidate = False
+        liquidation_threshold = 0.75  # 默认清算阈值
+        new_health_factor = health_factor
+
+        if is_borrowing:
+            # 如果有特定的清算阈值变化
+            threshold_change = protocol_impact.get(scenario, {}).get(
+                "liquidation_threshold_change", 0
+            )
+            liquidation_threshold += threshold_change
+
+            # 如果有特定的抵押物和债务资产，计算新的健康因子
+            if collateral_asset and debt_asset:
+                collateral_change = asset_changes.get(
+                    collateral_asset.upper(), default_change
+                )
+                debt_change = asset_changes.get(debt_asset.upper(), default_change)
+
+                # 计算新的健康因子
+                new_health_factor = (
+                    health_factor * (1 + collateral_change) / (1 + debt_change)
+                )
+            else:
+                # 简化计算：根据健康因子和市场变化估算清算风险
+                new_health_factor = health_factor + (
+                    adjusted_change_rate * health_factor
+                )
+
+            # 判断是否会被清算
+            will_liquidate = new_health_factor < 1.0
+
+            # 如果是黑客事件，增加随机清算概率
+            if scenario == "defi_hack":
+                hack_chance = protocol_impact.get(scenario, {}).get(
+                    "affected_chance", 0.2
+                )
+                import random
+
+                will_liquidate = will_liquidate or random.random() < hack_chance
+
+        # 构建模拟头寸对象
+        simulated_position = {
+            "asset": asset,
+            "protocol": protocol,
+            "type": "borrowing" if is_borrowing else "investment",
+            "current_value_usd": current_value,
+            "simulated_value_usd": new_value,
+            "change_usd": new_value - current_value,
+            "change_percent": adjusted_change_rate * 100,
+            "liquidated": will_liquidate,
+            "health_factor": (
+                {"current": health_factor, "simulated": new_health_factor}
+                if is_borrowing
+                else None
+            ),
+            "risk_multiplier": risk_multiplier,
+        }
+
+        return new_value, current_value, simulated_position
+
+    def _get_scenario_risk_mitigation(
+        self,
+        scenario,
+        positions,
+        liquidations,
+        current_total,
+        simulated_total,
+        wallet_address,
+        protocol_impacts,
+    ):
+        """获取情景风险缓解建议"""
+        # 使用AI预测器生成风险缓解建议
+        risk_mitigation = []
+        if self.ai_predictor:
+            try:
+                # 准备AI分析上下文
+                analysis_context = {
+                    "scenario": scenario,
+                    "positions": positions,
+                    "liquidations": liquidations,
+                    "value_change_percent": (
+                        (simulated_total - current_total) / current_total * 100
+                        if current_total > 0
+                        else 0
+                    ),
+                    "protocol_impacts": protocol_impacts,
+                    "wallet_address": wallet_address,
+                }
+
+                # 调用AI预测器的analyze_generic方法
+                ai_result = self.ai_predictor.analyze_generic(
+                    "market_scenario", analysis_context
+                )
+
+                if isinstance(ai_result, dict) and "recommendations" in ai_result:
+                    risk_mitigation = ai_result.get("recommendations", [])
+            except Exception as e:
+                self.logger.error(f"生成AI风险缓解建议时出错: {str(e)}")
+
+        # 如果AI未能生成建议，使用更详细的情景特定建议
+        if not risk_mitigation:
+            if scenario == "market_crash":
+                risk_mitigation = [
+                    "减少借贷头寸，降低杠杆率",
+                    "增加稳定币储备，准备在市场低点买入",
+                    "设置止损点，防止进一步下跌",
+                    "增加抵押品，防止清算",
+                    "关注市场动态，避免在下跌过程中恐慌性抛售",
+                    "重点保护高价值头寸，必要时优先卖出小额资产",
+                ]
+
+                # 根据是否有清算风险，添加特定建议
+                if liquidations:
+                    risk_mitigation.append(
+                        f"紧急增加以下头寸的抵押品，防止清算: {', '.join([l.get('asset', '') for l in liquidations])}"
+                    )
+
+                # 根据投资组合构成，添加特定建议
+                defi_exposure = sum(
+                    1
+                    for p in positions
+                    if p.get("protocol", "").lower()
+                    in ["aave", "compound", "curve", "uniswap"]
+                )
+                if defi_exposure > 3:
+                    risk_mitigation.append("考虑减少DeFi协议敞口，分散到不同类型的资产")
+
+            elif scenario == "bull_run":
+                risk_mitigation = [
+                    "定期获利了结，锁定部分盈利",
+                    "调整资产配置，防止过度集中",
+                    "关注市场情绪指标，警惕市场过热",
+                    "考虑对冲策略，防范突然回调",
+                    "设置止盈点，防止错失高点",
+                    "定期重新平衡投资组合，确保风险分散",
+                ]
+
+                # 根据投资组合构成，添加特定建议
+                alt_coins = sum(
+                    1
+                    for p in positions
+                    if p.get("asset", "").upper()
+                    not in ["BTC", "ETH", "USDC", "USDT", "DAI"]
+                )
+                if alt_coins > 5:
+                    risk_mitigation.append(
+                        "考虑将部分小市值代币的收益转换为BTC/ETH，降低风险"
+                    )
+
+            elif scenario == "defi_hack":
+                risk_mitigation = [
+                    "分散资产到多个协议，降低单一协议风险",
+                    "优先使用经过多次审计的成熟协议",
+                    "关注协议安全更新和公告",
+                    "考虑使用去中心化保险产品",
+                    "持续监控黑客事件相关新闻",
+                    "重点保护大额存款，必要时暂时转移到中心化交易所",
+                ]
+
+                # 根据投资组合构成，添加特定建议
+                high_risk_protocols = ["未审计的新协议", "历史上有安全问题的协议"]
+                high_risk_exposure = sum(
+                    1 for p in positions if p.get("protocol", "") in high_risk_protocols
+                )
+                if high_risk_exposure > 0:
+                    risk_mitigation.append("立即从未经充分审计的新协议中提取资金")
+
+            elif scenario == "regulatory_crackdown":
+                risk_mitigation = [
+                    "关注各国监管动态，适时调整投资策略",
+                    "增加合规性高的资产比例",
+                    "考虑分散到不同司法管辖区的协议",
+                    "准备应急撤离计划，确保资金安全",
+                    "咨询法律专业人士，了解监管影响",
+                    "密切跟踪交易所和稳定币发行方的合规状态",
+                ]
+
+            elif scenario == "stablecoin_depeg":
+                risk_mitigation = [
+                    "分散稳定币持仓，避免集中在单一稳定币",
+                    "优先持有完全抵押的稳定币",
+                    "设置自动兑换脚本，在脱锚初期快速反应",
+                    "建立稳定币预警系统，监控脱锚风险",
+                    "关注稳定币发行方的财务状况和负面新闻",
+                ]
+
+                # 分析投资组合的稳定币敞口
+                stablecoin_exposure = sum(
+                    p.get("current_value_usd", 0)
+                    for p in positions
+                    if p.get("asset", "").upper()
+                    in ["USDC", "USDT", "DAI", "BUSD", "TUSD", "FRAX"]
+                )
+                if stablecoin_exposure > current_total * 0.3:
+                    risk_mitigation.append(
+                        "您的稳定币敞口较大，建议分散到多种不同抵押机制的稳定币"
+                    )
+
+            elif scenario == "chain_outage":
+                risk_mitigation = [
+                    "将资产分散到多个不同公链，降低单链风险",
+                    "保持适当的链外资产比例",
+                    "为跨链转账预先做好准备",
+                    "了解各链的应急机制和恢复程序",
+                    "在多个钱包中保留一些ETH/BTC作为应急资金",
+                ]
+
+            elif scenario == "liquidity_crisis":
+                risk_mitigation = [
+                    "增加高流动性资产的比例",
+                    "将资金分散在多个不同类型的交易所和协议",
+                    "建立分阶段撤离策略，避免一次性大额提款",
+                    "持有适量稳定币，作为流动性缓冲",
+                    "关注协议和交易所的流动性指标变化",
+                    "避免参与TVL低的流动性池",
+                ]
+
+            else:  # inflation_surge
+                risk_mitigation = [
+                    "增加商品类和通胀对冲型资产的比例",
+                    "降低固定收益资产的敞口",
+                    "密切关注央行政策动向",
+                    "关注比特币在通胀环境中的表现",
+                    "考虑增加实物资产或与实物资产挂钩的数字资产配置",
+                    "短期内避免长周期的锁仓",
+                ]
+
+        return risk_mitigation
+
+    def _calculate_market_risk_metrics(
+        self,
+        scenario,
+        current_total,
+        simulated_total,
+        positions,
+        liquidations,
+        market_sentiment,
+        market_direction,
+        volatility_level,
+    ):
+        """计算市场风险指标"""
+        # 计算最大回撤
+        max_drawdown = 0
+        if current_total > 0:
+            max_drawdown = max(
+                0, abs((simulated_total - current_total) / current_total * 100)
+            )
+
+        # 计算风险等级
+        if simulated_total < current_total * 0.7:
+            risk_level = "高"
+        elif simulated_total < current_total:
+            risk_level = "中"
+        else:
+            risk_level = "低"
+
+        # 计算受影响的协议
+        affected_protocols = set()
+        severely_affected_protocols = set()
+        for p in positions:
+            protocol = p.get("protocol", "")
+            change_percent = p.get("change_percent", 0)
+
+            if change_percent < -10:
+                affected_protocols.add(protocol)
+
+            if change_percent < -20:
+                severely_affected_protocols.add(protocol)
+
+        # 计算受影响的资产
+        affected_assets = set()
+        severely_affected_assets = set()
+
+        # 递归处理嵌套结构
+        def process_position(position):
+            if "positions" in position and isinstance(position["positions"], list):
+                for sub_pos in position["positions"]:
+                    process_position(sub_pos)
+            else:
+                asset = position.get("asset", "")
+                change_percent = position.get("change_percent", 0)
+
+                if change_percent < -10:
+                    affected_assets.add(asset)
+
+                if change_percent < -20:
+                    severely_affected_assets.add(asset)
+
+        for p in positions:
+            process_position(p)
+
+        # 市场相关性分析
+        market_correlation = "高" if scenario in ["market_crash", "bull_run"] else "中"
+
+        # 如果使用了杠杆，风险级别上调
+        has_leverage = any(
+            p.get("type", "") == "borrowing" or p.get("health_factor") is not None
+            for p in positions
+        )
+        if has_leverage and risk_level == "中":
+            risk_level = "高"
+
+        # 如果有清算，风险级别上调到最高
+        if liquidations:
+            risk_level = "极高"
+
+        # 返回市场风险指标
+        return {
+            "max_drawdown": max_drawdown,
+            "risk_level": risk_level,
+            "affected_protocols_count": len(affected_protocols),
+            "severely_affected_protocols_count": len(severely_affected_protocols),
+            "affected_assets_count": len(affected_assets),
+            "severely_affected_assets_count": len(severely_affected_assets),
+            "liquidation_count": len(liquidations),
+            "market_correlation": market_correlation,
+            "market_sentiment": market_sentiment,
+            "market_direction": market_direction,
+            "volatility_level": volatility_level,
+            "has_leverage": has_leverage,
+            "portfolio_diversity_score": min(10, len(affected_assets)),
+            "protocol_diversity_score": min(10, len(affected_protocols)),
+        }

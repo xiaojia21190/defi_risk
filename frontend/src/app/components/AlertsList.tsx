@@ -102,6 +102,7 @@ const mapAlertType = (type: string): Alert["type"] => {
   const typeMap: Record<string, Alert["type"]> = {
     liquidation_risk: "liquidation",
     market_volatility: "marketVolatility",
+    price_volatility: "marketVolatility",
     technical_signal: "technicalSignal",
     risk_warning: "riskWarning",
     opportunity: "opportunityAlert",

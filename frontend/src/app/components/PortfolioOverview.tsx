@@ -59,7 +59,7 @@ const SimplePieChart: React.FC<{
           );
         })}
       </svg>
-      <div className="flex absolute inset-0 flex-col justify-center items-center text-center">
+      <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
         {activeIndex !== null ? (
           <div className="text-sm font-medium">
             {data[activeIndex].title}
@@ -107,6 +107,7 @@ interface PortfolioOverviewProps {
         tokenList: Array<{
           tokenSymbol: string;
           tokenLogo: string;
+          tokenType?: string;
           coinAmount: string;
           currencyAmount: string;
           tokenPrecision: number;
@@ -181,7 +182,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
           <CardTitle>投资组合概览</CardTitle>
           <CardDescription>加载中...</CardDescription>
         </CardHeader>
-        <CardContent className="flex justify-center items-center py-8">
+        <CardContent className="flex items-center justify-center py-8">
           <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
         </CardContent>
       </Card>
@@ -324,7 +325,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
       <div className="grid grid-cols-2 gap-4 mb-6 sm:grid-cols-4">
         <Card className="bg-gradient-to-br from-primary/20 to-primary/5">
           <CardContent className="p-4">
-            <div className="flex justify-between items-center">
+            <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">总资产价值</p>
                 <h3 className="mt-1 text-2xl font-bold">${formatCurrency(portfolio.total_value_usd)}</h3>
@@ -338,7 +339,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
 
         <Card className="bg-gradient-to-br from-blue-500/20 to-blue-500/5">
           <CardContent className="p-4">
-            <div className="flex justify-between items-center">
+            <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">协议数量</p>
                 <h3 className="mt-1 text-2xl font-bold">{portfolio.protocol_count}</h3>
@@ -352,7 +353,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
 
         <Card className="bg-gradient-to-br from-amber-500/20 to-amber-500/5">
           <CardContent className="p-4">
-            <div className="flex justify-between items-center">
+            <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">头寸数量</p>
                 <h3 className="mt-1 text-2xl font-bold">{portfolio.position_count}</h3>
@@ -366,7 +367,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
 
         <Card className="bg-gradient-to-br from-green-500/20 to-green-500/5">
           <CardContent className="p-4">
-            <div className="flex justify-between items-center">
+            <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">平均APY</p>
                 <h3 className="mt-1 text-2xl font-bold">{calculateAverageApy(portfolio)}%</h3>
@@ -413,8 +414,8 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
           <div className="space-y-6">
             {portfolio.positions.map((protocolPos) => (
               <div key={protocolPos.protocol} className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <div className="flex gap-2 items-center">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
                     <h4 className="text-lg font-medium">{protocolPos.protocol}</h4>
                     <Badge variant="outline">杠杆率: {protocolPos.leverage}x</Badge>
                   </div>
@@ -431,22 +432,53 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {protocolPos.positions.map((position) => (
-                      <TableRow key={`${position.protocol}-${position.asset}`}>
-                        <TableCell>
-                          <div className="flex gap-2 items-center">
-                            {position.tokenList[0]?.tokenLogo && <img src={position.tokenList[0].tokenLogo} alt={position.asset} className="w-6 h-6 rounded-full" />}
-                            <span>{position.asset}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>{parseFloat(position.tokenList[0]?.coinAmount || "0").toFixed(4)}</TableCell>
-                        <TableCell>{formatCurrency(parseFloat(position.tokenList[0]?.currencyAmount || "0"))}</TableCell>
-                        <TableCell>
-                          <Badge variant="secondary">{getInvestTypeName(position.invest_type)}</Badge>
-                        </TableCell>
-                        <TableCell>{position.apy ? <Badge variant="default">{formatPercentage(position.apy)}</Badge> : <span className="text-muted-foreground">-</span>}</TableCell>
-                      </TableRow>
-                    ))}
+                    {protocolPos.positions.map((position) => {
+                      const assetTokens = position.tokenList || [];
+                      const mainToken = assetTokens.find((t) => !t.tokenType || t.tokenType !== "reward") || assetTokens[0];
+
+                      return (
+                        <TableRow key={`${position.protocol}-${position.asset}`}>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {mainToken && mainToken.tokenLogo ? (
+                                <img
+                                  src={mainToken.tokenLogo}
+                                  alt={`${position.asset} logo`}
+                                  className="w-5 h-5 rounded-full"
+                                  onError={(e) => {
+                                    // 如果图片加载失败，隐藏图片元素
+                                    (e.target as HTMLImageElement).style.display = "none";
+                                  }}
+                                />
+                              ) : (
+                                <div className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center text-[10px] font-bold">{position.asset.charAt(0)}</div>
+                              )}
+                              <div>
+                                <div className="flex items-center gap-1">
+                                  <span className="text-sm font-medium">{position.asset}</span>
+                                  {position.apy && (
+                                    <Badge variant="outline" className="text-xs">
+                                      APY: {formatPercentage(position.apy)}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                  <span>{getInvestTypeName(position.invest_type)}</span>
+                                  <span>•</span>
+                                  <span>{formatCurrency(position.amount)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>{parseFloat(position.tokenList[0]?.coinAmount || "0").toFixed(4)}</TableCell>
+                          <TableCell>{formatCurrency(parseFloat(position.tokenList[0]?.currencyAmount || "0"))}</TableCell>
+                          <TableCell>
+                            <Badge variant="secondary">{getInvestTypeName(position.invest_type)}</Badge>
+                          </TableCell>
+                          <TableCell>{position.apy ? <Badge variant="default">{formatPercentage(position.apy)}</Badge> : <span className="text-muted-foreground">-</span>}</TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -463,9 +495,9 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
         <CardContent>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {portfolio.protocols.map((protocol) => (
-              <div key={protocol.name} className="p-4 rounded-lg border transition-colors cursor-pointer bg-card/50 hover:bg-card/80" onClick={() => openProtocolDetails(protocol)}>
-                <div className="flex justify-between items-center mb-2">
-                  <div className="flex gap-2 items-center">
+              <div key={protocol.name} className="p-4 transition-colors border rounded-lg cursor-pointer bg-card/50 hover:bg-card/80" onClick={() => openProtocolDetails(protocol)}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
                     <h4 className="font-medium">{protocol.name}</h4>
                     <Badge variant="outline">{protocol.chain}</Badge>
                   </div>
@@ -483,11 +515,11 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
                 </div>
                 <p className="mb-3 text-sm text-muted-foreground line-clamp-2">{protocol.description}</p>
                 <div className="space-y-2">
-                  <div className="flex gap-2 items-center text-sm">
+                  <div className="flex items-center gap-2 text-sm">
                     <Coins className="w-4 h-4" />
                     <span>支持资产: {protocol.supported_assets.join(", ")}</span>
                   </div>
-                  <div className="flex gap-2 items-center text-sm">
+                  <div className="flex items-center gap-2 text-sm">
                     <BarChart3 className="w-4 h-4" />
                     <span>TVL: {formatCurrency(protocol.tvl)}</span>
                   </div>
@@ -511,7 +543,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
           {selectedProtocol && (
             <>
               <DialogHeader>
-                <DialogTitle className="flex justify-between items-center">
+                <DialogTitle className="flex items-center justify-between">
                   <span>{selectedProtocol.name}</span>
                   {selectedProtocol.chain && <Badge variant="secondary">{selectedProtocol.chain}</Badge>}
                 </DialogTitle>
@@ -555,7 +587,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
                       <h4 className="mb-2 text-sm font-medium">功能特性</h4>
                       <ul className="space-y-1 text-sm">
                         {selectedProtocol.features.map((feature, index) => (
-                          <li key={index} className="flex gap-2 items-start">
+                          <li key={index} className="flex items-start gap-2">
                             <span className="text-primary">•</span>
                             <span>{feature}</span>
                           </li>
@@ -567,12 +599,12 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
 
                 <TabsContent value="risk" className="space-y-4">
                   {loadingRisk ? (
-                    <div className="flex justify-center items-center py-12">
+                    <div className="flex items-center justify-center py-12">
                       <Loader2 className="w-8 h-8 animate-spin text-primary" />
                     </div>
                   ) : !protocolRisk ? (
                     <div className="py-8 text-center">
-                      <AlertTriangle className="mx-auto mb-2 w-8 h-8 text-amber-500" />
+                      <AlertTriangle className="w-8 h-8 mx-auto mb-2 text-amber-500" />
                       <p className="text-muted-foreground">无法获取风险分析数据</p>
                       <Button className="mt-4" onClick={() => fetchProtocolRisk(selectedProtocol.name)}>
                         重试
@@ -584,7 +616,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <h4 className="mb-1 text-sm font-medium">风险评分</h4>
-                          <div className="flex gap-2 items-center">
+                          <div className="flex items-center gap-2">
                             <p className="text-2xl font-bold">{protocolRisk.risk_score}</p>
                             <span className="text-sm text-muted-foreground">/100</span>
                           </div>
@@ -602,7 +634,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
                           <div className="space-y-3">
                             {protocolRisk.risk_factors.map((factor, index) => (
                               <div key={index} className="p-3 rounded-md bg-secondary/50">
-                                <div className="flex justify-between items-center mb-1">
+                                <div className="flex items-center justify-between mb-1">
                                   <h5 className="font-medium">{factor.factor}</h5>
                                   <Badge variant={factor.score > 80 ? "default" : factor.score > 60 ? "secondary" : "destructive"}>{factor.score}/100</Badge>
                                 </div>
@@ -619,7 +651,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
                           <h4 className="mb-2 text-sm font-medium">AI建议</h4>
                           <ul className="space-y-1 text-sm">
                             {protocolRisk.recommendations.map((rec, index) => (
-                              <li key={index} className="flex gap-2 items-start">
+                              <li key={index} className="flex items-start gap-2">
                                 <span className="text-primary">•</span>
                                 <span>{rec}</span>
                               </li>

@@ -7,7 +7,7 @@ import PortfolioOverview from "./PortfolioOverview";
 import AlertsList from "./AlertsList";
 import MarketAnalysis from "./MarketAnalysis";
 import { apiService } from "../services/api";
-import type { Portfolio, WalletRiskAssessment } from "../services/api";
+import type { Portfolio, WalletRiskAssessment, WalletMarketRisk } from "../services/api";
 import { Loader2, RefreshCw, AlertTriangle, Shield, Zap } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -96,6 +96,7 @@ export const Dashboard: React.FC = () => {
   const { address, isConnected } = useAccount();
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [riskAnalysis, setRiskAnalysis] = useState<WalletRiskAssessment | null>(null);
+  const [marketRisk, setMarketRisk] = useState<WalletMarketRisk | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -164,6 +165,15 @@ export const Dashboard: React.FC = () => {
 
       // 调用风险分析API
       const riskAnalysisData = await apiService.getWalletRiskAssessment(address);
+
+      // 获取市场风险数据
+      try {
+        const marketRiskData = await apiService.getWalletMarketRisk(address);
+        setMarketRisk(marketRiskData);
+      } catch (marketError) {
+        console.error("获取市场风险数据失败:", marketError);
+        // 市场风险获取失败不影响主流程
+      }
 
       // 更新状态
       setRiskAnalysis(riskAnalysisData);
@@ -347,10 +357,17 @@ export const Dashboard: React.FC = () => {
                       {riskAnalysis?.risk_factors && riskAnalysis.risk_factors.length > 0 && (
                         <div>
                           <p className="mb-1 text-sm font-medium">主要风险因素</p>
-                          <p className="text-sm text-destructive">
-                            • {riskAnalysis.risk_factors[0].name}: {riskAnalysis.risk_factors[0].description}
-                          </p>
-                          {riskAnalysis.risk_factors.length > 1 && <p className="mt-1 text-xs text-muted-foreground">还有 {riskAnalysis.risk_factors.length - 1} 个风险因素</p>}
+                          <div className="flex items-start gap-2">
+                            <div className={`p-1.5 rounded-full ${riskAnalysis.risk_factors[0].score > 60 ? "bg-destructive/20 text-destructive" : riskAnalysis.risk_factors[0].score > 30 ? "bg-amber-500/20 text-amber-500" : "bg-green-500/20 text-green-500"}`}>
+                              <AlertTriangle className="w-3 h-3" />
+                            </div>
+                            <div>
+                              <p className="text-sm text-destructive">
+                                {riskAnalysis.risk_factors[0].name}: {riskAnalysis.risk_factors[0].description}
+                              </p>
+                              {riskAnalysis.risk_factors.length > 1 && <p className="mt-1 text-xs text-muted-foreground">还有 {riskAnalysis.risk_factors.length - 1} 个风险因素</p>}
+                            </div>
+                          </div>
                         </div>
                       )}
 
@@ -358,8 +375,15 @@ export const Dashboard: React.FC = () => {
                       {portfolio.recommendations && portfolio.recommendations.length > 0 && (
                         <div>
                           <p className="mb-1 text-sm font-medium">建议</p>
-                          <p className="text-sm text-muted-foreground">• {portfolio.recommendations[0]}</p>
-                          {portfolio.recommendations.length > 1 && <p className="mt-1 text-xs text-muted-foreground">还有 {portfolio.recommendations.length - 1} 个建议</p>}
+                          <div className="flex items-start gap-2">
+                            <div className="p-1.5 rounded-full bg-blue-500/20 text-blue-500">
+                              <Shield className="w-3 h-3" />
+                            </div>
+                            <div>
+                              <p className="text-sm text-muted-foreground">{portfolio.recommendations[0]}</p>
+                              {portfolio.recommendations.length > 1 && <p className="mt-1 text-xs text-muted-foreground">还有 {portfolio.recommendations.length - 1} 个建议</p>}
+                            </div>
+                          </div>
                         </div>
                       )}
 
@@ -389,7 +413,7 @@ export const Dashboard: React.FC = () => {
 
           {/* 风险分析标签页 */}
           <TabsContent value="risk" className="mt-0">
-            <RiskMonitor portfolio={portfolio} riskAnalysis={riskAnalysis} analyzing={analyzing} completed={!!portfolio.risk_level} onAnalyze={analyzeWalletRisk} />
+            <RiskMonitor portfolio={portfolio} riskAnalysis={riskAnalysis} marketRisk={marketRisk} analyzing={analyzing} completed={riskAnalysis !== null} onAnalyze={analyzeWalletRisk} />
           </TabsContent>
 
           {/* 市场分析标签页 */}
