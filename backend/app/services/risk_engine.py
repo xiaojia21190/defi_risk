@@ -49,6 +49,15 @@ class RiskEngine:
         self.blockchain_service = blockchain_service
         self.ai_service = ai_service
 
+        # 风险类型映射表 - 用于将注册时使用的小写风险类型映射到RiskFactor.id中使用的中文风险类型
+        self.risk_type_map = {
+            "market": "市场风险",
+            "protocol": "协议风险",
+            "liquidity": "流动性风险",
+            "correlation": "相关性风险",
+            "smart_contract": "智能合约风险",
+        }
+
         # 不再自动创建ai_predictor，改为通过外部依赖注入
         self.ai_predictor = None
         if ai_service and hasattr(ai_service, "get_predictor"):
@@ -527,18 +536,54 @@ class RiskEngine:
 
         # 从各分析器获取监控点
         for risk_type, analyzer in self.risk_analyzers.items():
+            # 使用风险类型映射表获取对应的中文风险类型
+            chinese_risk_type = self.risk_type_map.get(risk_type, risk_type)
+
             # 过滤出当前风险类型的因子
             type_factors = [
-                f for f in risk_factors.values() if f.id.startswith(risk_type)
+                f for f in risk_factors.values() if f.id.startswith(chinese_risk_type)
             ]
+
+            self.logger.debug(
+                f"风险类型 {risk_type} (中文映射: {chinese_risk_type}) 找到 {len(type_factors)} 个风险因子"
+            )
+
             if type_factors:
                 try:
                     monitoring_points = await analyzer.get_monitoring_points(
                         type_factors
                     )
+                    self.logger.info(
+                        f"风险类型 {risk_type} 生成了 {len(monitoring_points)} 个监控点"
+                    )
                     all_monitoring_points.extend(monitoring_points)
                 except Exception as e:
                     self.logger.error(f"获取监控点时出错 ({risk_type}): {str(e)}")
+                    # 记录更多调试信息
+                    self.logger.error(f"错误详情: {e.__class__.__name__}: {str(e)}")
+                    import traceback
+
+                    self.logger.error(f"调用栈: {traceback.format_exc()}")
+            else:
+                self.logger.warning(
+                    f"风险类型 {risk_type} 没有找到匹配的风险因子，无法生成监控点"
+                )
+                # 记录所有可用的风险因子ID，帮助调试
+                if risk_factors:
+                    self.logger.debug(
+                        f"可用的风险因子ID: {[f.id for f in risk_factors.values()]}"
+                    )
+
+        # 如果没有收集到任何监控点，添加默认监控点
+        if not all_monitoring_points:
+            self.logger.warning("没有从任何风险分析器收集到监控点，添加默认监控点")
+            all_monitoring_points = [
+                "定期评估投资组合的整体风险状况",
+                "监控主要资产的价格和波动性变化",
+                "关注使用的DeFi协议的安全状态和TVL变化",
+                "追踪投资组合中资产的相关性变化",
+                "注意市场整体趋势和情绪指标的变化",
+            ]
 
         # 去重
         return list(set(all_monitoring_points))
@@ -552,8 +597,12 @@ class RiskEngine:
 
         for risk_type in RiskType:
             type_name = risk_type.name
+            # 将RiskType枚举值映射到中文风险类型
+            chinese_type_name = self.risk_type_map.get(type_name, type_name)
+
+            # 过滤出当前风险类型的因子
             type_factors = [
-                f for f in risk_factors.values() if f.id.startswith(type_name)
+                f for f in risk_factors.values() if f.id.startswith(chinese_type_name)
             ]
 
             if type_factors:
@@ -1277,6 +1326,11 @@ class RiskEngine:
                         "开始投资以获取收益",
                         "从小额投资开始，逐步了解DeFi生态",
                     ],
+                    "monitoring_points": [
+                        "关注市场整体趋势以寻找入场机会",
+                        "追踪主流DeFi协议的安全性和稳定性",
+                        "监控主要加密资产的价格走势",
+                    ],
                     "analysis_timestamp": datetime.utcnow().isoformat(),
                 }
 
@@ -1338,6 +1392,13 @@ class RiskEngine:
                 "risk_metrics": {},
                 "risk_factors": [],
                 "recommendations": ["建议重新分析或联系技术支持"],
+                "monitoring_points": [
+                    "监控投资组合总价值变化趋势",
+                    "关注主要资产的价格波动",
+                    "定期检查投资组合的资产配置比例",
+                    "留意市场整体风险指标变化",
+                    "观察协议安全性和黑客攻击新闻",
+                ],
                 "analysis_timestamp": datetime.utcnow().isoformat(),
             }
 

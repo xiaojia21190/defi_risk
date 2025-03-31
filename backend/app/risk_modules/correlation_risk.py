@@ -861,13 +861,50 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
         Returns:
             监控点列表
         """
-        # 确保区块链服务可用
-        self._ensure_blockchain_service_available("获取相关性风险监控点")
+        try:
+            # 检查是否存在recommendation_service
+            if hasattr(self, "recommendation_service") and self.recommendation_service:
+                # 使用推荐服务生成监控点 - 使用中文风险类型
+                return self.recommendation_service.get_monitoring_points(
+                    self.get_chinese_risk_type("CORRELATION"), risk_factors
+                )
+            else:
+                # 如果没有推荐服务，生成默认监控点
+                monitoring_points = []
 
-        # 使用推荐服务生成监控点
-        return self.recommendation_service.get_monitoring_points(
-            "CORRELATION", risk_factors
-        )
+                # 根据风险因子生成基本监控点
+                for factor in risk_factors:
+                    if "资产相关性" in factor.name:
+                        monitoring_points.append(
+                            "定期计算投资组合中主要资产对的相关系数"
+                        )
+                    elif "投资类型相关性" in factor.name:
+                        monitoring_points.append("监控不同投资类型资产的收益相关性变化")
+                    elif "协议相关性" in factor.name:
+                        monitoring_points.append("关注不同协议间的相关性和连锁风险")
+                    elif "市场相关性" in factor.name:
+                        monitoring_points.append("跟踪加密资产与传统市场的相关性变化")
+
+                # 如果通过风险因子没有生成监控点，添加默认监控点
+                if not monitoring_points:
+                    monitoring_points = [
+                        "定期分析投资组合内资产间的相关性",
+                        "监控不同投资策略间的相关性变化",
+                        "关注市场环境变化对资产相关性的影响",
+                        "评估投资组合的多样性和平衡性",
+                        "注意市场压力情况下相关性的变化",
+                    ]
+
+                return monitoring_points
+
+        except Exception as e:
+            self.logger.error(f"生成相关性风险监控点时出错: {str(e)}")
+            # 发生错误时返回基本监控点
+            return [
+                "监控投资组合中资产的相关性变化",
+                "关注各类资产在市场波动中的表现相关性",
+                "定期评估投资组合的多样化程度",
+            ]
 
     def _safe_get_attr(self, obj, attr_name, default=None):
         """

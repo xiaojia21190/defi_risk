@@ -25,6 +25,15 @@ class RiskAnalyzerBase(ABC):
         self.logger = logging.getLogger(f"defi_risk.{self.__class__.__name__}")
         self.name = self.__class__.__name__
 
+        # 风险类型映射表，用于在调用推荐服务等场景下转换风险类型
+        self.risk_type_map = {
+            "MARKET": "市场风险",
+            "PROTOCOL": "协议风险",
+            "LIQUIDITY": "流动性风险",
+            "CORRELATION": "相关性风险",
+            "SMART_CONTRACT": "智能合约风险",
+        }
+
     def calculate_weighted_score(self, risk_factors: List[RiskFactor]) -> float:
         """
         计算风险因子的加权平均分数
@@ -236,3 +245,15 @@ class RiskAnalyzerBase(ABC):
             filtered_tokens.append(token)
 
         return filtered_tokens
+
+    def get_chinese_risk_type(self, risk_type: str) -> str:
+        """
+        将英文大写风险类型转换为中文风险类型
+
+        Args:
+            risk_type: 英文大写风险类型
+
+        Returns:
+            中文风险类型
+        """
+        return self.risk_type_map.get(risk_type, risk_type)

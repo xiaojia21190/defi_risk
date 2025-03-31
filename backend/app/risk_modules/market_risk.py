@@ -1028,8 +1028,79 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
         Returns:
             监控点列表
         """
-        # 使用推荐服务生成监控点
-        return self.recommendation_service.get_monitoring_points("MARKET", risk_factors)
+        try:
+            # 检查是否存在recommendation_service
+            if hasattr(self, "recommendation_service") and self.recommendation_service:
+                # 使用推荐服务生成监控点 - 使用中文风险类型
+                monitoring_points = self.recommendation_service.get_monitoring_points(
+                    self.get_chinese_risk_type("MARKET"), risk_factors
+                )
+            else:
+                # 如果没有推荐服务，生成默认监控点
+                monitoring_points = []
+                # 根据风险因子生成基本监控点
+                for factor in risk_factors:
+                    if "集中度" in factor.name:
+                        monitoring_points.append("监控投资组合中主要资产的占比变化")
+                    elif "波动性" in factor.name:
+                        monitoring_points.append("监控市场波动性指标（如VIX）的变化")
+                    elif "趋势" in factor.name:
+                        monitoring_points.append("监控市场趋势指标和移动平均线交叉")
+                    elif "相关性" in factor.name:
+                        monitoring_points.append(
+                            "定期计算投资组合中主要资产对的相关系数"
+                        )
+
+                # 如果通过风险因子没有生成监控点，添加默认监控点
+                if not monitoring_points:
+                    monitoring_points = [
+                        "定期监控主要加密资产价格走势",
+                        "关注市场总体波动性变化",
+                        "跟踪重要资产的相关性变化",
+                        "监控投资组合的集中度风险",
+                        "关注市场情绪指标如恐惧与贪婪指数",
+                    ]
+
+            # 尝试添加AI生成的监控点
+            try:
+                if self.ai_predictor and hasattr(
+                    self.ai_predictor, "generate_market_risk_monitoring_points"
+                ):
+                    # 准备风险因子数据
+                    risk_data = {
+                        "risk_factors": [
+                            {
+                                "name": factor.name,
+                                "score": factor.score,
+                                "description": factor.description,
+                                "trend": factor.trend,
+                                "data_points": factor.data_points,
+                            }
+                            for factor in risk_factors
+                        ],
+                    }
+
+                    # 获取AI监控点
+                    ai_result = (
+                        self.ai_predictor.generate_market_risk_monitoring_points(
+                            risk_data
+                        )
+                    )
+                    if ai_result and "monitoring_points" in ai_result:
+                        monitoring_points.extend(ai_result["monitoring_points"])
+            except Exception as e:
+                self.logger.error(f"获取AI市场风险监控点时出错: {str(e)}")
+
+            return list(set(monitoring_points))  # 去重
+
+        except Exception as e:
+            self.logger.error(f"生成市场风险监控点时出错: {str(e)}")
+            # 发生错误时返回基本监控点
+            return [
+                "监控主要资产的价格波动",
+                "关注投资组合的整体风险",
+                "定期评估市场趋势变化",
+            ]
 
     async def _get_ai_recommendations(
         self, risk_factors: List[RiskFactor]

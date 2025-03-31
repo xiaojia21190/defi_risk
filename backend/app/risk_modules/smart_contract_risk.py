@@ -464,24 +464,45 @@ class SmartContractRiskAnalyzer(RiskAnalyzerBase):
         Returns:
             监控点列表
         """
-        monitoring_points = []
+        try:
+            # 检查是否存在recommendation_service
+            if hasattr(self, "recommendation_service") and self.recommendation_service:
+                # 使用推荐服务生成监控点 - 使用中文风险类型
+                monitoring_points = self.recommendation_service.get_monitoring_points(
+                    self.get_chinese_risk_type("SMART_CONTRACT"), risk_factors
+                )
+            else:
+                # 如果没有推荐服务，生成默认监控点
+                monitoring_points = []
 
-        # 根据风险因子生成监控点
-        for factor in risk_factors:
-            if factor.id == "SMART_CONTRACT.审计状态" and factor.score > 40:
-                monitoring_points.append("关注协议的最新安全审计报告和审计机构的声誉")
+                # 根据风险因子生成基本监控点
+                for factor in risk_factors:
+                    if "审计" in factor.name:
+                        monitoring_points.append("关注智能合约的最新审计结果")
+                    elif "漏洞" in factor.name:
+                        monitoring_points.append("监控已知漏洞的修复进度")
+                    elif "复杂性" in factor.name:
+                        monitoring_points.append("关注合约升级和代码变更")
+                    elif "代码质量" in factor.name:
+                        monitoring_points.append("注意开发团队对代码库的维护状态")
 
-            if factor.id == "SMART_CONTRACT.代码质量" and factor.score > 40:
-                monitoring_points.append("监控协议的GitHub活动和代码更新频率")
+                # 如果通过风险因子没有生成监控点，添加默认监控点
+                if not monitoring_points:
+                    monitoring_points = [
+                        "定期检查智能合约的安全审计状态",
+                        "关注主要安全平台上的漏洞报告",
+                        "监控合约的重大升级和变更",
+                        "追踪合约使用的重要参数变化",
+                        "关注开发团队对安全问题的响应时间",
+                    ]
 
-            if factor.id == "SMART_CONTRACT.漏洞历史" and factor.score > 40:
-                monitoring_points.append("关注安全漏洞公告和协议的安全事件响应")
+            return monitoring_points
 
-            if factor.id == "SMART_CONTRACT.合约复杂性" and factor.score > 40:
-                monitoring_points.append("跟踪协议的合约升级和架构变化")
-
-        # 添加一般性监控点
-        if not monitoring_points:
-            monitoring_points.append("定期检查协议的安全状态和社区反馈")
-
-        return monitoring_points
+        except Exception as e:
+            self.logger.error(f"生成智能合约风险监控点时出错: {str(e)}")
+            # 发生错误时返回基本监控点
+            return [
+                "监控智能合约的安全状态",
+                "关注合约升级和代码变更",
+                "留意智能合约相关的安全警报",
+            ]

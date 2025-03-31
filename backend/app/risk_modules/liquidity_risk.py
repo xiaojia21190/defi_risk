@@ -976,7 +976,45 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
         Returns:
             监控点列表
         """
-        # 使用推荐服务生成监控点
-        return self.recommendation_service.get_monitoring_points(
-            "LIQUIDITY", risk_factors
-        )
+        try:
+            # 检查是否存在recommendation_service
+            if hasattr(self, "recommendation_service") and self.recommendation_service:
+                # 使用推荐服务生成监控点 - 使用中文风险类型
+                return self.recommendation_service.get_monitoring_points(
+                    self.get_chinese_risk_type("LIQUIDITY"), risk_factors
+                )
+            else:
+                # 如果没有推荐服务，生成默认监控点
+                monitoring_points = []
+
+                # 根据风险因子生成基本监控点
+                for factor in risk_factors:
+                    if "资产流动性" in factor.name:
+                        monitoring_points.append("监控主要资产的交易量和滑点变化")
+                    elif "协议流动性" in factor.name:
+                        monitoring_points.append("监控DeFi协议的TVL变化趋势")
+                    elif "池" in factor.name and "流动性" in factor.name:
+                        monitoring_points.append("关注流动性池的深度和稳定性")
+                    elif "市场深度" in factor.name:
+                        monitoring_points.append("跟踪资产的买卖盘深度变化")
+
+                # 如果通过风险因子没有生成监控点，添加默认监控点
+                if not monitoring_points:
+                    monitoring_points = [
+                        "定期监控关键资产的流动性指标",
+                        "关注使用的DeFi协议的流动性状况",
+                        "跟踪主要交易市场的深度变化",
+                        "监控流动性集中度的变化",
+                        "关注市场极端情况下的流动性表现",
+                    ]
+
+                return monitoring_points
+
+        except Exception as e:
+            self.logger.error(f"生成流动性风险监控点时出错: {str(e)}")
+            # 发生错误时返回基本监控点
+            return [
+                "监控主要资产的交易量变化",
+                "关注流动性池的状态",
+                "注意市场深度指标的变化",
+            ]

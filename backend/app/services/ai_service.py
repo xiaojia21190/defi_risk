@@ -681,7 +681,7 @@ class AiService:
 
             # 调用AI预测器分析
             insights_result = await self.analyze_with_predictor(
-                analysis_type="portfolio_insights", data=analysis_data
+                analysis_type="portfolio_risk", data=analysis_data
             )
 
             logger.info(f"获取投资组合洞察完成: {wallet_address}")

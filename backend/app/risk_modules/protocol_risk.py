@@ -1112,34 +1112,45 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
         Returns:
             监控点列表
         """
-        # 从风险因子中提取协议名称，如果不存在则使用通用名称
-        protocol_name = "未知协议"
-        if risk_factors and risk_factors[0].metadata:
-            protocol_name = risk_factors[0].metadata.get("protocol_name", "未知协议")
+        try:
+            # 检查是否存在recommendation_service
+            if hasattr(self, "recommendation_service") and self.recommendation_service:
+                # 使用推荐服务生成监控点 - 使用中文风险类型
+                monitoring_points = self.recommendation_service.get_monitoring_points(
+                    self.get_chinese_risk_type("PROTOCOL"), risk_factors
+                )
+            else:
+                # 如果没有推荐服务，生成默认监控点
+                monitoring_points = []
 
-        monitoring_points = []
+                # 根据风险因子生成基本监控点
+                for factor in risk_factors:
+                    if "安全" in factor.name:
+                        monitoring_points.append("监控协议的安全审计报告和漏洞公告")
+                    elif "治理" in factor.name:
+                        monitoring_points.append("监控协议的治理提案和社区投票情况")
+                    elif "声誉" in factor.name:
+                        monitoring_points.append("关注社区对协议的评价和反馈")
+                    elif "TVL" in factor.name.upper():
+                        monitoring_points.append("监控协议的总锁仓价值(TVL)变化趋势")
 
-        # 根据风险因子生成监控点
-        for factor in risk_factors:
-            if factor.name == "协议安全风险" and factor.score > 40:
-                monitoring_points.append(f"关注{protocol_name}的安全审计状态和更新")
-                monitoring_points.append(f"监控{protocol_name}的安全事件和漏洞报告")
+                # 如果通过风险因子没有生成监控点，添加默认监控点
+                if not monitoring_points:
+                    monitoring_points = [
+                        "定期检查协议的最新安全审计状态",
+                        "关注协议官方发布的安全公告",
+                        "监控协议的TVL和用户数变化",
+                        "跟踪协议在DeFi生态中的影响力变化",
+                        "关注协议团队和社区动态",
+                    ]
 
-            if factor.name == "协议治理风险" and factor.score > 40:
-                monitoring_points.append(f"关注{protocol_name}的治理提案和投票情况")
-                monitoring_points.append(f"监控{protocol_name}的治理结构变化")
+            return monitoring_points
 
-            if factor.name == "协议历史风险" and factor.score > 40:
-                monitoring_points.append(f"跟踪{protocol_name}的TVL变化趋势")
-                monitoring_points.append(f"监控{protocol_name}的用户增长情况")
-
-            if factor.name == "协议复杂性风险" and factor.score > 40:
-                monitoring_points.append(f"关注{protocol_name}的合约升级和功能变更")
-                monitoring_points.append(f"监控{protocol_name}的技术架构变化")
-
-        # 如果没有生成监控点，添加通用监控点
-        if not monitoring_points:
-            monitoring_points.append(f"定期检查{protocol_name}的运行状态和性能指标")
-            monitoring_points.append(f"关注{protocol_name}的官方公告和社区动态")
-
-        return monitoring_points
+        except Exception as e:
+            self.logger.error(f"生成协议风险监控点时出错: {str(e)}")
+            # 发生错误时返回基本监控点
+            return [
+                "关注协议安全状态和审计报告",
+                "监控协议TVL变化趋势",
+                "注意协议团队的重要公告",
+            ]

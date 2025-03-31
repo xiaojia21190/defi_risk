@@ -295,23 +295,29 @@ class RecommendationService:
         """
         monitoring_points = []
 
-        # 根据风险类型生成监控点
-        if risk_type == "MARKET":
-            monitoring_points.extend(self._get_market_monitoring_points(risk_factors))
-        elif risk_type == "LIQUIDITY":
-            monitoring_points.extend(
-                self._get_liquidity_monitoring_points(risk_factors)
-            )
-        elif risk_type == "PROTOCOL":
-            monitoring_points.extend(self._get_protocol_monitoring_points(risk_factors))
-        elif risk_type == "SMART_CONTRACT":
-            monitoring_points.extend(
-                self._get_smart_contract_monitoring_points(risk_factors)
-            )
-        elif risk_type == "CORRELATION":
-            monitoring_points.extend(
-                self._get_correlation_monitoring_points(risk_factors)
-            )
+        # 定义中文风险类型到处理方法的映射
+        risk_type_map = {
+            # 英文大写映射
+            "MARKET": self._get_market_monitoring_points,
+            "LIQUIDITY": self._get_liquidity_monitoring_points,
+            "PROTOCOL": self._get_protocol_monitoring_points,
+            "SMART_CONTRACT": self._get_smart_contract_monitoring_points,
+            "CORRELATION": self._get_correlation_monitoring_points,
+            # 中文映射
+            "市场风险": self._get_market_monitoring_points,
+            "流动性风险": self._get_liquidity_monitoring_points,
+            "协议风险": self._get_protocol_monitoring_points,
+            "智能合约风险": self._get_smart_contract_monitoring_points,
+            "相关性风险": self._get_correlation_monitoring_points,
+        }
+
+        # 根据风险类型映射获取对应的处理方法
+        if risk_type in risk_type_map:
+            handler = risk_type_map[risk_type]
+            monitoring_points.extend(handler(risk_factors))
+        else:
+            # 记录未知风险类型
+            logging.warning(f"未知风险类型: {risk_type}，无法生成特定监控点")
 
         # 如果没有生成监控点，添加通用监控点
         if not monitoring_points:
