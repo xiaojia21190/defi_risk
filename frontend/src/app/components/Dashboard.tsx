@@ -6,6 +6,7 @@ import RiskMonitor from "./RiskMonitor";
 import PortfolioOverview from "./PortfolioOverview";
 import AlertsList from "./AlertsList";
 import MarketAnalysis from "./MarketAnalysis";
+import ApiTest from "./ApiTest";
 import { apiService } from "../services/api";
 import type { Portfolio, WalletRiskAssessment, WalletMarketRisk } from "../services/api";
 import { Loader2, RefreshCw, AlertTriangle, Shield, Zap } from "lucide-react";
@@ -305,6 +306,7 @@ export const Dashboard: React.FC = () => {
             <TabsTrigger value="alerts">风险警报</TabsTrigger>
             <TabsTrigger value="risk">风险分析</TabsTrigger>
             <TabsTrigger value="market">市场分析</TabsTrigger>
+            <TabsTrigger value="api">API测试</TabsTrigger>
           </TabsList>
 
           {/* 投资组合概览标签页 */}
@@ -419,6 +421,11 @@ export const Dashboard: React.FC = () => {
           {/* 市场分析标签页 */}
           <TabsContent value="market" className="mt-0">
             <MarketAnalysis marketPredictions={marketPredictions} loading={loadingMarketData} onAssetSelect={handleAssetSelect} />
+          </TabsContent>
+
+          {/* API测试标签页 */}
+          <TabsContent value="api" className="mt-0">
+            <ApiTest />
           </TabsContent>
         </Tabs>
       )}

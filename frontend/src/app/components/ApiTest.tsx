@@ -6,8 +6,10 @@ import { Loader2, CheckCircle, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useAccount } from "wagmi";
 
 export const ApiTest: React.FC = () => {
+  const { address } = useAccount();
   const [apiStatus, setApiStatus] = useState<"loading" | "connected" | "error">("loading");
   const [testResults, setTestResults] = useState<{ endpoint: string; status: "success" | "error"; message: string }[]>([]);
   const [isRunning, setIsRunning] = useState(false);
@@ -60,6 +62,33 @@ export const ApiTest: React.FC = () => {
         message: `ETH价格: $${data.price}`,
       };
     });
+
+    // 如果有连接的钱包地址，测试警报接口
+    if (address) {
+      await testEndpoint("钱包警报", async () => {
+        const alerts = await apiService.getAlerts(address);
+        return {
+          success: true,
+          message: `获取到${Array.isArray(alerts) ? alerts.length : 0}个警报`,
+        };
+      });
+
+      // 测试市场风险API
+      await testEndpoint("市场风险分析", async () => {
+        try {
+          const marketRisk = await apiService.getWalletMarketRisk(address);
+          return {
+            success: !!marketRisk,
+            message: `风险评分: ${marketRisk.score}, 风险级别: ${marketRisk.risk_level}`,
+          };
+        } catch (error) {
+          return {
+            success: false,
+            message: "市场风险API暂不可用",
+          };
+        }
+      });
+    }
 
     setIsRunning(false);
   };
@@ -136,6 +165,12 @@ export const ApiTest: React.FC = () => {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {!address && (
+            <div className="p-4 mt-4 text-sm text-center border rounded-md bg-secondary/10">
+              <p>连接钱包后可测试更多API端点</p>
             </div>
           )}
         </div>
