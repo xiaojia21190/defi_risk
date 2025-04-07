@@ -168,6 +168,7 @@ interface PortfolioOverviewProps {
       supported_assets: string[];
       features: string[];
       description: string;
+      contract_addresses: string;
     }>;
     timestamp: string;
     is_demo_data: boolean;
@@ -196,6 +197,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
     supported_assets: string[];
     features: string[];
     description: string;
+    contract_addresses: string;
   } | null>(null);
   const [protocolRisk, setProtocolRisk] = useState<ProtocolRiskAnalysis | null>(null);
   const [loadingRisk, setLoadingRisk] = useState(false);
@@ -965,7 +967,7 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
               </Tabs>
 
               <DialogFooter className="flex items-center justify-between pt-4 mt-8 border-t border-slate-700/30">
-                <Button variant="outline" className="gap-2" onClick={() => selectedProtocol?.name && window.open(`https://etherscan.io/address/${selectedProtocol.name}`, "_blank")}>
+                <Button variant="outline" className="gap-2" onClick={() => selectedProtocol?.contract_addresses && window.open(`https://etherscan.io/address/${selectedProtocol.contract_addresses}`, "_blank")}>
                   <Network className="w-4 h-4" />
                   查看合约
                 </Button>

@@ -73,6 +73,7 @@ export interface Protocol {
   tvl: number;
   supported_assets: string[];
   features: string[];
+  contract_addresses: string;
 }
 
 export interface MarketPrediction {

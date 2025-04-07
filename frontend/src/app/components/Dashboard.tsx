@@ -85,6 +85,7 @@ const adaptPortfolioForOverview = (portfolio: Portfolio) => {
       supported_assets: protocol.supported_assets || [],
       features: protocol.features || [],
       description: protocol.description || "",
+      contract_addresses: protocol.contract_addresses || "",
     })),
     timestamp: portfolio.timestamp,
     is_demo_data: portfolio.is_demo_data,
