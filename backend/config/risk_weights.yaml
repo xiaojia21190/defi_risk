@@ -1,0 +1,10 @@
+# DeFi风险监控系统风险权重配置
+# 各类风险的权重总和应为1.0
+
+RISK_WEIGHTS:
+  MARKET: 0.3       # 市场风险权重
+  SMART_CONTRACT: 0.2  # 智能合约风险权重
+  LIQUIDITY: 0.2    # 流动性风险权重
+  PROTOCOL: 0.15    # 协议风险权重
+  CORRELATION: 0.1  # 相关性风险权重
+  REGULATORY: 0.05  # 监管风险权重

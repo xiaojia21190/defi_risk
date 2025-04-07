@@ -115,12 +115,15 @@ async def get_wallet_positions(
                             "supported_assets": protocol_info.get(
                                 "supported_assets", ["ETH", "USDC"]
                             ),
-                            "features": protocol_info.get(
-                                "features", ["借贷", "流动性挖矿"]
+                            "features": protocol_info.get("coingecko", {}).get(
+                                "categories", ["借贷", "流动性挖矿"]
                             ),
-                            "description": protocol_info.get(
+                            "description": protocol_info.get("coingecko", {}).get(
                                 "description", f"{protocol_name}是一个DeFi协议"
                             ),
+                            "contract_addresses": protocol_info.get("coingecko", {})
+                            .get("contract_addresses", {})
+                            .get(protocol_info.get("ethereum", ""), {}),
                         }
                     )
                 except Exception:
@@ -130,8 +133,8 @@ async def get_wallet_positions(
                             "name": protocol_name,
                             "chain": position.get("chain", "Unknown"),
                             "tvl": 0,
-                            "supported_assets": ["ETH", "USDC"],
-                            "features": ["借贷", "流动性挖矿"],
+                            "supported_assets": [position.get("asset", "Unknown")],
+                            "features": ["质押", "流动性挖矿"],
                             "description": f"{protocol_name}是一个DeFi协议",
                         }
                     )

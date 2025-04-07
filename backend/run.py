@@ -5,10 +5,6 @@ DeFi风险分析API启动脚本
 import os
 import argparse
 import uvicorn
-from dotenv import load_dotenv
-
-# 加载环境变量
-load_dotenv()
 
 
 def parse_args():

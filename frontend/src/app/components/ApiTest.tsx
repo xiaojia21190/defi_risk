@@ -39,56 +39,11 @@ export const ApiTest: React.FC = () => {
       return { success: isHealthy, message: isHealthy ? "API服务正常" : "API服务不可用" };
     });
 
-    // 测试协议列表
-    await testEndpoint("协议列表", async () => {
-      const data = await apiService.getProtocols();
-      return {
-        success: data.protocols && data.protocols.length > 0,
-        message: `获取到${data.protocols.length}个协议`,
-      };
-    });
-
     // 测试Gas价格
     await testEndpoint("Gas价格", async () => {
       const price = await apiService.getGasPrice();
       return { success: price !== undefined, message: `当前Gas价格: ${price}` };
     });
-
-    // 测试市场数据
-    await testEndpoint("市场数据 (ETH)", async () => {
-      const data = await apiService.getMarketData("ETH");
-      return {
-        success: !!data,
-        message: `ETH价格: $${data.price}`,
-      };
-    });
-
-    // 如果有连接的钱包地址，测试警报接口
-    if (address) {
-      await testEndpoint("钱包警报", async () => {
-        const alerts = await apiService.getAlerts(address);
-        return {
-          success: true,
-          message: `获取到${Array.isArray(alerts) ? alerts.length : 0}个警报`,
-        };
-      });
-
-      // 测试市场风险API
-      await testEndpoint("市场风险分析", async () => {
-        try {
-          const marketRisk = await apiService.getWalletMarketRisk(address);
-          return {
-            success: !!marketRisk,
-            message: `风险评分: ${marketRisk.score}, 风险级别: ${marketRisk.risk_level}`,
-          };
-        } catch (error) {
-          return {
-            success: false,
-            message: "市场风险API暂不可用",
-          };
-        }
-      });
-    }
 
     setIsRunning(false);
   };

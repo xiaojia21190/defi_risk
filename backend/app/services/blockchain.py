@@ -413,7 +413,7 @@ class BlockchainService:
             # 如果OKX API获取失败，回退到基础方法
             self.logger.info("使用基础方法获取有限的协议头寸数据")
             # 合并结果
-            all_positions = []
+            all_positions = []  # TODO: Implement fallback logic if needed
 
             # 如果获取到了结果，缓存数据
             if all_positions:
@@ -424,6 +424,53 @@ class BlockchainService:
         except Exception as e:
             self.logger.error(f"获取所有头寸失败: {str(e)}")
             return []
+
+    async def get_protocols_by_wallet(
+        self, wallet_address: str
+    ) -> List[Dict[str, Any]]:
+        """
+        获取指定钱包地址拥有的协议列表及其总资产。
+
+        Args:
+            wallet_address: 用户的钱包地址。
+
+        Returns:
+            一个字典列表，每个字典包含协议名称 ('name') 和在该协议的总资产 ('total_assets')。
+            如果获取失败则返回空列表。
+        """
+        try:
+            self.logger.info(f"开始获取钱包 {wallet_address} 拥有的协议列表")
+
+            # 调用 get_all_positions 获取所有头寸信息
+            positions_data = await self.get_all_positions(wallet_address)
+
+            # 检查是否有数据返回
+            if not positions_data:
+                self.logger.info(f"钱包 {wallet_address} 没有找到任何协议头寸")
+                return []
+
+            protocols_output = []
+            # 遍历头寸数据，提取协议名称和总资产
+            for position_info in positions_data:
+                protocol_name = position_info.get("protocol")
+                total_assets = position_info.get("total_assets", 0.0)
+
+                if protocol_name:
+                    protocols_output.append(
+                        {
+                            "name": protocol_name,
+                            "total_assets": float(total_assets),  # 确保是 float 类型
+                        }
+                    )
+
+            self.logger.info(
+                f"成功获取钱包 {wallet_address} 的 {len(protocols_output)} 个协议列表"
+            )
+            return protocols_output
+
+        except Exception as e:
+            self.logger.error(f"获取钱包 {wallet_address} 协议列表时出错: {str(e)}")
+            return []  # 出错时返回空列表
 
     def _get_invest_type_name(self, invest_type: int) -> str:
         """获取投资类型的名称
@@ -501,7 +548,7 @@ class BlockchainService:
             API响应数据
         """
         # 间隔1-2秒
-        time.sleep(random.randint(1, 2))
+        time.sleep(random.randint(3, 5))
         if full_path_header == "":
             full_path = self.okx_api_defi_path + path
         else:
@@ -632,7 +679,7 @@ class BlockchainService:
 
             return risk_summary
         except Exception as e:
-            self.logger.error(f"获取协议 {protocol} 风险摘要失败: {str(e)}")
+            self.logger.error(f"获取协议风险摘要失败: {str(e)}")
             return {"risk_level": "未知", "risk_score": 0, "audit_status": False}
 
     async def _get_okx_positions(self, address: str) -> List[Dict[str, Any]]:
@@ -821,42 +868,45 @@ class BlockchainService:
                                                 )
                                             rewardDefitokeninfo = invest_token.get(
                                                 "rewardDefiTokenInfo", []
-                                            )[0]
-                                            baseDefiTokenInfos = (
-                                                rewardDefitokeninfo.get(
-                                                    "baseDefiTokenInfos", []
-                                                )
                                             )
-                                            for reward in baseDefiTokenInfos:
-                                                tokenSymbol = reward.get(
-                                                    "tokenSymbol", ""
+                                            if rewardDefitokeninfo:
+                                                baseDefiTokenInfos = (
+                                                    rewardDefitokeninfo[0].get(
+                                                        "baseDefiTokenInfos", []
+                                                    )
                                                 )
-                                                tokenLogo = reward.get("tokenLogo", "")
-                                                coinAmount = reward.get(
-                                                    "coinAmount", ""
-                                                )
-                                                currencyAmount = reward.get(
-                                                    "currencyAmount", ""
-                                                )
-                                                tokenPrecision = reward.get(
-                                                    "tokenPrecision", ""
-                                                )
-                                                tokenAddress = reward.get(
-                                                    "tokenAddress", ""
-                                                )
-                                                network = reward.get("network", "")
-                                                position.tokenList.append(
-                                                    {
-                                                        "tokenSymbol": tokenSymbol,
-                                                        "tokenType": "reward",
-                                                        "tokenLogo": tokenLogo,
-                                                        "coinAmount": coinAmount,
-                                                        "currencyAmount": currencyAmount,
-                                                        "tokenPrecision": tokenPrecision,
-                                                        "tokenAddress": tokenAddress,
-                                                        "network": network,
-                                                    }
-                                                )
+                                                for reward in baseDefiTokenInfos:
+                                                    tokenSymbol = reward.get(
+                                                        "tokenSymbol", ""
+                                                    )
+                                                    tokenLogo = reward.get(
+                                                        "tokenLogo", ""
+                                                    )
+                                                    coinAmount = reward.get(
+                                                        "coinAmount", ""
+                                                    )
+                                                    currencyAmount = reward.get(
+                                                        "currencyAmount", ""
+                                                    )
+                                                    tokenPrecision = reward.get(
+                                                        "tokenPrecision", ""
+                                                    )
+                                                    tokenAddress = reward.get(
+                                                        "tokenAddress", ""
+                                                    )
+                                                    network = reward.get("network", "")
+                                                    position.tokenList.append(
+                                                        {
+                                                            "tokenSymbol": tokenSymbol,
+                                                            "tokenType": "reward",
+                                                            "tokenLogo": tokenLogo,
+                                                            "coinAmount": coinAmount,
+                                                            "currencyAmount": currencyAmount,
+                                                            "tokenPrecision": tokenPrecision,
+                                                            "tokenAddress": tokenAddress,
+                                                            "network": network,
+                                                        }
+                                                    )
 
                                         # 更新平台资产统计
                                         if invest_type == 6:  # 借贷
@@ -959,7 +1009,8 @@ class BlockchainService:
                     if apy is not None and symbol.lower() in pool_symbol.lower():
                         rApy = apy
                         break
-
+            if rApy == 0:
+                rApy = 2
             logger.info(f"获取到{protocol}协议{symbol}资产的APY: {rApy}")
             return rApy
         except Exception as e:
@@ -1217,15 +1268,15 @@ class BlockchainService:
         #     return {}
 
     # 获取 get_protocol 作缓存
-    async def get_protocol(self, protocol: str) -> float:
+    async def get_protocol(self, protocol: str) -> Dict[str, Any]:
         """
-        获取协议的详细信息
+        获取协议的详细信息，包括基本信息、categories、description和contract_address
 
         Args:
             protocol: 协议名称
 
         Returns:
-            协议的详细信息
+            Dict[str, Any]: 包含协议详细信息的字典，包括DeFi Llama数据和CoinGecko数据
         """
         try:
             # 检查缓存
@@ -1241,12 +1292,95 @@ class BlockchainService:
                 protocol = "Pendle"
             if protocol == "Aethir":
                 protocol = "aethir"
-            protocol = self.defi_llama_client.get_protocol(protocol)
-            self.historical_data_cache.set(cache_key, protocol, cache_interval)
-            return protocol
+
+            # 获取DeFi Llama协议数据
+            try:
+                protocol_data = self.defi_llama_client.get_protocol(protocol)
+            except Exception as e:
+                self.logger.warning(f"获取DeFi Llama协议数据失败: {str(e)}")
+                protocol_data = {}
+
+            # tvl
+            try:
+                tvl = await self.get_protocol_tvl(protocol)
+                protocol_data["tvl"] = tvl
+            except Exception as e:
+                self.logger.warning(f"获取协议TVL失败: {str(e)}")
+                protocol_data["tvl"] = 0
+
+            # 尝试从CoinGecko获取额外信息
+            try:
+                # 将协议名称转换为CoinGecko ID
+                coingecko_id = self._convert_to_coingecko_id(protocol)
+
+                # 构建CoinGecko API URL
+                url = f"https://api.coingecko.com/api/v3/coins/{coingecko_id}"
+                params = {
+                    "localization": "false",
+                    "tickers": "false",
+                    "market_data": "false",
+                    "community_data": "true",
+                    "developer_data": "false",
+                    "sparkline": "false",
+                }
+
+                headers = {
+                    "accept": "application/json",
+                    "x-cg-demo-api-key": "CG-2TiEpWzWzfnpD5hnRzk4ufDg",
+                }
+
+                # 发送请求
+                response = requests.get(
+                    url, params=params, headers=headers, proxies=proxies
+                )
+
+                if response.status_code == 200:
+                    coingecko_data = response.json()
+
+                    # 提取所需信息
+                    categories = coingecko_data.get("categories", [])
+                    description = coingecko_data.get("description", {}).get("en", "")
+                    contract_addresses = {}
+
+                    # 提取contract_address
+                    platforms = coingecko_data.get("platforms", {})
+                    for platform, address in platforms.items():
+                        if address and address.strip():
+                            contract_addresses[platform] = address
+
+                    # 合并信息到协议数据中
+                    if isinstance(protocol_data, dict):
+                        protocol_data["coingecko"] = {
+                            "categories": categories,
+                            "description": description,
+                            "contract_addresses": contract_addresses,
+                        }
+                    else:
+                        # 如果DeFi Llama未返回有效数据，直接使用CoinGecko数据
+                        protocol_data = {
+                            "name": coingecko_data.get("name", protocol),
+                            "coingecko": {
+                                "categories": categories,
+                                "description": description,
+                                "contract_addresses": contract_addresses,
+                            },
+                        }
+
+                    self.logger.info(f"成功从CoinGecko获取{protocol}的额外信息")
+                else:
+                    self.logger.warning(
+                        f"CoinGecko API返回错误: {response.status_code}，仅使用DeFi Llama数据"
+                    )
+            except Exception as e:
+                self.logger.warning(f"从CoinGecko获取{protocol}额外信息失败: {str(e)}")
+                # 如果CoinGecko API调用失败，继续使用DeFi Llama数据
+
+            # 存入缓存
+            self.historical_data_cache.set(cache_key, protocol_data, cache_interval)
+            return protocol_data
         except Exception as e:
             self.logger.error(f"获取协议的详细信息失败: {str(e)}")
-            return 0.0
+            return {}
 
     async def get_protocol_tvl(self, protocol: str) -> float:
         """
@@ -2234,83 +2368,36 @@ class BlockchainService:
                         f"成功获取CoinGecko完整代币列表，共{len(coins_list)}个代币"
                     )
                 else:
-                    self.logger.error(
-                        f"获取CoinGecko代币列表失败: {response.status_code}"
-                    )
-                    coins_list = []
+                    self.logger.error(f"获取CoinGecko代币列表失败: {response.status_code}")
+                    return asset.lower()  # 失败时返回原始资产符号
             except Exception as e:
-                self.logger.error(f"获取CoinGecko代币列表失败: {str(e)}")
-                coins_list = []
+                self.logger.error(f"获取CoinGecko代币列表异常: {str(e)}")
+                return asset.lower()  # 异常时返回原始资产符号
 
-        # 标准化输入
-        asset_normalized = asset.strip().lower()
+        # 标准化输入资产名
+        normalized_asset = self._normalize_asset_symbol(asset)
 
-        # 首先检查完全匹配的id
+        # 1. 首先尝试通过symbol精确匹配
         for coin in coins_list:
-            if coin.get("id") == asset_normalized:
-                return coin.get("id")
+            if coin['symbol'].lower() == normalized_asset.lower():
+                self.logger.debug(f"通过symbol匹配到代币: {asset} -> {coin['id']}")
+                return coin['id']
 
-        # 然后检查symbol的完全匹配
-        exact_matches = [
-            coin
-            for coin in coins_list
-            if coin.get("symbol").lower() == asset_normalized
-        ]
-        if exact_matches:
-            # 如果有多个匹配，优先选择市值较高的主流代币
-            if len(exact_matches) > 1:
-                # 常见主流代币优先级
-                priority_ids = [
-                    "bitcoin",
-                    "ethereum",
-                    "tether",
-                    "usd-coin",
-                    "binancecoin",
-                    "ripple",
-                    "cardano",
-                    "solana",
-                    "dogecoin",
-                    "polkadot",
-                ]
-                for priority_id in priority_ids:
-                    for coin in exact_matches:
-                        if coin.get("id") == priority_id:
-                            return priority_id
+        # 2. 然后尝试通过id匹配
+        for coin in coins_list:
+            if coin['id'].lower() == normalized_asset.lower():
+                self.logger.debug(f"通过id匹配到代币: {asset} -> {coin['id']}")
+                return coin['id']
 
-                # 如果没有匹配到优先级列表，返回第一个匹配
-                return exact_matches[0].get("id")
-            else:
-                return exact_matches[0].get("id")
+        # 3. 最后尝试通过name匹配
+        for coin in coins_list:
+            if coin['name'].lower() == asset.lower():  # 使用原始资产名进行name匹配
+                self.logger.debug(f"通过name匹配到代币: {asset} -> {coin['id']}")
+                return coin['id']
 
-        # 如果没有完全匹配，使用硬编码的映射作为后备
-        fallback_mapping = {
-            "btc": "bitcoin",
-            "eth": "ethereum",
-            "usdt": "tether",
-            "usdc": "usd-coin",
-            "bnb": "binancecoin",
-            "xrp": "ripple",
-            "ada": "cardano",
-            "sol": "solana",
-            "doge": "dogecoin",
-            "dot": "polkadot",
-        }
-
-        if asset_normalized in fallback_mapping:
-            return fallback_mapping[asset_normalized]
-
-        # 作为最后的尝试，查找部分匹配
-        partial_matches = [
-            coin
-            for coin in coins_list
-            if asset_normalized in coin.get("symbol").lower()
-        ]
-        if partial_matches:
-            return partial_matches[0].get("id")
-
-        # 如果所有尝试都失败，返回原始输入（可能导致API错误）
-        self.logger.warning(f"无法将{asset}映射到CoinGecko ID，使用原始输入")
-        return asset_normalized
+        # 如果都匹配不到，记录警告并返回原始资产符号
+        self.logger.warning(f"无法在CoinGecko找到对应的代币ID: {asset}")
+        return normalized_asset.lower()
 
     async def _get_coingecko_24h_data(self, asset: str) -> Optional[Dict]:
         """

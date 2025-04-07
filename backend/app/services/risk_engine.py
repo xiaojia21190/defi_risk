@@ -382,16 +382,33 @@ class RiskEngine:
 
         # 并行执行各风险分析器
         tasks = []
+        analyzers_map = {}  # 用于记录任务和分析器的映射关系
+
         for risk_type, analyzer in self.risk_analyzers.items():
-            tasks.append(self._get_risk_factors(risk_type, analyzer, portfolio_data))
+            task = self._get_risk_factors(risk_type, analyzer, portfolio_data)
+            tasks.append(task)
+            analyzers_map[task] = risk_type
 
-        # 等待所有分析器完成
-        results = await asyncio.gather(*tasks)
+        try:
+            # 等待所有分析器完成，使用return_exceptions=True来避免一个任务失败导致所有任务失败
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # 合并结果
-        for factors in results:
-            for factor in factors:
-                all_risk_factors[factor.id] = factor
+            # 处理结果，包括可能的异常
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    # 获取对应的风险类型
+                    risk_type = analyzers_map.get(tasks[i], f"Unknown_{i}")
+                    self.logger.error(f"风险分析器 {risk_type} 执行失败: {str(result)}")
+                    # 对于失败的分析器，添加一个空列表作为其结果
+                    continue
+
+                # 正常处理结果
+                for factor in result:
+                    all_risk_factors[factor.id] = factor
+
+        except Exception as e:
+            self.logger.error(f"执行风险分析任务时出错: {str(e)}")
+            # 即使出错，我们仍然尝试继续处理已收集到的风险因子
 
         # 计算总体风险评分
         total_score = self._calculate_total_score(all_risk_factors)
@@ -399,9 +416,18 @@ class RiskEngine:
         # 确定风险等级
         risk_level = self._determine_risk_level(total_score)
 
-        # 生成建议和监控点
-        recommendations = await self._generate_recommendations(all_risk_factors)
-        monitoring_points = await self._generate_monitoring_points(all_risk_factors)
+        try:
+            # 生成建议和监控点
+            recommendations = await self._generate_recommendations(all_risk_factors)
+        except Exception as e:
+            self.logger.error(f"生成建议时出错: {str(e)}")
+            recommendations = ["无法生成建议，请稍后再试"]
+
+        try:
+            monitoring_points = await self._generate_monitoring_points(all_risk_factors)
+        except Exception as e:
+            self.logger.error(f"生成监控点时出错: {str(e)}")
+            monitoring_points = ["监控投资组合总体表现", "关注主要资产的市场动态"]
 
         # 创建风险评估结果
         assessment = RiskAssessment(

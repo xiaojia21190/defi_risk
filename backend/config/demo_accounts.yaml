@@ -1,0 +1,27 @@
+# DeFi风险监控系统演示账户配置
+# 这些账户仅在演示模式下使用
+
+DEMO_ACCOUNTS:
+  - address: 0xdemo1234567890abcdef1234567890abcdef123456
+    name: 演示账户1
+    type: demo
+    description: 包含多种DeFi头寸的演示账户
+    risk_level: medium
+
+  - address: 0xdemo2234567890abcdef1234567890abcdef123456
+    name: 演示账户2
+    type: demo
+    description: 高风险DeFi投资组合演示账户
+    risk_level: high
+
+  - address: 0xdemo3234567890abcdef1234567890abcdef123456
+    name: 低风险投资账户
+    type: demo
+    description: 主要持有稳定币和蓝筹资产的保守型账户
+    risk_level: low
+
+  - address: 0xdemo5234567890abcdef1234567890abcdef123456
+    name: LP流动性提供者
+    type: demo
+    description: 专注于Uniswap和Curve上提供流动性的账户
+    risk_level: medium

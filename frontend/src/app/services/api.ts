@@ -2,6 +2,7 @@
 declare const process: {
   env: {
     NEXT_PUBLIC_API_URL?: string;
+    NEXT_PUBLIC_DEMO_MODE?: string;
   };
 };
 
@@ -10,14 +11,14 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/a
 export interface Position {
   protocol: string;
   asset: string;
-  amount?: number;
-  leverage?: number;
-  apy?: number;
-  invest_type?: number;
-  tokenList?: Array<{
+  amount: number;
+  leverage: number;
+  apy: number;
+  invest_type: number;
+  tokenList: Array<{
     tokenSymbol: string;
     tokenLogo: string;
-    tokenType?: string;
+    tokenType: string;
     coinAmount: string;
     currencyAmount: string;
     tokenPrecision: string | number;
@@ -67,11 +68,11 @@ export interface MarketData {
 
 export interface Protocol {
   name: string;
-  description?: string;
-  chain?: string;
-  tvl?: number;
-  supported_assets?: string[];
-  features?: string[];
+  description: string;
+  chain: string;
+  tvl: number;
+  supported_assets: string[];
+  features: string[];
 }
 
 export interface MarketPrediction {
@@ -199,15 +200,15 @@ export interface WalletRiskAssessment {
   warnings: string[];
   monitoring_points: string[];
   analysis_timestamp: string;
-  positions_summary?: {
+  positions_summary: {
     total_value: number;
     position_count: number;
     protocols: string[];
     assets: string[];
   };
-  ai_enhanced?: boolean;
-  timestamp?: string;
-  is_demo_data?: boolean;
+  ai_enhanced: boolean;
+  timestamp: string;
+  is_demo_data: boolean;
 }
 
 // 钱包市场风险接口
@@ -289,70 +290,147 @@ export interface HackathonGuide {
   websiteUrl: string;
 }
 
-import { demoProtocols } from './protocols';
 
 class ApiService {
   // 检查是否处于演示模式
   private _demoMode: boolean | null = null;
   private _demoAddress: string | null = null;
+  private _demoAccounts: Array<{ address: string; type: string }> | null = null;
+  private _cacheTimestamp: number = 0;
+  private readonly CACHE_TTL: number = 5 * 60 * 1000; // 5分钟缓存过期
 
-  // 获取演示模式状态
+  // 获取演示模式状态，优先使用环境变量
   async isDemoMode(): Promise<boolean> {
-    if (this._demoMode !== null) {
+    // 优先使用环境变量
+    const envDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+
+    // 如果有本地缓存且未过期，直接返回
+    if (this._demoMode !== null && (Date.now() - this._cacheTimestamp) < this.CACHE_TTL) {
       return this._demoMode;
     }
 
     try {
+      // 尝试从后端获取状态
       const status = await this.getDemoStatus();
       this._demoMode = status.demo_mode;
+      this._cacheTimestamp = Date.now();
+
       if (status.demo_accounts && status.demo_accounts.length > 0) {
+        this._demoAccounts = status.demo_accounts;
         this._demoAddress = status.demo_accounts[0].address;
       }
+
       return this._demoMode;
     } catch (error) {
-      console.error('Error checking demo mode:', error);
-      return false;
+      console.error('获取演示模式状态失败，使用环境变量:', error);
+      // 如果API调用失败，使用环境变量
+      this._demoMode = envDemoMode;
+      this._cacheTimestamp = Date.now();
+      return envDemoMode;
     }
   }
 
   // 获取演示账户地址
   async getDemoAddress(): Promise<string | null> {
-    if (this._demoAddress !== null) {
+    // 如果缓存有效，直接返回
+    if (this._demoAddress !== null && (Date.now() - this._cacheTimestamp) < this.CACHE_TTL) {
       return this._demoAddress;
     }
 
+    // 如果没有缓存或已过期
     try {
-      const status = await this.getDemoStatus();
-      if (status.demo_accounts && status.demo_accounts.length > 0) {
-        this._demoAddress = status.demo_accounts[0].address;
-        return this._demoAddress;
-      }
-      return null;
+      await this.isDemoMode(); // 这会更新_demoAddress
+      return this._demoAddress;
     } catch (error) {
-      console.error('Error getting demo address:', error);
+      console.error('获取演示账户地址失败:', error);
       return null;
     }
   }
 
-  private async fetchJson<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  // 获取所有演示账户
+  async getDemoAccounts(): Promise<Array<{ address: string; type: string }>> {
+    // 如果缓存有效，直接返回
+    if (this._demoAccounts !== null && (Date.now() - this._cacheTimestamp) < this.CACHE_TTL) {
+      return this._demoAccounts;
+    }
+
+    // 如果没有缓存或已过期
     try {
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      const status = await this.getDemoStatus();
+      this._demoAccounts = status.demo_accounts || [];
+      this._cacheTimestamp = Date.now();
+      return this._demoAccounts;
+    } catch (error) {
+      console.error('获取演示账户列表失败:', error);
+      return [];
+    }
+  }
+
+  private async fetchJson<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const url = `${API_BASE_URL}${endpoint}`;
+    try {
+      console.debug(`[API] 请求: ${endpoint}`);
+
+      const response = await fetch(url, {
         ...options,
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
           ...options.headers,
         },
       });
 
+      // 获取响应文本，用于日志和错误信息
+      const responseText = await response.text();
+
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`API Error (${response.status}): ${errorText}`);
-        throw new Error(`API Error: ${response.statusText}`);
+        // 尝试解析错误JSON
+        let errorMessage = `API错误 (${response.status}): ${response.statusText}`;
+        let errorData = {};
+
+        try {
+          if (responseText) {
+            errorData = JSON.parse(responseText);
+            if (errorData && typeof errorData === 'object' && 'detail' in errorData) {
+              errorMessage = `API错误: ${errorData.detail}`;
+            } else if (errorData && typeof errorData === 'object' && 'message' in errorData) {
+              errorMessage = `API错误: ${(errorData as any).message}`;
+            }
+          }
+        } catch (parseError: unknown) {
+          console.error(`无法解析错误响应: ${responseText}`);
+        }
+
+        console.error(`API请求失败 (${endpoint}): ${errorMessage}`, {
+          status: response.status,
+          url,
+          errorData
+        });
+
+        const error = new Error(errorMessage);
+        (error as any).status = response.status;
+        (error as any).responseData = errorData;
+        throw error;
       }
 
-      return response.json();
-    } catch (error) {
-      console.error(`请求失败 (${endpoint}):`, error);
+      // 解析成功响应的JSON
+      let data: T;
+      try {
+        data = responseText ? JSON.parse(responseText) : {};
+        console.debug(`[API] 响应: ${endpoint}`, { status: response.status });
+        return data;
+      } catch (parseError: unknown) {
+        console.error(`解析响应JSON失败: ${endpoint}`, parseError);
+        const typedError = parseError as Error;
+        throw new Error(`解析响应失败: ${typedError.message}`);
+      }
+    } catch (error: unknown) {
+      // 网络错误或其他未处理的错误
+      if (!(error instanceof Error && (error as any).status)) {
+        console.error(`网络请求失败 (${endpoint}):`, error);
+        const errorMessage = error instanceof Error ? error.message : '未知错误';
+        throw new Error(`网络请求失败: ${errorMessage}`);
+      }
       throw error;
     }
   }
@@ -365,16 +443,15 @@ class ApiService {
     try {
       // 只获取钱包头寸
       const positionsResponse = await this.fetchJson<any>(`/wallet/${address}/positions`);
-
       // 初始化portfolio对象
       const portfolio: Portfolio = {
         wallet_address: address,
-        total_value: positionsResponse.portfolio_summary?.total_value || 0,
-        total_value_usd: positionsResponse.portfolio_summary?.total_value_usd || 0,
+        total_value: positionsResponse.total_value_usd || 0,
+        total_value_usd: positionsResponse.total_value_usd || 0,
         position_count: positionsResponse.positions?.length || 0,
         protocol_count: positionsResponse.positions?.length || 0,
         positions: [],
-        protocols: [],
+        protocols: positionsResponse.protocols || [],
         risk_level: "", // 初始为空，需要单独加载
         recommendations: [],
         market_analysis: {},
@@ -430,45 +507,19 @@ class ApiService {
         warnings: response.warnings || [],
         monitoring_points: response.monitoring_points || [],
         analysis_timestamp: response.analysis_timestamp || new Date().toISOString(),
-        positions_summary: response.positions_summary,
+        positions_summary: response.positions_summary || {
+          total_value: 0,
+          position_count: 0,
+          protocols: [],
+          assets: []
+        },
         ai_enhanced: response.ai_enhanced || false,
-        timestamp: response.timestamp,
+        timestamp: response.timestamp || new Date().toISOString(),
         is_demo_data: response.is_demo_data || false
       };
     } catch (error) {
       console.error('获取钱包风险评估失败:', error);
       throw error;
-    }
-  }
-
-  // 新方法：获取投资组合资产的市场分析
-  async getPortfolioMarketAnalysis(assets: string[]): Promise<Record<string, any>> {
-    if (!assets || assets.length === 0) {
-      return {};
-    }
-
-    try {
-      const marketAnalysis: Record<string, any> = {};
-
-      for (const asset of assets) {
-        try {
-          const marketData = await this.getMarketData(asset);
-          marketAnalysis[asset] = {
-            current_price: marketData.price,
-            volume_24h: marketData.volume_24h,
-            market_cap: marketData.market_cap,
-            price_change_24h: marketData.price_change_24h,
-            volatility_30d: Math.abs(marketData.price_change_24h) // 简化处理
-          };
-        } catch (error) {
-          console.error(`获取${asset}市场数据失败:`, error);
-        }
-      }
-
-      return marketAnalysis;
-    } catch (error) {
-      console.error('获取投资组合市场分析失败:', error);
-      return {};
     }
   }
 
@@ -542,16 +593,6 @@ class ApiService {
     }
   }
 
-  async analyzeWalletRisk(address: string): Promise<any> {
-    try {
-      const data = await this.fetchJson<any>(`/wallet/${address}/risk`);
-      return data;
-    } catch (error) {
-      console.error('Error analyzing wallet risk:', error);
-      throw error;
-    }
-  }
-
   // 获取钱包市场风险分析
   async getWalletMarketRisk(address: string): Promise<WalletMarketRisk> {
     if (!address || address === '') {
@@ -620,27 +661,37 @@ class ApiService {
 
   async getDemoStatus(): Promise<DemoStatus> {
     try {
-      // 注意：后端暂时没有实现此端点，返回模拟数据
-      console.warn('Demo status API endpoint is not implemented in the backend');
+      // 尝试从后端API获取Demo状态
+      try {
+        const response = await this.fetchJson<DemoStatus>('/system/demo-status');
+        return response;
+      } catch (apiError) {
+        console.warn('获取Demo状态API失败，使用本地配置', apiError);
 
-      // 返回模拟数据
-      return {
-        demo_mode: true,
-        timestamp: new Date().toISOString(),
-        environment: {
-          network: "Sepolia",
-          chain_id: "11155111",
-          web3_connected: true
-        },
-        demo_accounts: [
-          {
-            address: "0xAbCdEf123456789AbCdEf123456789AbCdEf1234",
-            type: "demo"
-          }
-        ],
-        supported_assets: ["ETH", "USDC", "DAI", "BTC"],
-        refresh_interval: "30m"
-      };
+        // 使用环境变量构建备用响应
+        const demoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+
+        // 如果环境中有演示地址，使用它；否则使用默认地址
+        const demoAddress = "0xdemo1234567890abcdef1234567890abcdef123456";
+
+        return {
+          demo_mode: demoMode,
+          timestamp: new Date().toISOString(),
+          environment: {
+            network: "Mainnet",
+            chain_id: "1",
+            web3_connected: true
+          },
+          demo_accounts: [
+            {
+              address: demoAddress,
+              type: "demo"
+            }
+          ],
+          supported_assets: ["ETH", "USDC", "DAI", "BTC"],
+          refresh_interval: "30m"
+        };
+      }
     } catch (error) {
       console.error('获取演示状态失败:', error);
       throw error;
@@ -806,7 +857,7 @@ class ApiService {
     } catch (error) {
       console.error('获取协议列表失败:', error);
       // 出错时返回演示数据
-      return { protocols: demoProtocols };
+      return { protocols: [] };
     }
   }
 }
