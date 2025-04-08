@@ -730,7 +730,9 @@ class BlockchainService:
                     if platform_name not in platform_assets:
                         platform_assets[platform_name] = {
                             "protocol": platform_name,
-                            "total_assets": 0.0,  # 总资产价值
+                            "total_assets": wallet_platform.get(
+                                "currencyAmount", 0
+                            ),  # 总资产价值
                             "total_debts": 0.0,  # 总负债价值
                             "leverage": 0.0,  # 杠杆率
                             "positions": [],  # 该平台的所有头寸
@@ -912,10 +914,6 @@ class BlockchainService:
                                         if invest_type == 6:  # 借贷
                                             platform_assets[platform_name][
                                                 "total_debts"
-                                            ] += total_value
-                                        else:  # 其他类型都计入总资产
-                                            platform_assets[platform_name][
-                                                "total_assets"
                                             ] += total_value
 
                                         # 添加到平台头寸列表
@@ -2368,7 +2366,9 @@ class BlockchainService:
                         f"成功获取CoinGecko完整代币列表，共{len(coins_list)}个代币"
                     )
                 else:
-                    self.logger.error(f"获取CoinGecko代币列表失败: {response.status_code}")
+                    self.logger.error(
+                        f"获取CoinGecko代币列表失败: {response.status_code}"
+                    )
                     return asset.lower()  # 失败时返回原始资产符号
             except Exception as e:
                 self.logger.error(f"获取CoinGecko代币列表异常: {str(e)}")
@@ -2379,21 +2379,21 @@ class BlockchainService:
 
         # 1. 首先尝试通过symbol精确匹配
         for coin in coins_list:
-            if coin['symbol'].lower() == normalized_asset.lower():
+            if coin["symbol"].lower() == normalized_asset.lower():
                 self.logger.debug(f"通过symbol匹配到代币: {asset} -> {coin['id']}")
-                return coin['id']
+                return coin["id"]
 
         # 2. 然后尝试通过id匹配
         for coin in coins_list:
-            if coin['id'].lower() == normalized_asset.lower():
+            if coin["id"].lower() == normalized_asset.lower():
                 self.logger.debug(f"通过id匹配到代币: {asset} -> {coin['id']}")
-                return coin['id']
+                return coin["id"]
 
         # 3. 最后尝试通过name匹配
         for coin in coins_list:
-            if coin['name'].lower() == asset.lower():  # 使用原始资产名进行name匹配
+            if coin["name"].lower() == asset.lower():  # 使用原始资产名进行name匹配
                 self.logger.debug(f"通过name匹配到代币: {asset} -> {coin['id']}")
-                return coin['id']
+                return coin["id"]
 
         # 如果都匹配不到，记录警告并返回原始资产符号
         self.logger.warning(f"无法在CoinGecko找到对应的代币ID: {asset}")

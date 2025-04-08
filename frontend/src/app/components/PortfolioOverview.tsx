@@ -586,10 +586,10 @@ const PortfolioOverview: React.FC<PortfolioOverviewProps> = ({ portfolio, loadin
                           </div>
                         </div>
                       </div>
-                      <Button variant="outline" size="sm" className="gap-1 mt-2 text-xs transition-colors bg-slate-800/50 hover:bg-slate-700/50 sm:mt-0">
+                      {/* <Button variant="outline" size="sm" className="gap-1 mt-2 text-xs transition-colors bg-slate-800/50 hover:bg-slate-700/50 sm:mt-0">
                         <Info className="w-3.5 h-3.5" />
                         查看分析
-                      </Button>
+                      </Button> */}
                     </div>
                   </div>
 
