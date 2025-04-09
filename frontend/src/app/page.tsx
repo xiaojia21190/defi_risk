@@ -1,5 +1,6 @@
 import { Dashboard } from "./components/Dashboard";
 import { ConnectButton } from "./components/ConnectButton";
+import { GasPrice } from "./components/GasPrice";
 
 export default function Home() {
   return (
@@ -7,7 +8,7 @@ export default function Home() {
       <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex items-center h-14">
           <div className="flex items-center space-x-2">
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary">
+            <div className="flex justify-center items-center w-8 h-8 rounded-full bg-primary">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 text-primary-foreground">
                 <path d="M12 2L2 7l10 5 10-5-10-5z" />
                 <path d="M2 17l10 5 10-5" />
@@ -16,7 +17,10 @@ export default function Home() {
             </div>
             <h1 className="text-xl font-bold text-primary">DeFi Risk Monitor</h1>
           </div>
-          <div className="flex items-center justify-end flex-1 space-x-4">
+          <div className="flex flex-1 justify-end items-center space-x-4">
+            <div className="hidden md:block">
+              <GasPrice />
+            </div>
             <ConnectButton />
           </div>
         </div>
@@ -29,7 +33,7 @@ export default function Home() {
       </main>
 
       <footer className="py-6 border-t">
-        <div className="container flex flex-col items-center justify-between gap-4 md:h-24 md:flex-row">
+        <div className="container flex flex-col gap-4 justify-between items-center md:h-24 md:flex-row">
           <p className="text-sm leading-loose text-center text-muted-foreground md:text-left">© {new Date().getFullYear()} DeFi Risk Monitor. 保护您的DeFi投资安全。</p>
         </div>
       </footer>

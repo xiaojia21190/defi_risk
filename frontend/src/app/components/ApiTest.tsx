@@ -74,22 +74,22 @@ export const ApiTest: React.FC = () => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center justify-between">
+        <CardTitle className="flex justify-between items-center">
           API连接测试
           {apiStatus === "loading" && (
-            <Badge variant="outline" className="flex items-center gap-1">
+            <Badge variant="outline" className="flex gap-1 items-center">
               <Loader2 className="w-3 h-3 animate-spin" />
               检查中
             </Badge>
           )}
           {apiStatus === "connected" && (
-            <Badge variant="default" className="flex items-center gap-1 bg-green-500">
+            <Badge variant="default" className="flex gap-1 items-center bg-green-500">
               <CheckCircle className="w-3 h-3" />
               已连接
             </Badge>
           )}
           {apiStatus === "error" && (
-            <Badge variant="destructive" className="flex items-center gap-1">
+            <Badge variant="destructive" className="flex gap-1 items-center">
               <XCircle className="w-3 h-3" />
               连接失败
             </Badge>
@@ -98,10 +98,10 @@ export const ApiTest: React.FC = () => {
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex justify-between items-center">
             <p className="text-sm text-muted-foreground">测试前端与后端API的连接状态</p>
             <Button onClick={runApiTests} disabled={isRunning || apiStatus === "loading"} size="sm">
-              {isRunning && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              {isRunning && <Loader2 className="mr-2 w-4 h-4 animate-spin" />}
               运行测试
             </Button>
           </div>
@@ -111,8 +111,8 @@ export const ApiTest: React.FC = () => {
               <h3 className="text-sm font-medium">测试结果:</h3>
               <div className="space-y-2">
                 {testResults.map((result, index) => (
-                  <div key={index} className="flex items-center justify-between pb-2 text-sm border-b">
-                    <div className="flex items-center gap-2">
+                  <div key={index} className="flex justify-between items-center pb-2 text-sm border-b">
+                    <div className="flex gap-2 items-center">
                       {result.status === "success" ? <CheckCircle className="w-4 h-4 text-green-500" /> : <XCircle className="w-4 h-4 text-red-500" />}
                       <span>{result.endpoint}</span>
                     </div>
@@ -124,7 +124,7 @@ export const ApiTest: React.FC = () => {
           )}
 
           {!address && (
-            <div className="p-4 mt-4 text-sm text-center border rounded-md bg-secondary/10">
+            <div className="p-4 mt-4 text-sm text-center rounded-md border bg-secondary/10">
               <p>连接钱包后可测试更多API端点</p>
             </div>
           )}
