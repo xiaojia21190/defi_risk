@@ -28,9 +28,12 @@ async def predict_market(
     asset: str,
     time_frame: str = Query("24h", description="预测时间范围: 24h, 7d, 30d"),
     days: Optional[int] = Query(30, description="历史数据的天数"),
+    from_timestamp: Optional[int] = Query(
+        None, description="开始时间的UNIX时间戳（秒）"
+    ),
+    to_timestamp: Optional[int] = Query(None, description="结束时间的UNIX时间戳（秒）"),
     ai_service: AiService = Depends(get_ai_service),
     blockchain_service: BlockchainService = Depends(get_blockchain_service),
-    demo_service: DemoDataService = Depends(get_demo_data_service),
 ):
     """
     获取市场数据、历史数据并预测市场趋势
@@ -38,15 +41,20 @@ async def predict_market(
     - **asset**: 资产名称（例如：ETH, BTC, USDC等）
     - **time_frame**: 预测时间范围（24h, 7d, 30d）
     - **days**: 历史数据的天数，默认30天
+    - **from_timestamp**: (可选) 开始时间的UNIX时间戳（秒），如果提供则忽略days参数
+    - **to_timestamp**: (可选) 结束时间的UNIX时间戳（秒），如果提供则必须同时提供from_timestamp
     """
     try:
         logger.info(
-            f"收到综合市场数据和预测请求: {asset}, 时间范围: {time_frame}, 历史天数: {days}"
+            f"收到综合市场数据和预测请求: {asset}, 时间范围: {time_frame}, "
+            f"历史天数: {days if not from_timestamp else '未使用'}, "
+            f"从时间戳: {from_timestamp if from_timestamp else '未指定'}, "
+            f"到时间戳: {to_timestamp if to_timestamp else '未指定'}"
         )
 
         # 获取资产历史数据用于AI分析
         historical_data = await blockchain_service.get_coingecko_historical_data(
-            asset, days
+            asset, days, from_timestamp, to_timestamp
         )
 
         # 构建AI分析上下文

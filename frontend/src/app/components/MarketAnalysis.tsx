@@ -39,7 +39,7 @@ interface MarketAnalysisProps {
 }
 
 const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ portfolio }) => {
-  const [timeFrame, setTimeFrame] = useState<"24h" | "7d">("24h");
+  const [timeFrame, setTimeFrame] = useState<"24h" | "7d" | "30d">("24h");
   const [selectedAsset, setSelectedAsset] = useState<string>("ETH");
   const [marketPredictions, setMarketPredictions] = useState<{ [key: string]: ExtendedMarketPrediction } | null>(null);
   const [loadingMarketData, setLoadingMarketData] = useState(false);
@@ -317,6 +317,9 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ portfolio }) => {
                   </Button>
                   <Button variant={timeFrame === "7d" ? "default" : "outline"} size="sm" onClick={() => setTimeFrame("7d")}>
                     7天
+                  </Button>
+                  <Button variant={timeFrame === "30d" ? "default" : "outline"} size="sm" onClick={() => setTimeFrame("30d")}>
+                    30天
                   </Button>
                 </div>
               </div>

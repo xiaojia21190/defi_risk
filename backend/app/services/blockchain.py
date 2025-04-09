@@ -2108,21 +2108,49 @@ class BlockchainService:
             return [{"error": f"获取警报时出错: {str(e)}"}]
 
     async def get_coingecko_historical_data(
-        self, asset: str, days: int = 30
+        self,
+        asset: str,
+        days: int = 30,
+        from_timestamp: Optional[int] = None,
+        to_timestamp: Optional[int] = None,
     ) -> Optional[pd.DataFrame]:
         """
         从CoinGecko API获取资产的历史数据
 
+        可以通过两种方式指定时间范围：
+        1. 使用days参数获取最近N天的数据
+        2. 使用from_timestamp和to_timestamp参数获取特定时间范围的数据
+
         Args:
             asset: 资产ID或符号
-            days: 获取多少天的数据
+            days: 获取多少天的数据，当提供时间戳参数时忽略此参数
+            from_timestamp: 开始时间的UNIX时间戳（秒）
+            to_timestamp: 结束时间的UNIX时间戳（秒）
 
         Returns:
             DataFrame: 包含历史数据的DataFrame
         """
         try:
-            # 检查缓存
+            # 检查时间戳参数是否有效
+            use_range_endpoint = False
+            if from_timestamp is not None and to_timestamp is not None:
+                use_range_endpoint = True
+                if from_timestamp >= to_timestamp:
+                    self.logger.error(
+                        f"时间戳参数无效: from_timestamp ({from_timestamp}) 必须小于 to_timestamp ({to_timestamp})"
+                    )
+                    return None
+            elif from_timestamp is not None or to_timestamp is not None:
+                self.logger.error("必须同时提供 from_timestamp 和 to_timestamp")
+                return None
+
+            # 缓存键需考虑新参数
             cache_key = f"coingecko_historical_data_{asset}"
+            if use_range_endpoint:
+                cache_key = (
+                    f"coingecko_historical_data_{asset}_{from_timestamp}_{to_timestamp}"
+                )
+
             cache_interval = "1h"
             cached_data = self.historical_data_cache.get(cache_key, cache_interval)
 
@@ -2136,13 +2164,28 @@ class BlockchainService:
                 self.logger.warning(f"无法将{asset}转换为CoinGecko ID")
                 return None
 
-            # 构建API URL
-            url = f"https://api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart"
-            params = {"vs_currency": "usd", "days": days, "interval": "daily"}
+            # 根据参数选择不同的端点
             headers = {
                 "accept": "application/json",
                 "x-cg-demo-api-key": "CG-2TiEpWzWzfnpD5hnRzk4ufDg",
             }
+
+            if use_range_endpoint:
+                # 使用 market_chart/range 端点
+                url = f"https://api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart/range"
+                params = {
+                    "vs_currency": "usd",
+                    "from": from_timestamp,
+                    "to": to_timestamp,
+                }
+                self.logger.info(
+                    f"使用CoinGecko market_chart/range端点，时间范围: {from_timestamp} - {to_timestamp}"
+                )
+            else:
+                # 使用原有的 market_chart 端点
+                url = f"https://api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart"
+                params = {"vs_currency": "usd", "days": days, "interval": "daily"}
+                self.logger.info(f"使用CoinGecko market_chart端点，days: {days}")
 
             # 发送请求
             response = requests.get(
@@ -2177,7 +2220,8 @@ class BlockchainService:
 
                 return df
             else:
-                self.logger.error(f"CoinGecko API返回错误: {response.status_code}")
+                error_msg = f"CoinGecko API返回错误: {response.status_code}, 响应: {response.text}"
+                self.logger.error(error_msg)
                 return None
 
         except Exception as e:
