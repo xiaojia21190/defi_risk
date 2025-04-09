@@ -104,22 +104,7 @@ export const Dashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
   const initialized = useRef(false);
-  const [marketPredictions, setMarketPredictions] = useState<{ [key: string]: any } | null>(null);
-  const [selectedAsset, setSelectedAsset] = useState<string>("ETH");
-  const [loadingMarketData, setLoadingMarketData] = useState(false);
-
-  useEffect(() => {
-    if (initialized.current) return;
-
-    const init = async () => {
-      if (isConnected && address) {
-        initialized.current = true;
-        fetchPortfolioData(address);
-      }
-    };
-
-    init();
-  }, [isConnected, address]);
+  const [activeTab, setActiveTab] = useState<string>("overview");
 
   // 当钱包地址变化时重新获取数据
   useEffect(() => {
@@ -130,13 +115,6 @@ export const Dashboard: React.FC = () => {
       setRiskAnalysis(null);
     }
   }, [isConnected, address]);
-
-  // 获取市场分析数据
-  useEffect(() => {
-    if (portfolio) {
-      fetchMarketData(selectedAsset);
-    }
-  }, [portfolio, selectedAsset]);
 
   const fetchPortfolioData = async (walletAddress?: string) => {
     if (!walletAddress) return;
@@ -169,13 +147,13 @@ export const Dashboard: React.FC = () => {
       const riskAnalysisData = await apiService.getWalletRiskAssessment(address);
 
       // 获取市场风险数据
-      try {
-        const marketRiskData = await apiService.getWalletMarketRisk(address);
-        setMarketRisk(marketRiskData);
-      } catch (marketError) {
-        console.error("获取市场风险数据失败:", marketError);
-        // 市场风险获取失败不影响主流程
-      }
+      // try {
+      //   const marketRiskData = await apiService.getWalletMarketRisk(address);
+      //   setMarketRisk(marketRiskData);
+      // } catch (marketError) {
+      //   console.error("获取市场风险数据失败:", marketError);
+      //   // 市场风险获取失败不影响主流程
+      // }
 
       // 更新状态
       setRiskAnalysis(riskAnalysisData);
@@ -194,59 +172,6 @@ export const Dashboard: React.FC = () => {
       setError("无法完成风险分析");
     } finally {
       setAnalyzing(false);
-    }
-  };
-
-  // 获取市场分析数据
-  const fetchMarketData = async (asset: string) => {
-    try {
-      setLoadingMarketData(true);
-
-      // 调用市场预测API
-      const prediction = await apiService.predictMarket(asset, "24h");
-
-      // 扩展市场预测数据
-      const extendedPrediction = {
-        ...prediction,
-        asset,
-        time_frame: "24h",
-        price_history: {
-          timestamp: { "1": new Date().toISOString(), "2": new Date(Date.now() - 86400000).toISOString() },
-          price: { "1": 1800, "2": 1750 }, // 示例数据，实际应从API获取
-          volume: { "1": 3000000, "2": 2800000 },
-          market_cap: { "1": 200000000, "2": 195000000 },
-          source: { "1": "api", "2": "api" },
-        },
-        predictions: [
-          {
-            target: "price",
-            timeframe: "24h",
-            value: prediction.predicted_price_range["24h"][1],
-            probability: 0.8,
-            range: prediction.predicted_price_range["24h"],
-          },
-        ],
-        insights: prediction.recommendations || [],
-        timestamp: new Date().toISOString(),
-        confidence: 0.75,
-      };
-
-      setMarketPredictions({
-        ...marketPredictions,
-        [asset]: extendedPrediction,
-      });
-    } catch (error) {
-      console.error("获取市场分析数据失败:", error);
-    } finally {
-      setLoadingMarketData(false);
-    }
-  };
-
-  // 选择资产处理函数
-  const handleAssetSelect = (asset: string) => {
-    setSelectedAsset(asset);
-    if (!marketPredictions?.[asset]) {
-      fetchMarketData(asset);
     }
   };
 
@@ -301,11 +226,11 @@ export const Dashboard: React.FC = () => {
       )}
 
       {!loading && !error && portfolio && (
-        <Tabs defaultValue="overview" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="mb-4">
             <TabsTrigger value="overview">投资组合概览</TabsTrigger>
-            <TabsTrigger value="alerts">风险警报</TabsTrigger>
             <TabsTrigger value="risk">风险分析</TabsTrigger>
+            <TabsTrigger value="alerts">风险警报</TabsTrigger>
             <TabsTrigger value="market">市场分析</TabsTrigger>
             <TabsTrigger value="api">API测试</TabsTrigger>
           </TabsList>
@@ -545,8 +470,7 @@ export const Dashboard: React.FC = () => {
                         size="sm"
                         className="relative w-full mt-6 overflow-hidden font-medium text-white transition-all duration-300 shadow-sm group/btn bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700 hover:shadow-md dark:shadow-blue-900/20"
                         onClick={() => {
-                          const riskTab = document.querySelector('[data-value="risk"]') as HTMLButtonElement;
-                          if (riskTab) riskTab.click();
+                          setActiveTab("risk");
                         }}
                       >
                         {/* 按钮背景动画效果 */}
@@ -570,12 +494,12 @@ export const Dashboard: React.FC = () => {
 
           {/* 风险分析标签页 */}
           <TabsContent value="risk" className="mt-0">
-            <RiskMonitor portfolio={portfolio} riskAnalysis={riskAnalysis} marketRisk={marketRisk} analyzing={analyzing} completed={riskAnalysis !== null} onAnalyze={analyzeWalletRisk} />
+            <RiskMonitor portfolio={portfolio} riskAnalysis={riskAnalysis} analyzing={analyzing} completed={riskAnalysis !== null} onAnalyze={analyzeWalletRisk} />
           </TabsContent>
 
           {/* 市场分析标签页 */}
           <TabsContent value="market" className="mt-0">
-            <MarketAnalysis marketPredictions={marketPredictions} loading={loadingMarketData} onAssetSelect={handleAssetSelect} />
+            <MarketAnalysis portfolio={portfolio} />
           </TabsContent>
 
           {/* API测试标签页 */}

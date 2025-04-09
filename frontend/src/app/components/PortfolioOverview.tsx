@@ -89,7 +89,7 @@ const SimplePieChart: React.FC<{
                   setShowTooltip(false);
                 }}
               />
-              {percentage > 5 && (
+              {
                 <text
                   x={x}
                   y={y}
@@ -113,19 +113,10 @@ const SimplePieChart: React.FC<{
                     {percentage.toFixed(1)}%
                   </tspan>
                 </text>
-              )}
+              }
             </React.Fragment>
           );
         })}
-
-        {showTooltip && (
-          <g className="pointer-events-none">
-            <rect x={tooltipContent.x - 15} y={tooltipContent.y - 12} width="30" height="24" rx="4" fill="rgba(0,0,0,0.8)" className="animate-fadeIn" />
-            <text x={tooltipContent.x} y={tooltipContent.y} fontSize="4" fontWeight="bold" fill="white" textAnchor="middle" dominantBaseline="middle">
-              {formatTooltipValue(tooltipContent.value)}
-            </text>
-          </g>
-        )}
       </svg>
     </div>
   );

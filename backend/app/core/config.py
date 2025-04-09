@@ -52,8 +52,10 @@ class Settings(BaseSettings):
     # AI设置
     OPENAI_API_KEY: str = Field(..., env="OPENAI_API_KEY")
     OPENAI_API_URL: str = Field(..., env="OPENAI_API_URL")
-
     AI_MODEL: str = Field(default="gpt-3.5-turbo", env="OPENAI_API_MODEL")
+    ENABLE_EXTERNAL_AI: bool = Field(
+        default=False, env="ENABLE_EXTERNAL_AI"
+    )  # 控制是否启用外部AI服务
 
     # 代理设置
     PROXY_URL: str = Field(default="http://127.0.0.1:7890", env="PROXY_URL")

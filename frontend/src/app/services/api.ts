@@ -77,6 +77,7 @@ export interface Protocol {
 }
 
 export interface MarketPrediction {
+  asset?: string;
   trend: string;
   trend_strength: string;
   risk_level: string;
@@ -99,6 +100,23 @@ export interface MarketPrediction {
     take_profit?: number[];
   };
   alerts?: Array<{ message: string }>;
+  price_history?: {
+    timestamp: { [key: string]: string };
+    price: { [key: string]: number };
+    volume: { [key: string]: number };
+    market_cap: { [key: string]: number };
+    source: { [key: string]: string };
+  };
+  predictions?: Array<{
+    target: string;
+    timeframe: string;
+    value: number;
+    probability: number;
+    range: [number, number];
+  }>;
+  insights?: string[];
+  confidence?: number;
+  timestamp?: string;
 }
 
 export interface ProtocolRisk {
@@ -550,6 +568,7 @@ class ApiService {
 
       // 将后端响应转换为前端期望的MarketPrediction格式
       return {
+        asset: response.asset,
         trend: response.trend || "neutral",
         trend_strength: response.trend_strength || "medium",
         risk_level: response.risk_level || "medium",
@@ -565,10 +584,55 @@ class ApiService {
         },
         recommendations: response.recommendations || [],
         trading_signals: response.trading_signals || [],
-        key_levels: response.key_levels
+        key_levels: response.key_levels,
+        price_history: response.price_history,
+        predictions: response.predictions,
+        insights: response.insights,
+        confidence: response.confidence,
+        timestamp: response.timestamp
       };
     } catch (error) {
       console.error(`获取${asset}市场预测失败:`, error);
+      throw error;
+    }
+  }
+
+  // 使用传入的完整市场数据进行预测，而不是从API获取
+  async predictMarketWithData(data: any): Promise<MarketPrediction> {
+    try {
+      // 验证必要的数据字段
+      if (!data.asset || !data.price_history || !data.predictions) {
+        throw new Error('缺少必要的数据字段: asset, price_history, predictions');
+      }
+
+      const asset = data.asset;
+      // 构建MarketPrediction对象
+      return {
+        asset: asset,
+        trend: data.trend || "neutral",
+        trend_strength: data.trend_strength || "medium",
+        risk_level: data.risk_level || "medium",
+        predicted_price_range: data.predicted_price_range || {
+          "24h": [0, 0],
+          "7d": [0, 0]
+        },
+        technical_analysis: data.technical_analysis || {
+          ma_trend: "neutral",
+          macd_signal: "neutral",
+          bollinger_signal: "neutral",
+          volume_analysis: "normal"
+        },
+        recommendations: data.recommendations || [],
+        trading_signals: data.trading_signals || [],
+        key_levels: data.key_levels,
+        price_history: data.price_history,
+        predictions: data.predictions,
+        insights: data.insights || [],
+        confidence: data.confidence || 0.5,
+        timestamp: data.timestamp || new Date().toISOString()
+      };
+    } catch (error) {
+      console.error(`处理市场数据失败:`, error);
       throw error;
     }
   }

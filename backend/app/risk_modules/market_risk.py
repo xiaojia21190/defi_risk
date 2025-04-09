@@ -1005,17 +1005,6 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
             risk_factors
         )
 
-        # 如果有AI服务，增加更多个性化建议
-        if self.ai_predictor and hasattr(
-            self.ai_predictor, "generate_market_risk_recommendations"
-        ):
-            try:
-                ai_recommendations = await self._get_ai_recommendations(risk_factors)
-                if ai_recommendations:
-                    recommendations.extend(ai_recommendations)
-            except Exception as e:
-                self.logger.error(f"获取AI市场风险建议时出错: {str(e)}")
-
         return recommendations
 
     async def get_monitoring_points(self, risk_factors: List[RiskFactor]) -> List[str]:
@@ -1125,9 +1114,7 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
             }
 
             # 获取AI建议
-            result = await self.ai_predictor.generate_market_risk_recommendations(
-                risk_data
-            )
+            result = self.ai_predictor.generate_market_risk_recommendations(risk_data)
             if result and "recommendations" in result:
                 return result["recommendations"]
         except Exception as e:

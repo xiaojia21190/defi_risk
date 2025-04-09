@@ -2,11 +2,12 @@
 
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { useState, useEffect } from "react";
-import { Wallet, LogOut, ChevronDown, Copy, ExternalLink, Check } from "lucide-react";
+import { LogOut, ChevronDown, Copy, ExternalLink, Check, Wallet, Coins } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { MetaMaskIcon, WalletConnectIcon } from "./WalletIcons";
 
 export function ConnectButton() {
   const { address, isConnected } = useAccount();
@@ -14,6 +15,7 @@ export function ConnectButton() {
   const { disconnect } = useDisconnect();
   const [copied, setCopied] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   // 检查是否处于演示模式
   useEffect(() => {
@@ -34,6 +36,36 @@ export function ConnectButton() {
   const viewOnExplorer = () => {
     if (address) {
       window.open(`https://sepolia.etherscan.io/address/${address}`, "_blank");
+    }
+  };
+
+  // 处理钱包连接
+  const handleConnect = (connector: any) => {
+    connect({ connector });
+    setDialogOpen(false);
+  };
+
+  // 获取钱包图标
+  const getWalletIcon = (name: string) => {
+    switch (name) {
+      case "MetaMask":
+        return <MetaMaskIcon className="text-orange-500" />;
+      case "WalletConnect":
+        return <WalletConnectIcon className="text-blue-500" />;
+      default:
+        return <Coins className="w-5 h-5 text-primary" />;
+    }
+  };
+
+  // 获取钱包背景色
+  const getWalletBgColor = (name: string) => {
+    switch (name) {
+      case "MetaMask":
+        return "bg-orange-500/10";
+      case "WalletConnect":
+        return "bg-blue-500/10";
+      default:
+        return "bg-primary/10";
     }
   };
 
@@ -81,13 +113,30 @@ export function ConnectButton() {
         </Button>
       )}
 
-      {connectors.map((connector) => (
-        <Button key={connector.uid} onClick={() => connect({ connector })} disabled={isPending} className="relative overflow-hidden group">
-          <span className={cn("absolute inset-0 w-full h-full bg-gradient-to-r from-primary/0 via-primary-foreground/20 to-primary/0 -translate-x-full", "group-hover:animate-shimmer")} />
-          <Wallet className="w-4 h-4 mr-2" />
-          {isPending ? "连接中..." : `连接${connector.name}`}
-        </Button>
-      ))}
+      <Button variant="outline" className="relative overflow-hidden group" onClick={() => setDialogOpen(true)}>
+        <span className={cn("absolute inset-0 w-full h-full bg-gradient-to-r from-primary/0 via-primary-foreground/20 to-primary/0 -translate-x-full", "group-hover:animate-shimmer")} />
+        <Wallet className="w-4 h-4 mr-2" />
+        连接钱包
+      </Button>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>选择钱包</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            {connectors.map((connector) => (
+              <Button key={connector.uid} onClick={() => handleConnect(connector)} disabled={isPending} className="flex items-center justify-start gap-3 h-auto py-3 px-4 transition-all duration-200 hover:scale-[1.02]" variant="outline">
+                <div className={cn("flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-full", getWalletBgColor(connector.name))}>{getWalletIcon(connector.name)}</div>
+                <div className="flex flex-col items-start">
+                  <span className="font-medium">{connector.name}</span>
+                  <span className="text-xs text-muted-foreground">{connector.name === "MetaMask" ? "最受欢迎的以太坊钱包" : connector.name === "WalletConnect" ? "支持多种钱包的连接方式" : "连接您的钱包"}</span>
+                </div>
+              </Button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

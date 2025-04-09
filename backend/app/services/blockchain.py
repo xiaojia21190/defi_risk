@@ -730,7 +730,7 @@ class BlockchainService:
                     if platform_name not in platform_assets:
                         platform_assets[platform_name] = {
                             "protocol": platform_name,
-                            "total_assets": wallet_platform.get(
+                            "total_assets": platform.get(
                                 "currencyAmount", 0
                             ),  # 总资产价值
                             "total_debts": 0.0,  # 总负债价值
@@ -1038,120 +1038,49 @@ class BlockchainService:
         # 直接调用CoinGecko方法
         return await self._get_coingecko_24h_data(asset)
 
-    def _normalize_asset_symbol(self, asset: str) -> str:
+    def _normalize_asset_symbol(self, asset: str, format: str = "binance") -> str:
         """
-        将资产名称标准化为Binance交易对符号
+        标准化资产名称符号
 
         Args:
             asset: 资产名称或代币符号
+            format: 输出格式，可选 'binance' 或 'coingecko'
 
         Returns:
-            str: 标准化后的交易对符号
+            str: 标准化后的符号
         """
-        # 移除空格并转为大写
-        asset = asset.strip().upper()
 
-        # 常见稳定币和主流代币的映射
-        common_assets = {
-            "ETH": "ETHUSDT",
-            "ETHEREUM": "ETHUSDT",
-            "BTC": "BTCUSDT",
-            "BITCOIN": "BTCUSDT",
-            "USDC": "USDCUSDT",
-            "USDT": "USDTBUSD",  # USDT本身通常不与USDT交易
-            "DAI": "DAIUSDT",
-            "BNB": "BNBUSDT",
-            "SOL": "SOLUSDT",
-            "MATIC": "MATICUSDT",
-            "POLYGON": "MATICUSDT",
-            "AVAX": "AVAXUSDT",
-            "AVALANCHE": "AVAXUSDT",
-            "DOT": "DOTUSDT",
-            "POLKADOT": "DOTUSDT",
-            "ADA": "ADAUSDT",
-            "CARDANO": "ADAUSDT",
-            "LINK": "LINKUSDT",
-            "CHAINLINK": "LINKUSDT",
-            "UNI": "UNIUSDT",
-            "UNISWAP": "UNIUSDT",
-            "AAVE": "AAVEUSDT",
-            "SUSHI": "SUSHIUSDT",
-            "SUSHISWAP": "SUSHIUSDT",
-            "COMP": "COMPUSDT",
-            "COMPOUND": "COMPUSDT",
-            "MKR": "MKRUSDT",
-            "MAKER": "MKRUSDT",
-            "CRV": "CRVUSDT",
-            "CURVE": "CRVUSDT",
-            "SNX": "SNXUSDT",
-            "SYNTHETIX": "SNXUSDT",
-            "YFI": "YFIUSDT",
-            "YEARN": "YFIUSDT",
-            "1INCH": "1INCHUSDT",
+        asset = asset.strip()
+
+        # 处理常见的代币前缀
+        # 移除 "st" 前缀（质押代币）
+        if asset.lower().startswith("st") and len(asset) > 2:
+            # 确保是前缀而不是代币名称本身的一部分
+            self.logger.info(f"移除质押代币前缀: {asset} -> {asset[2:]}")
+            return asset[2:]
+
+        # 其他常见 DeFi 前缀处理
+        prefixes = {
+            "c": "compound ",  # Compound 代币
+            "a": "aave ",  # Aave 代币
+            "x": "x",  # 合成代币
+            "v": "v",  # 某些版本代币
+            "b": "b",  # 代表"Bridge"或"Binance"上的代币
+            "f": "frax ",  # Frax Finance 代币
         }
 
-        # 检查是否是常见资产
-        if asset in common_assets:
-            return common_assets[asset]
+        for prefix, full_name in prefixes.items():
+            if (
+                asset.lower().startswith(prefix)
+                and len(asset) > 1
+                and asset[1].isupper()
+            ):
+                # 这里我们不移除前缀，而是记录映射关系
+                self.logger.debug(f"识别到 {full_name.strip()} 代币: {asset}")
+                break
 
-        # 处理封装代币
-        wrapped_tokens = {
-            "WETH": "ETHUSDT",
-            "WBTC": "BTCUSDT",
-            "WBNB": "BNBUSDT",
-            "WMATIC": "MATICUSDT",
-            "WAVAX": "AVAXUSDT",
-        }
-
-        if asset in wrapped_tokens:
-            self.logger.info(f"将封装代币 {asset} 映射到 {wrapped_tokens[asset]}")
-            return wrapped_tokens[asset]
-
-        # 处理LP代币和复合代币
-        if "/" in asset or "-" in asset or "LP" in asset:
-            self.logger.info(f"检测到LP代币或复合代币: {asset}")
-            # 尝试提取基础代币
-            parts = asset.replace("-", "/").split("/")
-            if len(parts) >= 2:
-                # 尝试获取第一个代币的价格
-                base_token = parts[0].strip()
-                self.logger.info(f"尝试使用基础代币 {base_token} 的价格")
-                if base_token in common_assets:
-                    return common_assets[base_token]
-                # 如果第一个代币不是常见代币，尝试第二个
-                if len(parts) > 1 and parts[1].strip() in common_assets:
-                    return common_assets[parts[1].strip()]
-
-        # 处理合成代币和衍生品
-        synthetic_tokens = {
-            "SETH": "ETHUSDT",  # 合成ETH
-            "SBTC": "BTCUSDT",  # 合成BTC
-            "CETH": "ETHUSDT",  # Compound ETH
-            "CBTC": "BTCUSDT",  # Compound BTC
-            "STETH": "ETHUSDT",  # Staked ETH
-            "RETH": "ETHUSDT",  # Rocket Pool ETH
-            "FRXETH": "ETHUSDT",  # Frax ETH
-        }
-
-        if asset in synthetic_tokens:
-            self.logger.info(f"将合成代币 {asset} 映射到 {synthetic_tokens[asset]}")
-            return synthetic_tokens[asset]
-
-        # 如果是以ETH结尾，可能是ETH交易对
-        if asset.endswith("ETH") and asset != "ETH":
-            base_token = asset[:-3]
-            self.logger.info(f"检测到ETH交易对: {asset}，尝试转换为USDT交易对")
-            return f"{base_token}USDT"
-
-        # 如果是以BTC结尾，可能是BTC交易对
-        if asset.endswith("BTC") and asset != "BTC":
-            base_token = asset[:-3]
-            self.logger.info(f"检测到BTC交易对: {asset}，尝试转换为USDT交易对")
-            return f"{base_token}USDT"
-
-        # 默认添加USDT后缀
-        self.logger.info(f"未识别的代币 {asset}，默认添加USDT后缀")
-        return f"{asset}USDT"
+        # 对于 Coingecko 格式，我们直接返回处理后的结果，不添加交易对后缀
+        return asset
 
     async def get_asset_historical_data(self, asset: str) -> Optional[pd.DataFrame]:
         """
@@ -1174,96 +1103,6 @@ class BlockchainService:
             self.logger.warning(
                 f"从CoinGecko获取{asset}的历史数据失败: {e}，尝试使用Binance数据"
             )
-        # try:
-        #     # 检查缓存
-        #     cache_key = f"historical_data_{asset}"
-        #     cache_interval = "1h"
-        #     cached_data = self.historical_data_cache.get(cache_key, cache_interval)
-
-        #     if cached_data is not None:
-        #         self.logger.info(f"从缓存获取{asset}的历史数据")
-        #         return cached_data
-
-        #     asset = self._normalize_asset_symbol(asset)
-
-        #     """从Binance API获取历史数据"""
-        #     url = "https://api.binance.com/api/v3/klines"
-        #     # 计算时间范围（过去30天）
-        #     end_time = int(datetime.now().timestamp() * 1000)
-        #     start_time = end_time - (30 * 24 * 60 * 60 * 1000)  # 30天的毫秒数
-
-        #     # 设置请求参数
-        #     params = {
-        #         "symbol": asset,
-        #         "interval": "1d",  # 1天的K线
-        #         "startTime": start_time,
-        #         "endTime": end_time,
-        #         "limit": 30,  # 最多30个数据点
-        #     }
-
-        #     try:
-        #         response = requests.get(url, params=params, proxies=proxies)
-        #         if response.status_code == 200:
-        #             data = response.json()
-
-        #             if not data:
-        #                 logger.warning(f"Binance返回的{asset}数据为空")
-        #                 return None
-
-        #             # 创建DataFrame
-        #             # Binance K线数据格式:
-        #             # [
-        #             #   [
-        #             #     开盘时间,
-        #             #     开盘价,
-        #             #     最高价,
-        #             #     最低价,
-        #             #     收盘价,
-        #             #     成交量,
-        #             #     收盘时间,
-        #             #     成交额,
-        #             #     成交笔数,
-        #             #     主动买入成交量,
-        #             #     主动买入成交额,
-        #             #     忽略
-        #             #   ]
-        #             # ]
-        #             df = pd.DataFrame(
-        #                 {
-        #                     "timestamp": [
-        #                         datetime.fromtimestamp(k[0] / 1000) for k in data
-        #                     ],
-        #                     "price": [float(k[4]) for k in data],  # 使用收盘价
-        #                     "volume": [float(k[5]) for k in data],
-        #                     "market_cap": [None] * len(data),  # Binance不提供市值数据
-        #                 }
-        #             )
-        #             df["source"] = "binance"
-        #             # 存入缓存
-        #             self.historical_data_cache.set(cache_key, df, cache_interval)
-        #             return df
-        #         else:
-        #             logger.error(f"Binance API返回错误: {response.status}")
-        #             # 返回默认数据
-        #             df = pd.DataFrame(
-        #                 {
-        #                     "timestamp": [],
-        #                     "price": [],
-        #                     "volume": [],
-        #                     "market_cap": [],
-        #                     "source": [],
-        #                 }
-        #             )
-        #             return df
-
-        #     except Exception as e:
-        #         logger.error(f"获取{asset}历史数据失败: {str(e)}")
-        #         return None
-
-        #     return data
-        # except Exception as e:
-        #     self.logger.error(f"获取资产历史数据失败: {str(e)}")
-        #     return {}
 
     # 获取 get_protocol 作缓存
     async def get_protocol(self, protocol: str) -> Dict[str, Any]:
@@ -2380,23 +2219,31 @@ class BlockchainService:
         # 1. 首先尝试通过symbol精确匹配
         for coin in coins_list:
             if coin["symbol"].lower() == normalized_asset.lower():
-                self.logger.debug(f"通过symbol匹配到代币: {asset} -> {coin['id']}")
+                self.logger.debug(
+                    f"通过symbol匹配到代币: {normalized_asset} -> {coin['id']}"
+                )
                 return coin["id"]
 
         # 2. 然后尝试通过id匹配
         for coin in coins_list:
             if coin["id"].lower() == normalized_asset.lower():
-                self.logger.debug(f"通过id匹配到代币: {asset} -> {coin['id']}")
+                self.logger.debug(
+                    f"通过id匹配到代币: {normalized_asset} -> {coin['id']}"
+                )
                 return coin["id"]
 
         # 3. 最后尝试通过name匹配
         for coin in coins_list:
-            if coin["name"].lower() == asset.lower():  # 使用原始资产名进行name匹配
-                self.logger.debug(f"通过name匹配到代币: {asset} -> {coin['id']}")
+            if (
+                coin["name"].lower() == normalized_asset.lower()
+            ):  # 使用原始资产名进行name匹配
+                self.logger.debug(
+                    f"通过name匹配到代币: {normalized_asset} -> {coin['id']}"
+                )
                 return coin["id"]
 
         # 如果都匹配不到，记录警告并返回原始资产符号
-        self.logger.warning(f"无法在CoinGecko找到对应的代币ID: {asset}")
+        self.logger.warning(f"无法在CoinGecko找到对应的代币ID: {normalized_asset}")
         return normalized_asset.lower()
 
     async def _get_coingecko_24h_data(self, asset: str) -> Optional[Dict]:

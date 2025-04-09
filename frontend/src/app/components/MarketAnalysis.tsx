@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 import { Loader2, TrendingUp, TrendingDown, AlertTriangle, Info, ArrowUpDown } from "lucide-react";
 import type { MarketPrediction, Portfolio } from "../services/api";
+import { apiService } from "../services/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,22 +29,123 @@ interface ExtendedMarketPrediction extends MarketPrediction {
     range: [number, number];
   }>;
   insights: string[];
+  recommendations: string[];
   timestamp: string;
   confidence: number;
 }
 
 interface MarketAnalysisProps {
-  marketPredictions: { [key: string]: ExtendedMarketPrediction } | null;
-  loading: boolean;
-  onAssetSelect: (asset: string) => void;
+  portfolio: Portfolio | null;
 }
 
-const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ marketPredictions, loading, onAssetSelect }) => {
+const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ portfolio }) => {
   const [timeFrame, setTimeFrame] = useState<"24h" | "7d">("24h");
   const [selectedAsset, setSelectedAsset] = useState<string>("ETH");
+  const [marketPredictions, setMarketPredictions] = useState<{ [key: string]: ExtendedMarketPrediction } | null>(null);
+  const [loadingMarketData, setLoadingMarketData] = useState(false);
 
   const prediction = marketPredictions?.[selectedAsset];
-  const isLoading = loading || !prediction;
+  const isLoading = loadingMarketData || !prediction;
+
+  // 获取市场分析数据
+  const fetchMarketData = async (asset: string) => {
+    try {
+      setLoadingMarketData(true);
+
+      // 判断是否是特定资产的测试数据
+
+      // 调用市场预测API
+      const prediction = await apiService.predictMarket(asset, "24h");
+
+      // 扩展市场预测数据
+      const extendedPrediction = {
+        ...prediction,
+        asset,
+        time_frame: "24h",
+        price_history: prediction.price_history || {
+          timestamp: { "1": new Date().toISOString(), "2": new Date(Date.now() - 86400000).toISOString() },
+          price: { "1": 1800, "2": 1750 }, // 示例数据，实际应从API获取
+          volume: { "1": 3000000, "2": 2800000 },
+          market_cap: { "1": 200000000, "2": 195000000 },
+          source: { "1": "api", "2": "api" },
+        },
+        predictions: prediction.predictions || [
+          {
+            target: "price",
+            timeframe: "24h",
+            value: prediction.predicted_price_range["24h"][1],
+            probability: 0.8,
+            range: prediction.predicted_price_range["24h"],
+          },
+        ],
+        insights: prediction.insights || prediction.recommendations || [],
+        recommendations: prediction.recommendations || [],
+        timestamp: prediction.timestamp || new Date().toISOString(),
+        confidence: prediction.confidence || 0.75,
+      };
+
+      setMarketPredictions((prev) => ({
+        ...prev,
+        [asset]: extendedPrediction,
+      }));
+    } catch (error) {
+      console.error("获取市场分析数据失败:", error);
+    } finally {
+      setLoadingMarketData(false);
+    }
+  };
+
+  // 处理资产选择
+  const handleAssetSelect = (asset: string) => {
+    setSelectedAsset(asset);
+    if (!marketPredictions?.[asset]) {
+      fetchMarketData(asset);
+    }
+  };
+
+  // 当portfolio变化时，自动选择第一个可用资产并获取数据
+  useEffect(() => {
+    if (portfolio && portfolio.positions && portfolio.positions.length > 0) {
+      const uniqueAssets = [...new Set(portfolio.positions.map((position) => position.asset))];
+      if (uniqueAssets.length > 0) {
+        const newAsset = uniqueAssets[0];
+        setSelectedAsset(newAsset);
+        fetchMarketData(newAsset);
+      }
+    }
+  }, [portfolio]);
+
+  // 当选择的资产变化时，获取数据
+  useEffect(() => {
+    if (selectedAsset && !marketPredictions?.[selectedAsset]) {
+      fetchMarketData(selectedAsset);
+    }
+  }, [selectedAsset]);
+
+  // 获取可用资产列表
+  const getAssetOptions = () => {
+    if (portfolio && portfolio.positions && portfolio.positions.length > 0) {
+      // 从portfolio中提取不重复的资产
+      const uniqueAssets = [...new Set(portfolio.positions.map((position) => position.asset))];
+      return uniqueAssets.map((asset) => (
+        <option key={asset} value={asset}>
+          {asset}
+        </option>
+      ));
+    }
+    // 默认选项，当portfolio不可用时
+    return [
+      <option key="ETH" value="ETH">
+        ETH
+      </option>,
+      <option key="BTC" value="BTC">
+        BTC
+      </option>,
+      <option key="USDC" value="USDC">
+        USDC
+      </option>,
+    ];
+  };
 
   const getTrendIcon = (priceChange: number) => {
     if (priceChange > 0) {
@@ -61,19 +163,32 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ marketPredictions, load
     const prices = Object.values(prediction.price_history.price);
     const volumes = Object.values(prediction.price_history.volume);
 
-    return timestamps.map((timestamp, index) => ({
+    // 根据选择的时间范围过滤数据
+    let filteredData = timestamps.map((timestamp, index) => ({
       time: new Date(timestamp).toLocaleString(),
       price: prices[index],
       volume: volumes[index],
+      rawTimestamp: new Date(timestamp).getTime(),
     }));
+
+    // 根据timeFrame进行过滤
+    if (timeFrame === "24h") {
+      // 最近24小时的数据，取最后一天的数据
+      const oneDayMs = 24 * 60 * 60 * 1000;
+      const latestTime = Math.max(...filteredData.map((d) => d.rawTimestamp));
+      filteredData = filteredData.filter((d) => d.rawTimestamp >= latestTime - oneDayMs);
+    }
+    // 7d 时显示所有数据
+
+    return filteredData;
   };
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("zh-CN", {
       style: "currency",
       currency: "USD",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: 5,
+      maximumFractionDigits: 5,
     }).format(value);
   };
 
@@ -97,8 +212,34 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ marketPredictions, load
     if (!prediction?.price_history.price) return 0;
     const prices = Object.values(prediction.price_history.price);
     if (prices.length < 2) return 0;
+
+    // 获取最新价格和前一天的价格用于计算24小时变化
     const currentPrice = prices[prices.length - 1];
-    const previousPrice = prices[prices.length - 2];
+
+    // 计算24小时前的价格
+    let previousPriceIndex = prices.length - 1;
+    if (timeFrame === "24h") {
+      // 尝试找到接近24小时前的价格点
+      const timestamps = Object.values(prediction.price_history.timestamp);
+      const latestTime = new Date(timestamps[timestamps.length - 1]).getTime();
+      const oneDayMs = 24 * 60 * 60 * 1000;
+      const targetTime = latestTime - oneDayMs;
+
+      // 寻找最接近目标时间的价格点
+      let closestTimeDiff = Infinity;
+      for (let i = 0; i < timestamps.length; i++) {
+        const timeDiff = Math.abs(new Date(timestamps[i]).getTime() - targetTime);
+        if (timeDiff < closestTimeDiff) {
+          closestTimeDiff = timeDiff;
+          previousPriceIndex = i;
+        }
+      }
+    } else {
+      // 7天模式，对比第一个和最后一个价格
+      previousPriceIndex = 0;
+    }
+
+    const previousPrice = prices[previousPriceIndex];
     return ((currentPrice - previousPrice) / previousPrice) * 100;
   };
 
@@ -117,13 +258,11 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ marketPredictions, load
               value={selectedAsset}
               onChange={(e) => {
                 setSelectedAsset(e.target.value);
-                onAssetSelect(e.target.value);
+                handleAssetSelect(e.target.value);
               }}
               className="px-3 py-1 text-sm border rounded-md border-input bg-background"
             >
-              <option value="ETH">ETH</option>
-              <option value="BTC">BTC</option>
-              <option value="USDC">USDC</option>
+              {getAssetOptions()}
             </select>
           </div>
         </div>
@@ -154,10 +293,12 @@ const MarketAnalysis: React.FC<MarketAnalysisProps> = ({ marketPredictions, load
                 <div className="mb-1 text-sm text-muted-foreground">预测价格</div>
                 <div className="flex items-center">
                   <Badge variant="default" className="flex items-center gap-1">
-                    <span className="flex items-center gap-1">{formatCurrency(prediction?.predictions[0]?.value || 0)}</span>
+                    <span className="flex items-center gap-1">{formatCurrency(prediction?.predictions.find((p) => p.timeframe === timeFrame)?.value || prediction?.predictions[0]?.value || 0)}</span>
                   </Badge>
                 </div>
-                <div className="mt-2 text-xs text-muted-foreground">置信度: {(prediction?.confidence * 100).toFixed(1)}%</div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                  置信度: {(prediction?.confidence * 100).toFixed(1)}%{prediction?.predictions.find((p) => p.timeframe === timeFrame)?.probability && ` (概率: ${(prediction?.predictions.find((p) => p.timeframe === timeFrame)?.probability || 0) * 100}%)`}
+                </div>
               </div>
 
               <div className="p-4 border rounded-lg bg-card/50">

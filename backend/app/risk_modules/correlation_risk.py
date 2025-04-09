@@ -688,8 +688,8 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
                 # 遍历每个协议中的具体资产positions
                 for pos in inner_positions:
                     invest_type = self._safe_get_attr(pos, "invest_type", 0)
-                    invest_type_name = self._safe_get_attr(
-                        pos, "invest_type_name", "未知类型"
+                    invest_type_name = self.blockchain_service._get_invest_type_name(
+                        invest_type
                     )
                     amount = self._safe_get_attr(pos, "amount", 0)
                     try:

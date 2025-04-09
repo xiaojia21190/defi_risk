@@ -5,12 +5,15 @@ import pandas as pd
 import numpy as np
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Union
 import json
 from app.core.config import settings
 from openai import OpenAI
 from app.models.domain.risk import RiskFactor
 import asyncio
+import time
+import uuid
+import traceback
 
 logger = logging.getLogger("defi_risk.ai_predictor")
 
@@ -24,7 +27,7 @@ class AiPredictor:
         # 初始化OpenAI客户端
         self.client = None
         try:
-            client_http = httpx.Client(proxy="http://127.0.0.1:7890")
+            client_http = httpx.Client(proxies=settings.PROXY_URL)
             if settings.OPENAI_API_KEY:
                 self.client = OpenAI(
                     api_key=settings.OPENAI_API_KEY,
@@ -1329,7 +1332,7 @@ class AiPredictor:
 
             # 尝试发送一个简单的请求来测试连接
             response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "你是一个AI助手。"},
                     {"role": "user", "content": "测试连接"},
@@ -1698,206 +1701,485 @@ class AiPredictor:
                     "confidence": 0.9,
                 }
 
-            # 计算资产分布
-            assets = {}
-            protocols = {}
-            investment_types = {}
-            total_value = 0
-            high_risk_positions = []
-            liquidation_risk_positions = []
-
-            for position in positions:
-                asset = position.get("asset", "未知资产")
-                protocol = position.get("protocol", "未知协议")
-                invest_type = position.get("invest_type", 0)
-                usd_value = float(position.get("usd_value", 0))
-
-                # 累计资产价值
-                if asset in assets:
-                    assets[asset] += usd_value
-                else:
-                    assets[asset] = usd_value
-
-                # 累计协议价值
-                if protocol in protocols:
-                    protocols[protocol] += usd_value
-                else:
-                    protocols[protocol] = usd_value
-
-                # 累计投资类型价值
-                invest_type_name = self._get_invest_type_name(invest_type)
-                if invest_type_name in investment_types:
-                    investment_types[invest_type_name] += usd_value
-                else:
-                    investment_types[invest_type_name] = usd_value
-
-                total_value += usd_value
-
-                # 检查高风险和清算风险头寸
-                risk_score = position.get("risk_score", 0)
-                health_factor = position.get("health_factor", 10)
-
-                if risk_score > 70:
-                    high_risk_positions.append(position)
-
-                if health_factor < 1.5 and invest_type in [1, 2]:  # 借贷和杠杆头寸
-                    liquidation_risk_positions.append(position)
-
-            # 计算投资组合的关键指标
-            insights = []
-            recommendations = []
-            warnings = []
-
-            # 1. 资产集中度分析
-            if total_value > 0:
-                assets_sorted = sorted(
-                    [(k, v) for k, v in assets.items()],
-                    key=lambda x: x[1],
-                    reverse=True,
-                )
-                if assets_sorted and assets_sorted[0][1] / total_value > 0.5:
-                    top_asset = assets_sorted[0][0]
-                    top_pct = assets_sorted[0][1] / total_value * 100
-                    insights.append(
-                        f"您的投资组合过于集中在{top_asset}，占总资产的{top_pct:.1f}%，增加了单一资产风险"
-                    )
-                    recommendations.append(
-                        f"考虑将部分{top_asset}转换为其他资产，降低集中度至40%以下"
-                    )
-
-            # 2. 协议分散度分析
-            if len(protocols) == 1:
-                protocol_name = list(protocols.keys())[0]
-                insights.append(
-                    f"您的投资全部集中在{protocol_name}协议，缺乏协议多样性"
-                )
-                recommendations.append("考虑分散投资到2-3个不同的协议，降低协议风险")
-            elif len(protocols) > 5:
-                insights.append(
-                    f"您的投资分散在{len(protocols)}个协议，管理成本可能较高"
-                )
-                recommendations.append("考虑合并部分小额投资，减少管理复杂度")
-
-            # 3. 投资类型分析
-            if (
-                "借贷" in investment_types
-                and investment_types.get("借贷", 0) / total_value > 0.4
-            ):
-                insights.append("借贷头寸占比过高，增加了清算风险")
-                recommendations.append("减少借贷头寸的比例，确保不超过总资产的30%")
-
-            if (
-                "流动性挖矿" in investment_types
-                and investment_types.get("流动性挖矿", 0) / total_value > 0.5
-            ):
-                insights.append("流动性挖矿占比较高，面临无常损失风险")
-                recommendations.append(
-                    "关注流动性池资产的相关性，选择相关性低的资产对提供流动性"
-                )
-
-            # 4. 风险警告
-            if len(high_risk_positions) > 0:
-                warnings.append(
-                    f"检测到{len(high_risk_positions)}个高风险头寸，建议密切关注"
-                )
-
-            if len(liquidation_risk_positions) > 0:
-                protocol_names = ", ".join(
-                    set([p.get("protocol", "未知") for p in liquidation_risk_positions])
-                )
-                warnings.append(
-                    f"{protocol_names}上的借贷头寸健康因子低于1.5，存在清算风险"
-                )
-                recommendations.append(
-                    "立即补充抵押品或偿还部分债务，提高健康因子至2.0以上"
-                )
-
-            # 5. 基于风险指标的一般性建议
-            market_risk = risk_metrics.get("market_risk", 0)
-            liquidity_risk = risk_metrics.get("liquidity_risk", 0)
-
-            if market_risk > 70:
-                insights.append("当前市场风险较高，投资组合波动可能加剧")
-                recommendations.append("考虑增加稳定币比例，对冲市场下行风险")
-
-            if liquidity_risk > 70:
-                insights.append("投资组合流动性风险较高，可能面临兑现困难")
-                recommendations.append("增加高流动性资产的比例，确保资金灵活性")
-
-            # 6. 稳定币分析
-            stablecoin_assets = [
-                "USDT",
-                "USDC",
-                "DAI",
-                "BUSD",
-                "TUSD",
-                "USDP",
-                "GUSD",
-                "USDD",
-                "FRAX",
-                "sUSD",
-            ]
-            stablecoin_value = sum(assets.get(coin, 0) for coin in stablecoin_assets)
-            stablecoin_ratio = stablecoin_value / total_value if total_value > 0 else 0
-
-            if stablecoin_ratio < 0.1:
-                insights.append(
-                    f"稳定币比例较低({stablecoin_ratio:.1%})，缺乏市场波动缓冲"
-                )
-                recommendations.append("增加稳定币比例至少20%，作为市场波动的缓冲")
-            elif stablecoin_ratio > 0.7:
-                insights.append(
-                    f"稳定币比例过高({stablecoin_ratio:.1%})，可能错过市场上涨机会"
-                )
-                recommendations.append("考虑将部分稳定币投入到收益较高的资产中")
-
-            # 确保至少有三条洞察和三条建议
-            if len(insights) < 3:
-                default_insights = [
-                    "投资组合综合风险评分处于中等水平，有优化空间",
-                    "当前仓位分布相对均衡，但可进一步优化",
-                    "考虑根据风险承受能力调整投资策略",
-                ]
-                insights.extend(default_insights[: 3 - len(insights)])
-
-            if len(recommendations) < 3:
-                default_recommendations = [
-                    "定期检查投资组合风险，每月至少一次",
-                    "关注市场趋势变化，及时调整投资策略",
-                    "探索新的DeFi机会，但控制在总资产的10%以内",
-                ]
-                recommendations.extend(
-                    default_recommendations[: 3 - len(recommendations)]
-                )
-
-            return {
-                "insights": insights,
-                "recommendations": recommendations,
-                "warnings": warnings,
-                "confidence": 0.85,
-                "supporting_data": {
-                    "asset_distribution": [
-                        {"name": k, "value": v} for k, v in assets.items()
-                    ],
-                    "protocol_distribution": [
-                        {"name": k, "value": v} for k, v in protocols.items()
-                    ],
-                    "investment_type_distribution": [
-                        {"name": k, "value": v} for k, v in investment_types.items()
-                    ],
-                    "stablecoin_ratio": stablecoin_ratio,
-                    "risk_level": risk_level,
-                },
+            # 准备AI服务输入
+            ai_service_input = {
+                "wallet_address": wallet_address,
+                "positions": positions,
+                "risk_metrics": risk_metrics,
+                "risk_factors": risk_factors,
             }
+
+            # 直接尝试使用AI服务
+            self.logger.info("直接调用AI服务进行投资组合分析...")
+
+            # 如果有外部AI服务可用，优先使用
+            try:
+                # 使用AI服务的analyze_with_predictor方法
+                self.logger.info("尝试使用外部AI服务...")
+                # 调用时需要基于规则的结果作为基础，所以先获取基础分析
+                rule_based_results = self._rule_based_portfolio_analysis(
+                    wallet_address,
+                    positions,
+                    risk_score,
+                    risk_level,
+                    risk_metrics,
+                    risk_factors,
+                )
+
+                # 将AI服务请求的数据结构与基础分析结合
+                ai_service_input.update(
+                    {
+                        "rule_based_analysis": rule_based_results,
+                        "use_external_ai": True,
+                    }
+                )
+
+                # 直接调用_generate_ai_portfolio_insights
+                return self._generate_ai_portfolio_insights(
+                    wallet_address,
+                    positions,
+                    risk_score,
+                    risk_level,
+                    risk_metrics,
+                    risk_factors,
+                    rule_based_results,
+                )
+
+            except Exception as e:
+                self.logger.error(f"使用外部AI服务失败: {str(e)}")
+                self.logger.info("回退到内部分析")
+
+            # 如果没有外部AI服务或者调用失败，执行规则分析后再调用AI增强
+            rule_based_results = self._rule_based_portfolio_analysis(
+                wallet_address,
+                positions,
+                risk_score,
+                risk_level,
+                risk_metrics,
+                risk_factors,
+            )
+
+            # 使用内部逻辑进行AI分析增强
+            return self._generate_ai_portfolio_insights(
+                wallet_address,
+                positions,
+                risk_score,
+                risk_level,
+                risk_metrics,
+                risk_factors,
+                rule_based_results,
+            )
 
         except Exception as e:
             self.logger.error(f"生成投资组合洞察失败: {str(e)}")
+            self.logger.error(traceback.format_exc())
             return {
                 "insights": [f"分析投资组合时出错: {str(e)}"],
                 "recommendations": ["建议重新分析或联系技术支持"],
                 "warnings": [],
                 "confidence": 0.3,
             }
+
+    def _call_external_ai_service(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        调用外部AI服务来分析投资组合
+
+        Args:
+            input_data: 输入数据字典
+
+        Returns:
+            Dict: AI服务返回的分析结果，如果调用失败则返回None
+        """
+        try:
+            # 构建提示语，包含投资组合信息
+            system_message = """你是一个专业的DeFi投资组合分析师，擅长分析加密货币投资组合风险和提供投资建议。
+请根据提供的投资组合数据，提供深入的分析洞察、具体的改进建议和风险警告。
+关注资产分配、风险水平、市场趋势、协议多样性等关键指标。
+分析应该是全面的、专业的，并且提供可操作的建议。"""
+
+            # 构建用户消息，确保输入数据大小合适
+            positions_sample = input_data.get("positions", [])[
+                :5
+            ]  # 最多取5个头寸作为样本
+            risk_factors_sample = input_data.get("risk_factors", [])[
+                :5
+            ]  # 最多取5个风险因子作为样本
+
+            user_message = f"""请分析以下投资组合数据并提供洞察、建议和风险警告:
+
+钱包地址: {input_data.get('wallet_address', '未知')}
+投资头寸数量: {len(input_data.get('positions', []))}
+总风险评分: {input_data.get('risk_metrics', {}).get('risk_score', 0)}
+风险等级: {input_data.get('rule_based_analysis', {}).get('risk_level', '未知')}
+
+位置样本: {json.dumps(positions_sample, ensure_ascii=False)}
+(显示 {len(positions_sample)}/{len(input_data.get('positions', []))} 个头寸)
+
+风险因子样本: {json.dumps(risk_factors_sample, ensure_ascii=False)}
+(显示 {len(risk_factors_sample)}/{len(input_data.get('risk_factors', []))} 个风险因子)
+
+请以JSON格式提供:
+1. insights: 投资组合分析洞察列表 (至少5条)
+2. recommendations: 建议改进措施列表 (至少5条)
+3. warnings: 风险警告列表 (如有)
+
+回复仅限JSON格式，不要有其他文字。
+"""
+
+            self.logger.debug(
+                f"调用OpenAI API进行投资组合分析, 模型: {settings.AI_MODEL}"
+            )
+            start_time = time.time()
+
+            # 调用OpenAI API，设置超时
+            try:
+                response = self.client.chat.completions.create(
+                    model=settings.AI_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_message},
+                        {"role": "user", "content": user_message},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.5,
+                    max_tokens=2000,
+                    timeout=30,  # 30秒超时
+                )
+
+                elapsed_time = time.time() - start_time
+                self.logger.info(f"OpenAI API响应时间: {elapsed_time:.2f}秒")
+
+            except Exception as api_error:
+                self.logger.error(f"OpenAI API调用失败: {str(api_error)}")
+                return None
+
+            # 解析响应
+            if response and response.choices and len(response.choices) > 0:
+                try:
+                    content = response.choices[0].message.content
+                    result = json.loads(content)
+
+                    # 验证返回的JSON结构
+                    if not all(k in result for k in ["insights", "recommendations"]):
+                        self.logger.error("OpenAI返回的JSON缺少必要的字段")
+                        return None
+
+                    # 添加置信度和元数据
+                    result["confidence"] = 0.95  # 外部AI服务的置信度通常较高
+                    result["source"] = "external_ai"
+
+                    # 记录成功的API调用
+                    insights_count = len(result.get("insights", []))
+                    recommendations_count = len(result.get("recommendations", []))
+                    warnings_count = len(result.get("warnings", []))
+
+                    self.logger.info(
+                        f"OpenAI分析成功: {insights_count}条洞察, {recommendations_count}条建议, {warnings_count}条警告"
+                    )
+
+                    return result
+                except json.JSONDecodeError as json_error:
+                    self.logger.error(
+                        f"无法解析外部AI服务的JSON响应: {str(json_error)}"
+                    )
+                    self.logger.debug(
+                        f"无效的JSON内容: {response.choices[0].message.content[:200]}..."
+                    )
+                    return None
+            else:
+                self.logger.warning("外部AI服务没有返回有效响应")
+                return None
+
+        except Exception as e:
+            self.logger.error(f"调用外部AI服务出错: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            return None
+
+    def _merge_analysis_results(
+        self, rule_results: Dict[str, Any], ai_results: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        合并规则分析和AI分析结果
+
+        Args:
+            rule_results: 规则分析结果
+            ai_results: AI分析结果
+
+        Returns:
+            Dict: 合并后的分析结果
+        """
+        try:
+            # 提取规则分析的关键数据
+            rule_insights = set(rule_results.get("insights", []))
+            rule_recommendations = set(rule_results.get("recommendations", []))
+            rule_warnings = set(rule_results.get("warnings", []))
+
+            # 提取AI分析的关键数据
+            ai_insights = set(ai_results.get("insights", []))
+            ai_recommendations = set(ai_results.get("recommendations", []))
+            ai_warnings = set(ai_results.get("warnings", []))
+
+            # 合并并删除重复项
+            combined_insights = list(rule_insights.union(ai_insights))
+            combined_recommendations = list(
+                rule_recommendations.union(ai_recommendations)
+            )
+            combined_warnings = list(rule_warnings.union(ai_warnings))
+
+            # 使用AI结果的置信度，如果有的话
+            confidence = ai_results.get(
+                "confidence", rule_results.get("confidence", 0.8)
+            )
+
+            # 确定AI分析的来源
+            ai_source = ai_results.get("source", "unknown_ai")
+
+            # 记录合并结果的统计信息
+            self.logger.info(
+                f"合并分析结果: 规则({len(rule_insights)}条洞察) + AI({len(ai_insights)}条洞察) = 合并({len(combined_insights)}条洞察)"
+            )
+
+            # 合并支持数据
+            supporting_data = {
+                **rule_results.get("supporting_data", {}),
+                "ai_analysis": {
+                    "source": ai_source,
+                    "unique_insights": list(ai_insights - rule_insights),
+                    "unique_recommendations": list(
+                        ai_recommendations - rule_recommendations
+                    ),
+                    "timestamp": datetime.now().isoformat(),
+                },
+            }
+
+            # 如果AI结果中有charts_data，也合并它
+            if "charts_data" in ai_results.get("supporting_data", {}):
+                supporting_data["charts_data"] = ai_results["supporting_data"][
+                    "charts_data"
+                ]
+
+            # 构建最终结果
+            merged_results = {
+                "insights": combined_insights,
+                "recommendations": combined_recommendations,
+                "warnings": combined_warnings,
+                "confidence": confidence,
+                "supporting_data": supporting_data,
+            }
+
+            return merged_results
+
+        except Exception as e:
+            self.logger.error(f"合并分析结果时出错: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            # 出错时返回规则结果
+            return rule_results
+
+    def _rule_based_portfolio_analysis(
+        self,
+        wallet_address: str,
+        positions: List[Dict],
+        risk_score: float,
+        risk_level: str,
+        risk_metrics: Dict,
+        risk_factors: List[Dict],
+    ) -> Dict[str, Any]:
+        """
+        基于规则的投资组合分析方法
+
+        Args:
+            wallet_address: 钱包地址
+            positions: 投资头寸列表
+            risk_score: 风险评分
+            risk_level: 风险级别
+            risk_metrics: 风险指标
+            risk_factors: 风险因子
+
+        Returns:
+            Dict: 包含洞察、建议和警告的分析结果
+        """
+        # 计算资产分布
+        assets = {}
+        protocols = {}
+        investment_types = {}
+        total_value = 0
+        high_risk_positions = []
+        liquidation_risk_positions = []
+
+        for position in positions:
+            asset = position.get("asset", "未知资产")
+            protocol = position.get("protocol", "未知协议")
+            invest_type = position.get("invest_type", 0)
+            usd_value = float(position.get("usd_value", 0))
+
+            # 累计资产价值
+            if asset in assets:
+                assets[asset] += usd_value
+            else:
+                assets[asset] = usd_value
+
+            # 累计协议价值
+            if protocol in protocols:
+                protocols[protocol] += usd_value
+            else:
+                protocols[protocol] = usd_value
+
+            # 累计投资类型价值
+            invest_type_name = self._get_invest_type_name(invest_type)
+            if invest_type_name in investment_types:
+                investment_types[invest_type_name] += usd_value
+            else:
+                investment_types[invest_type_name] = usd_value
+
+            total_value += usd_value
+
+            # 检查高风险和清算风险头寸
+            risk_score_pos = position.get("risk_score", 0)
+            health_factor = position.get("health_factor", 10)
+
+            if risk_score_pos > 70:
+                high_risk_positions.append(position)
+
+            if health_factor < 1.5 and invest_type in [1, 2]:  # 借贷和杠杆头寸
+                liquidation_risk_positions.append(position)
+
+        # 计算投资组合的关键指标
+        insights = []
+        recommendations = []
+        warnings = []
+
+        # 1. 资产集中度分析
+        if total_value > 0:
+            assets_sorted = sorted(
+                [(k, v) for k, v in assets.items()],
+                key=lambda x: x[1],
+                reverse=True,
+            )
+            if assets_sorted and assets_sorted[0][1] / total_value > 0.5:
+                top_asset = assets_sorted[0][0]
+                top_pct = assets_sorted[0][1] / total_value * 100
+                insights.append(
+                    f"您的投资组合过于集中在{top_asset}，占总资产的{top_pct:.1f}%，增加了单一资产风险"
+                )
+                recommendations.append(
+                    f"考虑将部分{top_asset}转换为其他资产，降低集中度至40%以下"
+                )
+
+        # 2. 协议分散度分析
+        if len(protocols) == 1:
+            protocol_name = list(protocols.keys())[0]
+            insights.append(f"您的投资全部集中在{protocol_name}协议，缺乏协议多样性")
+            recommendations.append("考虑分散投资到2-3个不同的协议，降低协议风险")
+        elif len(protocols) > 5:
+            insights.append(f"您的投资分散在{len(protocols)}个协议，管理成本可能较高")
+            recommendations.append("考虑合并部分小额投资，减少管理复杂度")
+
+        # 3. 投资类型分析
+        if (
+            "借贷" in investment_types
+            and investment_types.get("借贷", 0) / total_value > 0.4
+        ):
+            insights.append("借贷头寸占比过高，增加了清算风险")
+            recommendations.append("减少借贷头寸的比例，确保不超过总资产的30%")
+
+        if (
+            "流动性挖矿" in investment_types
+            and investment_types.get("流动性挖矿", 0) / total_value > 0.5
+        ):
+            insights.append("流动性挖矿占比较高，面临无常损失风险")
+            recommendations.append(
+                "关注流动性池资产的相关性，选择相关性低的资产对提供流动性"
+            )
+
+        # 4. 风险警告
+        if len(high_risk_positions) > 0:
+            warnings.append(
+                f"检测到{len(high_risk_positions)}个高风险头寸，建议密切关注"
+            )
+
+        if len(liquidation_risk_positions) > 0:
+            protocol_names = ", ".join(
+                set([p.get("protocol", "未知") for p in liquidation_risk_positions])
+            )
+            warnings.append(
+                f"{protocol_names}上的借贷头寸健康因子低于1.5，存在清算风险"
+            )
+            recommendations.append(
+                "立即补充抵押品或偿还部分债务，提高健康因子至2.0以上"
+            )
+
+        # 5. 基于风险指标的一般性建议
+        market_risk = risk_metrics.get("market_risk", 0)
+        liquidity_risk = risk_metrics.get("liquidity_risk", 0)
+
+        if market_risk > 70:
+            insights.append("当前市场风险较高，投资组合波动可能加剧")
+            recommendations.append("考虑增加稳定币比例，对冲市场下行风险")
+
+        if liquidity_risk > 70:
+            insights.append("投资组合流动性风险较高，可能面临兑现困难")
+            recommendations.append("增加高流动性资产的比例，确保资金灵活性")
+
+        # 6. 稳定币分析
+        stablecoin_assets = [
+            "USDT",
+            "USDC",
+            "DAI",
+            "BUSD",
+            "TUSD",
+            "USDP",
+            "GUSD",
+            "USDD",
+            "FRAX",
+            "sUSD",
+        ]
+        stablecoin_value = sum(assets.get(coin, 0) for coin in stablecoin_assets)
+        stablecoin_ratio = stablecoin_value / total_value if total_value > 0 else 0
+
+        if stablecoin_ratio < 0.1:
+            insights.append(f"稳定币比例较低({stablecoin_ratio:.1%})，缺乏市场波动缓冲")
+            recommendations.append("增加稳定币比例至少20%，作为市场波动的缓冲")
+        elif stablecoin_ratio > 0.7:
+            insights.append(
+                f"稳定币比例过高({stablecoin_ratio:.1%})，可能错过市场上涨机会"
+            )
+            recommendations.append("考虑将部分稳定币投入到收益较高的资产中")
+
+        # 确保至少有三条洞察和三条建议
+        if len(insights) < 3:
+            default_insights = [
+                "投资组合综合风险评分处于中等水平，有优化空间",
+                "当前仓位分布相对均衡，但可进一步优化",
+                "考虑根据风险承受能力调整投资策略",
+            ]
+            insights.extend(default_insights[: 3 - len(insights)])
+
+        if len(recommendations) < 3:
+            default_recommendations = [
+                "定期检查投资组合风险，每月至少一次",
+                "关注市场趋势变化，及时调整投资策略",
+                "探索新的DeFi机会，但控制在总资产的10%以内",
+            ]
+            recommendations.extend(default_recommendations[: 3 - len(recommendations)])
+
+        return {
+            "insights": insights,
+            "recommendations": recommendations,
+            "warnings": warnings,
+            "confidence": 0.85,
+            "supporting_data": {
+                "asset_distribution": [
+                    {"name": k, "value": v} for k, v in assets.items()
+                ],
+                "protocol_distribution": [
+                    {"name": k, "value": v} for k, v in protocols.items()
+                ],
+                "investment_type_distribution": [
+                    {"name": k, "value": v} for k, v in investment_types.items()
+                ],
+                "stablecoin_ratio": stablecoin_ratio,
+                "risk_level": risk_level,
+            },
+        }
 
     def _get_invest_type_name(self, invest_type: int) -> str:
         """获取投资类型名称"""
@@ -3009,3 +3291,331 @@ class AiPredictor:
             "recommendations": recommendations,
             "monitoring_points": monitoring_points,
         }
+
+    def _generate_ai_portfolio_insights(
+        self,
+        wallet_address: str,
+        positions: List[Dict],
+        risk_score: float,
+        risk_level: str,
+        risk_metrics: Dict,
+        risk_factors: List[Dict],
+        rule_based_results: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        使用AI驱动的分析来生成投资组合洞察
+
+        Args:
+            wallet_address: 钱包地址
+            positions: 投资头寸列表
+            risk_score: 风险评分
+            risk_level: 风险级别
+            risk_metrics: 风险指标
+            risk_factors: 风险因子
+            rule_based_results: 基于规则的分析结果
+
+        Returns:
+            Dict: AI生成的洞察、建议和警告
+        """
+        try:
+            self.logger.info(f"开始生成AI驱动的投资组合洞察")
+
+            # 如果没有头寸，直接返回规则结果
+            if not positions:
+                self.logger.info("投资组合为空，跳过AI分析")
+                return rule_based_results
+
+            # 构建输入数据，准备AI分析
+            # 提取资产分布数据
+            supporting_data = rule_based_results.get("supporting_data", {})
+            asset_distribution = supporting_data.get("asset_distribution", [])
+            protocol_distribution = supporting_data.get("protocol_distribution", [])
+            investment_type_distribution = supporting_data.get(
+                "investment_type_distribution", []
+            )
+            stablecoin_ratio = supporting_data.get("stablecoin_ratio", 0)
+
+            # 提取风险因子数据
+            risk_factors_data = []
+            for factor in risk_factors:
+                risk_factors_data.append(
+                    {
+                        "name": factor.get("name", ""),
+                        "score": factor.get("score", 0),
+                        "description": factor.get("description", ""),
+                        "trend": factor.get("trend", "稳定"),
+                    }
+                )
+
+            # 优先尝试使用外部AI服务
+            self.logger.info("尝试使用外部AI服务进行投资组合分析...")
+
+            # 创建AI输入数据
+            ai_service_input = {
+                "wallet_address": wallet_address,
+                "positions": positions,
+                "risk_metrics": risk_metrics,
+                "risk_factors": risk_factors,
+                "rule_based_analysis": rule_based_results,
+                "portfolio_summary": {
+                    "total_risk_score": risk_score,
+                    "risk_level": risk_level,
+                    "total_value": sum(
+                        [float(p.get("usd_value", 0)) for p in positions]
+                    ),
+                    "asset_count": len(set([p.get("asset", "") for p in positions])),
+                    "protocol_count": len(
+                        set([p.get("protocol", "") for p in positions])
+                    ),
+                    "position_count": len(positions),
+                    "stablecoin_ratio": stablecoin_ratio,
+                },
+                "distributions": {
+                    "assets": asset_distribution,
+                    "protocols": protocol_distribution,
+                    "investment_types": investment_type_distribution,
+                },
+            }
+
+            # 调用外部AI服务
+            external_ai_results = self._call_external_ai_service(ai_service_input)
+
+            # 如果外部AI服务返回成功，合并结果并返回
+            if external_ai_results:
+                self.logger.info("外部AI服务返回成功，使用外部分析结果")
+                return self._merge_analysis_results(
+                    rule_based_results, external_ai_results
+                )
+
+            # 如果外部AI服务调用失败，回退到本地AI分析
+            self.logger.warning("外部AI服务返回为空或调用失败，回退到本地AI分析")
+
+            # 以下是原本的本地AI分析逻辑
+            # 创建AI输入数据（已在上面构建）
+            ai_input = {
+                "portfolio_summary": {
+                    "wallet_address": wallet_address,
+                    "total_risk_score": risk_score,
+                    "risk_level": risk_level,
+                    "total_value": sum(
+                        [float(p.get("usd_value", 0)) for p in positions]
+                    ),
+                    "asset_count": len(set([p.get("asset", "") for p in positions])),
+                    "protocol_count": len(
+                        set([p.get("protocol", "") for p in positions])
+                    ),
+                    "position_count": len(positions),
+                    "stablecoin_ratio": stablecoin_ratio,
+                },
+                "risk_metrics": risk_metrics,
+                "risk_factors": risk_factors_data,
+                "distributions": {
+                    "assets": asset_distribution,
+                    "protocols": protocol_distribution,
+                    "investment_types": investment_type_distribution,
+                },
+                "positions": positions,
+                "rule_based_insights": rule_based_results.get("insights", []),
+                "rule_based_recommendations": rule_based_results.get(
+                    "recommendations", []
+                ),
+            }
+
+            self.logger.debug(
+                f"执行本地AI分析，输入数据概要: 资产数量={ai_input['portfolio_summary']['asset_count']}, 协议数量={ai_input['portfolio_summary']['protocol_count']}"
+            )
+
+            # 根据现有数据生成洞察
+            ai_insights = []
+            ai_recommendations = []
+            ai_warnings = []
+
+            try:
+                # 1. 分析投资组合多样性
+                assets = [p.get("asset", "") for p in positions]
+                protocols = [p.get("protocol", "") for p in positions]
+                unique_assets = len(set(assets))
+                unique_protocols = len(set(protocols))
+
+                if unique_assets < 3 and len(assets) > 3:
+                    ai_insights.append("投资组合资产多样性较低，潜在系统性风险较高")
+                    ai_recommendations.append(
+                        "建议增加资产类别的多样性，降低单一资产价格波动对整体组合的影响"
+                    )
+
+                # 2. 高风险资产分析
+                high_risk_positions = [
+                    p for p in positions if p.get("risk_score", 0) > 70
+                ]
+                if len(high_risk_positions) > len(positions) * 0.3:
+                    ai_insights.append("高风险资产占比超过组合的30%，整体风险偏高")
+                    ai_recommendations.append(
+                        "考虑降低高风险资产的比例，增加中低风险资产的配置"
+                    )
+                    ai_warnings.append("高风险资产占比过高可能带来剧烈波动")
+
+                # 3. 分析杠杆使用情况
+                leverage_positions = [
+                    p for p in positions if p.get("invest_type", 0) in [2]
+                ]
+                leverage_value = sum(
+                    [float(p.get("usd_value", 0)) for p in leverage_positions]
+                )
+                total_value = sum([float(p.get("usd_value", 0)) for p in positions])
+                if leverage_value > 0 and total_value > 0:
+                    leverage_ratio = leverage_value / total_value
+                    if leverage_ratio > 0.2:
+                        ai_insights.append(
+                            f"杠杆仓位占比{leverage_ratio:.1%}，处于较高水平"
+                        )
+                        ai_recommendations.append(
+                            "在市场波动较大时考虑减少杠杆仓位，降低强制平仓风险"
+                        )
+                        if leverage_ratio > 0.4:
+                            ai_warnings.append("杠杆仓位占比过高，面临重大清算风险")
+
+                # 4. 分析投资时机与市场趋势
+                market_trend_factor = next(
+                    (f for f in risk_factors_data if "趋势" in f.get("name", "")), None
+                )
+                if market_trend_factor and market_trend_factor.get("score", 50) > 60:
+                    ai_insights.append("当前市场趋势不明朗或下行风险较大")
+                    ai_recommendations.append(
+                        "考虑分批建仓策略，避免一次性投入过多资金"
+                    )
+
+                # 5. 生成高级投资策略建议
+                # 根据资产类型分布和风险偏好，生成定制化策略
+                has_defi_positions = any(
+                    "defi" in p.get("protocol", "").lower() for p in positions
+                )
+                has_cefi_positions = any(
+                    "交易所" in p.get("protocol", "") for p in positions
+                )
+                if has_defi_positions and has_cefi_positions:
+                    ai_insights.append(
+                        "投资组合同时包含中心化和去中心化资产，策略较为均衡"
+                    )
+                    ai_recommendations.append(
+                        "建议定期重新平衡DeFi和CeFi资产的比例，以适应市场变化"
+                    )
+
+                # 6. 分析APY情况
+                apy_values = [
+                    float(p.get("apy", 0))
+                    for p in positions
+                    if p.get("apy") is not None
+                ]
+                if apy_values:
+                    avg_apy = sum(apy_values) / len(apy_values)
+                    high_apy_positions = [
+                        p for p in positions if p.get("apy", 0) > avg_apy * 2
+                    ]
+                    if high_apy_positions:
+                        ai_insights.append(
+                            f"检测到{len(high_apy_positions)}个高APY头寸，可能存在高收益高风险情况"
+                        )
+                        ai_recommendations.append(
+                            "建议对高收益头寸进行额外的风险评估，确保收益与风险匹配"
+                        )
+
+                self.logger.debug(
+                    f"本地AI分析完成: 生成 {len(ai_insights)} 条洞察, {len(ai_recommendations)} 条建议, {len(ai_warnings)} 条警告"
+                )
+
+            except Exception as inner_e:
+                # 内部分析出错，记录错误并尝试继续
+                self.logger.error(f"执行本地AI分析时出错: {str(inner_e)}")
+                # 添加一个关于分析问题的洞察
+                ai_insights.append("部分投资组合分析未能完成，结果可能不完整")
+
+            # 合并AI洞察与规则洞察，确保不重复
+            existing_insights = set(rule_based_results.get("insights", []))
+            existing_recommendations = set(
+                rule_based_results.get("recommendations", [])
+            )
+            existing_warnings = set(rule_based_results.get("warnings", []))
+
+            # 过滤掉重复项
+            unique_ai_insights = [i for i in ai_insights if i not in existing_insights]
+            unique_ai_recommendations = [
+                r for r in ai_recommendations if r not in existing_recommendations
+            ]
+            unique_ai_warnings = [w for w in ai_warnings if w not in existing_warnings]
+
+            # 记录AI分析增加的独特洞察数量
+            self.logger.info(
+                f"本地AI分析新增 {len(unique_ai_insights)} 条洞察, {len(unique_ai_recommendations)} 条建议, {len(unique_ai_warnings)} 条警告"
+            )
+
+            # 构建返回结果，包含AI和规则生成的洞察
+            combined_insights = (
+                rule_based_results.get("insights", []) + unique_ai_insights
+            )
+            combined_recommendations = (
+                rule_based_results.get("recommendations", [])
+                + unique_ai_recommendations
+            )
+            combined_warnings = (
+                rule_based_results.get("warnings", []) + unique_ai_warnings
+            )
+
+            # 增加可视化数据支持
+            charts_data = {
+                "risk_analysis": {
+                    "radar_chart": {
+                        "labels": [
+                            "市场风险",
+                            "协议风险",
+                            "流动性风险",
+                            "相关性风险",
+                            "智能合约风险",
+                        ],
+                        "datasets": [
+                            {
+                                "label": "风险评分",
+                                "data": [
+                                    risk_metrics.get("market_risk", 0),
+                                    risk_metrics.get("protocol_risk", 0),
+                                    risk_metrics.get("liquidity_risk", 0),
+                                    risk_metrics.get("correlation_risk", 0),
+                                    risk_metrics.get("smart_contract_risk", 0),
+                                ],
+                            }
+                        ],
+                    },
+                    "risk_factors_chart": {
+                        "labels": [f["name"] for f in risk_factors_data],
+                        "scores": [f["score"] for f in risk_factors_data],
+                        "weights": [
+                            f["weight"] if "weight" in f else 0.1
+                            for f in risk_factors_data
+                        ],
+                    },
+                }
+            }
+
+            ai_results = {
+                "insights": combined_insights,
+                "recommendations": combined_recommendations,
+                "warnings": combined_warnings,
+                "confidence": 0.92,  # AI分析的置信度，未来可以根据实际AI服务返回的置信度调整
+                "supporting_data": {
+                    **rule_based_results.get("supporting_data", {}),
+                    "charts_data": charts_data,
+                    "ai_analysis": {
+                        "unique_insights": unique_ai_insights,
+                        "unique_recommendations": unique_ai_recommendations,
+                        "analysis_source": "local_ai",
+                    },
+                },
+            }
+
+            self.logger.info("AI驱动的投资组合洞察生成完成")
+            return ai_results
+
+        except Exception as e:
+            self.logger.error(f"生成AI驱动投资组合洞察失败: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            # 出错时回退到规则结果
+            return rule_based_results

@@ -1,13 +1,11 @@
 "use client";
 
 import React from "react";
-import { Portfolio, MarketPrediction, WalletRiskAssessment, WalletMarketRisk } from "../services/api";
-import { AlertTriangle, Shield, TrendingDown, Zap, BarChart3, DollarSign, Percent, ChartBar, Target, Wallet, Loader2 } from "lucide-react";
+import { Portfolio, WalletRiskAssessment } from "../services/api";
+import { AlertTriangle, Shield, Zap, BarChart3, Target, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Table, TableBody, TableRow, TableCell } from "@/components/ui/table";
 
 interface Position {
   protocol: string;
@@ -20,13 +18,12 @@ interface Position {
 interface RiskMonitorProps {
   portfolio: Portfolio;
   riskAnalysis?: WalletRiskAssessment | null;
-  marketRisk?: WalletMarketRisk | null;
   analyzing: boolean;
   completed: boolean;
   onAnalyze: () => Promise<void>;
 }
 
-const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, marketRisk, analyzing, completed, onAnalyze }) => {
+const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, analyzing, completed, onAnalyze }) => {
   if (!portfolio) {
     return (
       <Card>
@@ -73,22 +70,22 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, mark
   // 处理风险因素数据
   const getRiskFactors = () => {
     // 如果有市场风险数据，优先使用它
-    if (marketRisk?.factors && marketRisk.factors.length > 0) {
-      return marketRisk.factors.map((factor) => {
-        const severity = factor.score > 60 ? "high" : factor.score > 30 ? "medium" : "low";
-        const icon = severity === "high" ? <AlertTriangle className="w-4 h-4" /> : severity === "medium" ? <BarChart3 className="w-4 h-4" /> : <Shield className="w-4 h-4" />;
+    // if (marketRisk?.factors && marketRisk.factors.length > 0) {
+    //   return marketRisk.factors.map((factor) => {
+    //     const severity = factor.score > 60 ? "high" : factor.score > 30 ? "medium" : "low";
+    //     const icon = severity === "high" ? <AlertTriangle className="w-4 h-4" /> : severity === "medium" ? <BarChart3 className="w-4 h-4" /> : <Shield className="w-4 h-4" />;
 
-        return {
-          name: factor.name,
-          description: factor.description,
-          severity,
-          icon,
-          score: factor.score,
-          weight: factor.weight,
-          trend: factor.trend,
-        };
-      });
-    }
+    //     return {
+    //       name: factor.name,
+    //       description: factor.description,
+    //       severity,
+    //       icon,
+    //       score: factor.score,
+    //       weight: factor.weight,
+    //       trend: factor.trend,
+    //     };
+    //   });
+    // }
 
     // 如果有来自API的风险因素，使用这些数据
     if (riskAnalysis?.risk_factors && riskAnalysis.risk_factors.length > 0) {
@@ -189,9 +186,9 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, mark
 
   // 获取监控点
   const getMonitoringPoints = () => {
-    if (marketRisk?.monitoring_points && marketRisk.monitoring_points.length > 0) {
-      return marketRisk.monitoring_points;
-    }
+    // if (marketRisk?.monitoring_points && marketRisk.monitoring_points.length > 0) {
+    //   return marketRisk.monitoring_points;
+    // }
 
     if (riskAnalysis?.monitoring_points && riskAnalysis.monitoring_points.length > 0) {
       return riskAnalysis.monitoring_points;
@@ -202,18 +199,18 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, mark
 
   // 获取AI洞察
   const getAiInsights = () => {
-    if (marketRisk?.ai_insights && marketRisk.ai_insights.length > 0) {
-      return marketRisk.ai_insights;
-    }
+    // if (marketRisk?.ai_insights && marketRisk.ai_insights.length > 0) {
+    //   return marketRisk.ai_insights;
+    // }
 
     return [];
   };
 
   // 获取建议
   const getRecommendations = () => {
-    if (marketRisk?.recommendations && marketRisk.recommendations.length > 0) {
-      return marketRisk.recommendations;
-    }
+    // if (marketRisk?.recommendations && marketRisk.recommendations.length > 0) {
+    //   return marketRisk.recommendations;
+    // }
 
     if (riskAnalysis?.recommendations && riskAnalysis.recommendations.length > 0) {
       return riskAnalysis.recommendations;
@@ -256,7 +253,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, mark
     <Card>
       <CardHeader>
         <CardTitle>详细风险分析</CardTitle>
-        <CardDescription>{marketRisk ? `${marketRisk.risk_type} 类型风险分析，目标: ${marketRisk.target}` : "投资组合综合风险分析"}</CardDescription>
+        <CardDescription>投资组合综合风险分析</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         {/* 风险分数和等级 */}
@@ -298,7 +295,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, mark
               {riskFactors.map((factor, index) => (
                 <div key={index} className={`p-3 rounded-lg border ${factor.severity === "high" ? "border-destructive/50 bg-destructive/10" : factor.severity === "medium" ? "border-warning/50 bg-warning/10" : "border-success/50 bg-success/10"}`}>
                   <div className="flex items-start justify-between">
-                    <div className="flex gap-3 items-start">
+                    <div className="flex items-start gap-3">
                       <div className={`p-1.5 rounded-full ${factor.severity === "high" ? "bg-destructive/20 text-destructive" : factor.severity === "medium" ? "bg-warning/20 text-warning" : "bg-success/20 text-success"}`}>{factor.icon}</div>
                       <div>
                         <h4 className="text-sm font-medium">{factor.name}</h4>
@@ -330,7 +327,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, mark
             <h3 className="mb-3 text-sm font-medium">风险指标</h3>
             <div className="grid grid-cols-2 gap-3">
               {Object.entries(riskAnalysis.risk_metrics).map(([key, value], index) => (
-                <div key={index} className="p-3 rounded-md border">
+                <div key={index} className="p-3 border rounded-md">
                   <p className="text-xs text-muted-foreground">{key}</p>
                   <p className="text-sm font-medium">{value}</p>
                 </div>
@@ -344,7 +341,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, mark
           <div className="space-y-2">
             <h3 className="text-lg font-medium">AI 洞察</h3>
             <Card className="p-4 border-l-4 border-l-primary">
-              <ul className="list-disc pl-5 space-y-1">
+              <ul className="pl-5 space-y-1 list-disc">
                 {getAiInsights().map((insight, index) => (
                   <li key={index} className="text-sm">
                     {insight}
@@ -359,7 +356,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, mark
         <div className="space-y-2">
           <h3 className="text-lg font-medium">风险管理建议</h3>
           <Card className="p-4 border-l-4 border-l-primary">
-            <ul className="list-disc pl-5 space-y-1">
+            <ul className="pl-5 space-y-1 list-disc">
               {getRecommendations().map((recommendation, index) => (
                 <li key={index} className="text-sm">
                   {recommendation}
@@ -373,7 +370,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, mark
         <div className="space-y-2">
           <h3 className="text-lg font-medium">关键监控点</h3>
           <Card className="p-4 border-l-4 border-l-primary">
-            <ul className="list-disc pl-5 space-y-1">
+            <ul className="pl-5 space-y-1 list-disc">
               {getMonitoringPoints().map((point, index) => (
                 <li key={index} className="text-sm">
                   {point}
@@ -388,11 +385,11 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, mark
           <div>
             <h3 className="mb-3 text-sm font-medium">头寸摘要</h3>
             <div className="grid grid-cols-2 gap-3">
-              <div className="p-3 rounded-md border">
+              <div className="p-3 border rounded-md">
                 <p className="text-xs text-muted-foreground">总价值</p>
                 <p className="text-sm font-medium">${riskAnalysis.positions_summary.total_value.toLocaleString()}</p>
               </div>
-              <div className="p-3 rounded-md border">
+              <div className="p-3 border rounded-md">
                 <p className="text-xs text-muted-foreground">头寸数量</p>
                 <p className="text-sm font-medium">{riskAnalysis.positions_summary.position_count}</p>
               </div>
@@ -462,7 +459,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, mark
                     }
 
                     return (
-                      <Badge key={index} variant="outline" className="text-xs flex items-center gap-1 py-1 px-2">
+                      <Badge key={index} variant="outline" className="flex items-center gap-1 px-2 py-1 text-xs">
                         {assetLogo && (
                           <img
                             src={assetLogo}
@@ -489,7 +486,7 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, mark
           <div className="mt-4">
             <Badge className="bg-blue-600 hover:bg-blue-700">
               <Zap className="w-3 h-3 mr-1" />
-              AI增强分析
+              {riskAnalysis.ai_enhanced}
             </Badge>
           </div>
         )}

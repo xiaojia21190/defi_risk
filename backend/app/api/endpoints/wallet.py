@@ -90,9 +90,9 @@ async def get_wallet_positions(
         total_value = 0
         for position in positions:
             if "total_assets" in position:
-                total_value += position.get("total_assets", 0)
+                total_value += float(position.get("total_assets", 0))
             elif "amount" in position:
-                total_value += position.get("amount", 0)
+                total_value += float(position.get("amount", 0))
 
         # 提取协议列表并获取协议信息
         protocols_used = []

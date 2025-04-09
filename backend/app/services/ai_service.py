@@ -744,7 +744,8 @@ class AiService:
             # 导入AI预测器
             from app.services.ai_predictor import AiPredictor
 
-            predictor = AiPredictor()
+            # 使用已有的预测器实例或创建新实例
+            predictor = self.get_predictor()
 
             result = None
 

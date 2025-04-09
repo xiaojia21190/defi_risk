@@ -1,6 +1,6 @@
 import { createConfig, http } from 'wagmi'
 import { mainnet } from 'viem/chains'
-import { metaMask, } from 'wagmi/connectors'
+import { metaMask, walletConnect } from 'wagmi/connectors'
 
 // 获取环境变量
 const projectId = process.env.NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID || ''
@@ -14,5 +14,8 @@ export const config = createConfig({
   },
   connectors: [
     metaMask(),
-  ]
+    walletConnect({
+      projectId,
+    }),
+  ],
 })

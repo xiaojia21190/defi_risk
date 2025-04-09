@@ -96,104 +96,67 @@ class RiskEngine:
 
         self.risk_analyzers[risk_type] = analyzer
 
-    async def analyze_wallet_risk(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _get_risk_type_score(
+        self, risk_factors: Dict[str, RiskFactor], risk_type: str
+    ) -> float:
         """
-        分析钱包风险
+        计算特定风险类型的加权平均分
 
         Args:
-            context: 包含钱包地址和头寸的上下文
+            risk_factors: 风险因子字典
+            risk_type: 风险类型 (例如: "市场风险", "协议风险" 等)
 
         Returns:
-            Dict: 包含风险分析结果的字典
+            float: 该风险类型的加权平均分
         """
-        self.logger.info(
-            f"开始分析钱包风险: {context.get('wallet_address', '未知钱包')}"
-        )
-
         try:
-            # 提取钱包头寸
-            positions = context.get("positions", [])
+            if not risk_factors:
+                self.logger.warning(f"没有找到风险因子，返回默认分数50")
+                return 50.0
 
-            if not positions:
-                self.logger.warning(f"钱包 {context.get('wallet_address')} 没有头寸")
-                return self._get_empty_risk_analysis(context.get("wallet_address"))
+            # 筛选出特定风险类型的因子
+            type_factors = [
+                f for f in risk_factors.values() if f.id.startswith(risk_type)
+            ]
 
-            # 转换为RiskCalculator使用的Position对象
-            portfolio_positions = []
-            for pos in positions:
-                # 创建Position对象
-                portfolio_positions.append(
-                    {
-                        "protocol": pos.get("protocol", "unknown"),
-                        "asset": pos.get("asset", "unknown"),
-                        "amount": float(pos.get("amount", 0)),
-                        "invest_type": int(pos.get("invest_type", 0)),
-                        "apy": pos.get("apy"),
-                    }
+            if not type_factors:
+                self.logger.warning(
+                    f"没有找到{risk_type}类型的风险因子，返回默认分数50"
                 )
+                return 50.0
 
-            # 分析投资组合风险
-            portfolio_risk = await self.analyze_portfolio(
-                {
-                    "wallet_address": context.get("wallet_address"),
-                    "positions": portfolio_positions,
-                }
-            )
+            # 计算加权总分和权重总和
+            total_weighted_score = 0.0
+            total_weight = 0.0
 
-            # 生成AI投资组合建议
-            ai_recommendations = await self._generate_ai_recommendations(positions)
+            for factor in type_factors:
+                # 获取基础权重
+                weight = factor.weight
 
-            # 合并结果
-            result = {
-                "supporting_data": {
-                    "market_risk_score": self._get_risk_type_score(
-                        portfolio_risk, "MARKET"
-                    ),
-                    "protocol_risk_score": self._get_risk_type_score(
-                        portfolio_risk, "PROTOCOL"
-                    ),
-                    "liquidity_risk_score": self._get_risk_type_score(
-                        portfolio_risk, "LIQUIDITY"
-                    ),
-                    "smart_contract_risk_score": self._get_risk_type_score(
-                        portfolio_risk, "SMART_CONTRACT"
-                    ),
-                    "correlation_risk_score": self._get_risk_type_score(
-                        portfolio_risk, "CORRELATION"
-                    ),
-                },
-                "insights": self._generate_insights(portfolio_risk),
-                "recommendations": ai_recommendations.get("recommendations", [])
-                + portfolio_risk.recommendations,
-                "confidence": 0.85,  # 置信度
-            }
+                # 应用趋势调整
+                trend_adjustment = 1.0
+                if factor.trend == "上升":
+                    trend_adjustment = 1.1  # 上升趋势增加10%权重
+                elif factor.trend == "下降":
+                    trend_adjustment = 0.9  # 下降趋势减少10%权重
 
-            self.logger.info(f"钱包风险分析完成: {context.get('wallet_address')}")
-            return result
+                # 计算调整后的权重和分数
+                adjusted_weight = weight * trend_adjustment
+                total_weighted_score += factor.score * adjusted_weight
+                total_weight += adjusted_weight
+
+            # 计算加权平均分
+            if total_weight > 0:
+                average_score = total_weighted_score / total_weight
+                self.logger.info(f"{risk_type}的加权平均分: {average_score:.2f}")
+                return average_score
+            else:
+                self.logger.warning(f"{risk_type}的总权重为0，返回默认分数50")
+                return 50.0
 
         except Exception as e:
-            self.logger.error(f"分析钱包风险时出错: {str(e)}")
-            return {
-                "supporting_data": {
-                    "market_risk_score": 50,
-                    "protocol_risk_score": 50,
-                    "liquidity_risk_score": 50,
-                    "smart_contract_risk_score": 50,
-                    "correlation_risk_score": 50,
-                },
-                "insights": [f"分析过程中出错: {str(e)}"],
-                "recommendations": ["建议重新分析或联系技术支持"],
-                "confidence": 0.3,
-            }
-
-    def _get_risk_type_score(self, assessment: RiskAssessment, risk_type: str) -> float:
-        """获取特定风险类型的评分"""
-        if not assessment or not assessment.detailed_analysis:
-            return 50.0
-
-        risk_by_type = assessment.detailed_analysis.get("risk_by_type", {})
-        risk_data = risk_by_type.get(risk_type.lower(), {})
-        return risk_data.get("score", 50.0)
+            self.logger.error(f"计算{risk_type}风险评分时出错: {str(e)}")
+            return 50.0  # 出错时返回默认分数
 
     def _generate_insights(self, assessment: RiskAssessment) -> List[str]:
         """从风险评估生成洞察"""
@@ -518,9 +481,10 @@ class RiskEngine:
 
         # 从各分析器获取建议
         for risk_type, analyzer in self.risk_analyzers.items():
+            chinese_risk_type = self.risk_type_map.get(risk_type, risk_type)
             # 过滤出当前风险类型的因子
             type_factors = [
-                f for f in risk_factors.values() if f.id.startswith(risk_type)
+                f for f in risk_factors.values() if f.id.startswith(chinese_risk_type)
             ]
             if type_factors:
                 try:
@@ -541,14 +505,20 @@ class RiskEngine:
         # 根据高风险因子生成缓解策略
         high_risk_factors = [f for f in risk_factors.values() if f.score > 60]
 
-        if any(f.id.startswith("MARKET") for f in high_risk_factors):
+        if any(f.id.startswith("市场风险") for f in high_risk_factors):
             strategies.append("考虑增加投资组合多样性，减少对单一市场的依赖")
 
-        if any(f.id.startswith("SMART_CONTRACT") for f in high_risk_factors):
+        if any(f.id.startswith("智能合约风险") for f in high_risk_factors):
             strategies.append("使用经过审计的协议，并考虑使用智能合约保险")
 
-        if any(f.id.startswith("LIQUIDITY") for f in high_risk_factors):
+        if any(f.id.startswith("流动性风险") for f in high_risk_factors):
             strategies.append("增加流动性较高的资产比例，避免流动性陷阱")
+
+        if any(f.id.startswith("协议风险") for f in high_risk_factors):
+            strategies.append("考虑使用多协议分散风险")
+
+        if any(f.id.startswith("相关性风险") for f in high_risk_factors):
+            strategies.append("考虑使用多资产分散风险")
 
         # 添加更多策略...
 
@@ -1388,16 +1358,20 @@ class RiskEngine:
                 "risk_level": assessment.risk_level.value,
                 "description": f"投资组合风险分析完成，当前风险等级为{assessment.risk_level.value}",
                 "risk_metrics": {
-                    "market_risk": self._get_risk_type_score(assessment, "MARKET"),
-                    "protocol_risk": self._get_risk_type_score(assessment, "PROTOCOL"),
+                    "market_risk": self._get_risk_type_score(
+                        assessment.risk_factors, "市场风险"
+                    ),
+                    "protocol_risk": self._get_risk_type_score(
+                        assessment.risk_factors, "协议风险"
+                    ),
                     "liquidity_risk": self._get_risk_type_score(
-                        assessment, "LIQUIDITY"
+                        assessment.risk_factors, "流动性风险"
                     ),
                     "smart_contract_risk": self._get_risk_type_score(
-                        assessment, "SMART_CONTRACT"
+                        assessment.risk_factors, "智能合约风险"
                     ),
                     "correlation_risk": self._get_risk_type_score(
-                        assessment, "CORRELATION"
+                        assessment.risk_factors, "相关性风险"
                     ),
                 },
                 "risk_factors": risk_factors,
