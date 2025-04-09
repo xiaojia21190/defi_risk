@@ -33,7 +33,9 @@ def create_services():
     blockchain_service = BlockchainService()
 
     # 创建风险引擎并注入依赖
-    risk_engine = RiskEngine(blockchain_service=blockchain_service, ai_service=ai_service)
+    risk_engine = RiskEngine(
+        blockchain_service=blockchain_service, ai_service=ai_service
+    )
 
     # 创建演示数据服务
     demo_data_service = DemoDataService()
@@ -68,7 +70,7 @@ def setup_risk_analyzers(risk_engine, ai_service, blockchain_service):
         ),
         "smart_contract": SmartContractRiskAnalyzer(
             ai_predictor=ai_service, blockchain_service=blockchain_service
-        )
+        ),
     }
 
     # 注册风险分析器
@@ -115,6 +117,7 @@ def setup_lifecycle_events(app: FastAPI):
     Args:
         app: FastAPI应用实例
     """
+
     @app.on_event("startup")
     async def startup_event():
         """应用启动时执行的事件处理"""
@@ -131,7 +134,9 @@ def setup_lifecycle_events(app: FastAPI):
         if hasattr(app.state, "ai_service") and hasattr(app.state.ai_service, "close"):
             await app.state.ai_service.close()
 
-        if hasattr(app.state, "blockchain_service") and hasattr(app.state.blockchain_service, "close"):
+        if hasattr(app.state, "blockchain_service") and hasattr(
+            app.state.blockchain_service, "close"
+        ):
             await app.state.blockchain_service.close()
 
 
