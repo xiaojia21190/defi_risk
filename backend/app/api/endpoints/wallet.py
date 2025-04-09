@@ -123,7 +123,7 @@ async def get_wallet_positions(
                             ),
                             "contract_addresses": protocol_info.get("coingecko", {})
                             .get("contract_addresses", {})
-                            .get(protocol_info.get("ethereum", ""), {}),
+                            .get("ethereum", ""),
                         }
                     )
                 except Exception:

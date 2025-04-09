@@ -32,7 +32,7 @@ async def get_protocol_info(
             return demo_service.get_protocol_info(protocol_name)
 
         # 获取协议信息
-        protocol_info = await blockchain_service.get_protocol_info(protocol_name)
+        protocol_info = await blockchain_service.get_protocol(protocol_name)
         return protocol_info
     except Exception as e:
         logger.error(f"获取协议信息时出错: {str(e)}")
@@ -46,7 +46,7 @@ async def get_protocol_info(
 @router.get("/risk/{protocol_name}")
 async def analyze_protocol_risk(
     protocol_name: str,
-    blockchain_service: BlockchainService = Depends(get_blockchain_service),
+    ai_service: AiService = Depends(get_ai_service),
     demo_service: DemoDataService = Depends(get_demo_data_service),
 ):
     """
@@ -100,9 +100,7 @@ async def analyze_protocol_risk(
             }
 
         # 分析协议风险
-        risk_analysis = await blockchain_service._get_protocol_risk_summary(
-            protocol_name
-        )
+        risk_analysis = await ai_service.get_protocol_risk_analysis(protocol_name)
         return risk_analysis
     except Exception as e:
         logger.error(f"分析协议风险时出错: {str(e)}")
@@ -150,9 +148,9 @@ async def analyze_protocol_risk(
         raise HTTPException(status_code=500, detail=f"分析协议风险失败: {str(e)}")
 
 
-@router.get("/list")
+@router.get("/list/{wallet_address}")
 async def get_protocols_by_wallet(
-    wallet_address: str = Query(..., description="用户的钱包地址"),
+    wallet_address: str,
     blockchain_service: BlockchainService = Depends(get_blockchain_service),
     demo_service: DemoDataService = Depends(get_demo_data_service),
 ) -> List[Dict[str, Any]]:

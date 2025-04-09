@@ -10,7 +10,13 @@ from app.models.domain.risk import (
 class RiskAnalyzerBase(ABC):
     """风险分析器基类"""
 
-    def __init__(self, ai_service=None, ai_predictor=None, blockchain_service=None):
+    def __init__(
+        self,
+        ai_service=None,
+        ai_predictor=None,
+        blockchain_service=None,
+        risk_engine=None,
+    ):
         """
         初始化风险分析器
 
@@ -18,10 +24,12 @@ class RiskAnalyzerBase(ABC):
             ai_service: AI服务实例
             ai_predictor: AI预测器实例
             blockchain_service: 区块链服务实例
+            risk_engine: 风险引擎实例，用于委托复杂计算和跨域风险分析
         """
         self.ai_service = ai_service
         self.ai_predictor = ai_predictor
         self.blockchain_service = blockchain_service
+        self.risk_engine = risk_engine
         self.logger = logging.getLogger(f"defi_risk.{self.__class__.__name__}")
         self.name = self.__class__.__name__
 

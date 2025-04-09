@@ -15,10 +15,17 @@ from app.core.utility import safe_get
 class MarketRiskAnalyzer(RiskAnalyzerBase):
     """市场风险分析器"""
 
-    def __init__(self, ai_service=None, ai_predictor=None, blockchain_service=None):
+    def __init__(
+        self,
+        ai_service=None,
+        ai_predictor=None,
+        blockchain_service=None,
+        risk_engine=None,
+    ):
         """初始化市场风险分析器"""
         super().__init__(ai_service, ai_predictor, blockchain_service)
         self.recommendation_service = RecommendationService()
+        self.risk_engine = risk_engine
 
     async def analyze(self, data: Dict[str, Any]) -> RiskAnalysisResult:
         """

@@ -4,9 +4,16 @@ import uuid
 from datetime import datetime
 import logging
 import asyncio
+import numpy as np  # <-- Added import
 from app.core.config import settings
 from app.services.ai_predictor import AiPredictor
 from dataclasses import dataclass
+from cachetools import TTLCache  # <-- Added import
+from app.models.domain.risk import (  # <-- Added imports
+    RiskAnalysisResult,
+    RiskMetrics,
+    RiskAnalysis,
+)
 
 
 @dataclass
@@ -35,19 +42,25 @@ class MarketRiskResult:
 class RiskEngine:
     """风险评估引擎"""
 
-    def __init__(self, blockchain_service=None, ai_service=None):
+    def __init__(
+        self, blockchain_service=None, ai_service=None, cache_ttl=3600
+    ):  # <-- Added cache_ttl
         """
         初始化风险评估引擎
 
         Args:
             blockchain_service: 区块链服务实例
             ai_service: AI服务实例，如果为None则不使用AI服务
+            cache_ttl: 缓存时间 (秒), 默认1小时
         """
         self.logger = logging.getLogger("defi_risk.risk_engine")
         self.risk_analyzers = {}
         self.risk_weights = settings.RISK_WEIGHTS
         self.blockchain_service = blockchain_service
         self.ai_service = ai_service
+        self.analysis_cache = TTLCache(
+            maxsize=1024, ttl=cache_ttl
+        )  # <-- Added cache instance
 
         # 风险类型映射表 - 用于将注册时使用的小写风险类型映射到RiskFactor.id中使用的中文风险类型
         self.risk_type_map = {
@@ -64,7 +77,7 @@ class RiskEngine:
             self.ai_predictor = ai_service.get_predictor()
 
         self.logger.info(
-            f"风险引擎初始化完成: blockchain_service={blockchain_service}, ai_service={ai_service}"
+            f"风险引擎初始化完成: blockchain_service={blockchain_service}, ai_service={ai_service}, cache_ttl={cache_ttl}"  # <-- Updated log
         )
 
     def register_analyzer(self, risk_type: str, analyzer):
@@ -89,10 +102,13 @@ class RiskEngine:
         if hasattr(analyzer, "blockchain_service") and self.blockchain_service:
             analyzer.blockchain_service = self.blockchain_service
 
-        # 使用事件委托模式替代直接的循环引用
-        # 不再设置对RiskEngine的引用
-        # if hasattr(analyzer, "risk_engine"):
-        #     analyzer.risk_engine = self
+        # 只为需要 risk_engine 的分析器设置引用
+        # 目前只有 ProtocolRiskAnalyzer 需要此引用
+        if (
+            hasattr(analyzer, "risk_engine")
+            and analyzer.__class__.__name__ == "ProtocolRiskAnalyzer"
+        ):
+            analyzer.risk_engine = self
 
         self.risk_analyzers[risk_type] = analyzer
 
@@ -2646,3 +2662,622 @@ class RiskEngine:
             "portfolio_diversity_score": min(10, len(affected_assets)),
             "protocol_diversity_score": min(10, len(affected_protocols)),
         }
+
+    # --- Start of Migrated Methods ---
+
+    def _generate_asset_risk_recommendations(
+        self, risk_score: int, metrics: Dict[str, Any]
+    ) -> List[str]:
+        """
+        根据风险评分和指标生成资产风险建议 (内部辅助方法)
+        """
+        recommendations = []
+
+        # 基于市值
+        if metrics.get("market_cap", 0) < 100000000:  # < 1亿
+            recommendations.append("市值较小，建议控制仓位")
+
+        # 基于流动性
+        if metrics.get("volume_to_mcap_ratio", 0) < 0.01:
+            recommendations.append("流动性较低，建议关注交易风险")
+
+        # 基于波动性
+        if metrics.get("price_volatility", 0) > 10:
+            recommendations.append("价格波动较大，建议设置止损")
+
+        # 基于趋势
+        if metrics.get("price_trend", {}).get("current", 0) < metrics.get(
+            "price_trend", {}
+        ).get("ma30", 0):
+            recommendations.append("处于下降趋势，建议谨慎操作")
+
+        return recommendations
+
+    async def analyze_asset_risk(self, asset: str) -> RiskAnalysisResult:
+        """
+        分析资产的风险指标 (迁移自 BlockchainService)
+
+        Args:
+            asset: 资产符号或ID
+
+        Returns:
+            RiskAnalysisResult: 资产风险分析结果
+        """
+        try:
+            if not self.blockchain_service:
+                raise ValueError("BlockchainService is not initialized in RiskEngine")
+
+            # 获取24小时数据
+            # 注意: _get_coingecko_24h_data 是 blockchain_service 的私有方法, 需要确认是否能调用
+            # 假设它可以调用或有等效的公共方法
+            data_24h = await self.blockchain_service._get_coingecko_24h_data(asset)
+            if not data_24h:
+                return RiskAnalysisResult(
+                    asset_id=asset,
+                    risk_score=0,
+                    risk_level="未知",
+                    metrics=RiskMetrics(),
+                    analysis=RiskAnalysis(),
+                    error=f"无法获取{asset}的市场数据",
+                )
+
+            # 获取历史数据
+            historical_data = (
+                await self.blockchain_service.get_coingecko_historical_data(asset)
+            )
+            if historical_data is None or historical_data.empty:
+                return RiskAnalysisResult(
+                    asset_id=asset,
+                    risk_score=0,
+                    risk_level="未知",
+                    metrics=RiskMetrics(),
+                    analysis=RiskAnalysis(),
+                    error=f"无法获取{asset}的历史数据",
+                )
+
+            # 1. 价格波动性分析
+            price_volatility = historical_data["price"].pct_change().std() * 100
+
+            # 2. 市值分析
+            market_cap = data_24h.get("market_cap", 0)
+            market_cap_rank = data_24h.get("market_cap_rank", 0)
+
+            # 3. 流动性分析
+            volume = data_24h.get("volume", 0)
+            volume_to_mcap_ratio = volume / market_cap if market_cap > 0 else 0
+
+            # 4. 价格趋势分析
+            current_price = historical_data["price"].iloc[-1]
+            price_ma7 = historical_data["price"].rolling(window=7).mean().iloc[-1]
+            price_ma30 = historical_data["price"].rolling(window=30).mean().iloc[-1]
+
+            # 5. 计算风险评分
+            risk_score = 0
+            max_score = 100
+
+            # 市值风险 (30分)
+            if market_cap > 10000000000:  # > 100亿
+                risk_score += 30
+            elif market_cap > 1000000000:  # > 10亿
+                risk_score += 20
+            elif market_cap > 100000000:  # > 1亿
+                risk_score += 10
+
+            # 流动性风险 (20分)
+            if volume_to_mcap_ratio > 0.1:  # 日交易量超过市值的10%
+                risk_score += 20
+            elif volume_to_mcap_ratio > 0.05:  # 日交易量超过市值的5%
+                risk_score += 10
+
+            # 波动性风险 (20分)
+            if price_volatility < 5:  # 波动率小于5%
+                risk_score += 20
+            elif price_volatility < 10:  # 波动率小于10%
+                risk_score += 10
+
+            # 趋势风险 (30分)
+            if current_price > price_ma7 > price_ma30:  # 上升趋势
+                risk_score += 30
+            elif current_price > price_ma7:  # 短期上升
+                risk_score += 20
+            elif current_price > price_ma30:  # 长期上升
+                risk_score += 10
+
+            # 确定风险等级
+            risk_level = "高风险"
+            if risk_score >= 80:
+                risk_level = "低风险"
+            elif risk_score >= 60:
+                risk_level = "中低风险"
+            elif risk_score >= 40:
+                risk_level = "中等风险"
+            elif risk_score >= 20:
+                risk_level = "中高风险"
+
+            return RiskAnalysisResult(
+                asset_id=asset,
+                risk_score=risk_score,
+                risk_level=risk_level,
+                metrics=RiskMetrics(
+                    price_volatility=price_volatility,
+                    market_cap=market_cap,
+                    market_cap_rank=market_cap_rank,
+                    volume_to_mcap_ratio=volume_to_mcap_ratio,
+                ),
+                analysis=RiskAnalysis(
+                    market_cap_analysis=f"市值{market_cap:,.0f}美元，排名第{market_cap_rank}位",
+                    liquidity_analysis=f"日交易量/市值比率{volume_to_mcap_ratio:.2%}",
+                    volatility_analysis=f"价格波动率{price_volatility:.2f}%",
+                    trend_analysis=(
+                        "上升趋势" if current_price > price_ma7 else "下降趋势"
+                    ),
+                ),
+                recommendations=self._generate_asset_risk_recommendations(
+                    risk_score,
+                    {
+                        "price_volatility": price_volatility,
+                        "market_cap": market_cap,
+                        "market_cap_rank": market_cap_rank,
+                        "volume_to_mcap_ratio": volume_to_mcap_ratio,
+                        "price_trend": {
+                            "current": current_price,
+                            "ma7": price_ma7,
+                            "ma30": price_ma30,
+                        },
+                    },
+                ),
+            )
+        except Exception as e:
+            self.logger.error(f"分析资产{asset}风险时出错: {str(e)}")
+            return RiskAnalysisResult(
+                asset_id=asset,
+                risk_score=0,
+                risk_level="未知",
+                metrics=RiskMetrics(),
+                analysis=RiskAnalysis(),
+                error=f"风险分析失败: {str(e)}",
+            )
+
+    def _calculate_base_protocol_risk(
+        self, protocol_data: Dict, historical_tvl: List, audit_status: Dict
+    ) -> RiskAnalysisResult:
+        """
+        执行基础协议风险计算 (内部辅助方法，迁移自 BlockchainService.analyze_protocol_risk)
+
+        Args:
+            protocol_data: 从 get_protocol 获取的数据
+            historical_tvl: 从 get_protocol_historical_tvl 获取的数据
+            audit_status: 从 get_protocol_audit_status 获取的数据
+
+        Returns:
+            RiskAnalysisResult: 基础协议风险分析结果
+        """
+        protocol_name = "未知协议"  # Default value
+        try:
+            protocol_name = protocol_data.get("name", "未知协议")
+            protocol_category = protocol_data.get("category", "未知")
+            protocol_chains = protocol_data.get("chains", [])
+
+            # 使用 protocol_data 中的 TVL，因为它通常更新
+            tvl = protocol_data.get("tvl", 0)
+
+            # 提取审计信息
+            audit_count = audit_status.get("audit_count", 0)
+            audit_links = audit_status.get("audit_links", [])
+            is_open_source = audit_status.get("is_open_source", False)
+
+            # 计算TVL稳定性
+            tvl_stability = 0
+            if historical_tvl and len(historical_tvl) > 7:  # 至少需要一周的数据
+                recent_tvl = [item.get("tvl", 0) for item in historical_tvl[-30:]]
+                # Ensure recent_tvl is not empty and sum > 0 to avoid division by zero and errors
+                if recent_tvl and sum(recent_tvl) > 0:
+                    try:
+                        tvl_std = np.std(recent_tvl)
+                        tvl_mean = np.mean(recent_tvl)
+                        if tvl_mean != 0:  # Avoid division by zero
+                            tvl_stability = 1 - min(1, tvl_std / tvl_mean)
+                        else:
+                            tvl_stability = 0  # Set stability to 0 if mean is 0
+                    except Exception as np_err:
+                        self.logger.warning(
+                            f"Numpy calculation error for TVL stability ({protocol_name}): {np_err}"
+                        )
+                        tvl_stability = 0  # Default to 0 on error
+
+            # 重新构建审计状态字典以便计算分数
+            internal_audit_status = {
+                "audited": audit_count > 0,
+                "audit_count": audit_count,
+                "audit_links": audit_links,
+                "open_source": is_open_source,
+                "audit_score": min(
+                    100, audit_count * 20 + (50 if is_open_source else 0)
+                ),
+            }
+
+            # 根据各项指标计算综合风险评分
+            risk_score = 0.0  # Use float for score
+            max_score = 0.0  # Use float for max_score
+
+            # TVL因素 (TVL越高，风险越低)
+            if tvl > 0:
+                try:
+                    # Ensure tvl is a valid number for log10
+                    if isinstance(tvl, (int, float)) and tvl > 0:
+                        tvl_score = min(5.0, np.log10(tvl) - 5.0)
+                        risk_score += tvl_score
+                    else:
+                        tvl_score = 0.0
+                        self.logger.warning(
+                            f"Invalid TVL value {tvl} for log10 calculation ({protocol_name})"
+                        )
+                except ValueError:
+                    tvl_score = 0.0
+                    self.logger.warning(
+                        f"TVL value {tvl} caused ValueError in log10 for {protocol_name}"
+                    )
+                max_score += 5.0
+
+            # TVL稳定性因素
+            if tvl_stability >= 0:  # Stability should be non-negative
+                stability_score = tvl_stability * 3.0
+                risk_score += stability_score
+                max_score += 3.0
+
+            # 审计因素
+            if internal_audit_status.get("audited", False):
+                audit_score_val = (
+                    internal_audit_status.get("audit_score", 0) / 20.0
+                )  # Use float division
+                risk_score += audit_score_val
+                max_score += 5.0
+
+            # 多链部署因素 (部署在多条链上可能增加风险面)
+            chain_count = len(protocol_chains)
+            if chain_count > 0:
+                chain_factor = (
+                    2.0 if chain_count <= 2 else (1.0 if chain_count <= 5 else 0.0)
+                )
+                risk_score += chain_factor
+                max_score += 2.0
+
+            # 开源因素
+            if is_open_source:
+                risk_score += 2.0
+                max_score += 2.0
+
+            # 规范化风险分数 (0-100，越高表示风险越低)
+            normalized_risk_score = 0.0
+            if max_score > 0:
+                normalized_risk_score = max(
+                    0.0, min(100.0, (risk_score / max_score) * 100.0)
+                )
+            else:
+                self.logger.warning(
+                    f"Max score is zero for {protocol_name}, cannot normalize score."
+                )
+
+            # 风险等级
+            risk_level = "极高"  # Default to highest risk
+            if normalized_risk_score >= 80:
+                risk_level = "极低"
+            elif normalized_risk_score >= 60:
+                risk_level = "低"
+            elif normalized_risk_score >= 40:
+                risk_level = "中"
+            elif normalized_risk_score >= 20:
+                risk_level = "高"
+
+            # 构建分析文本
+            tvl_low_text = "较低"
+            tvl_med_text = "中等"
+            tvl_high_text = "较高"
+            tvl_text = (
+                tvl_high_text
+                if tvl > 100000000
+                else (tvl_med_text if tvl > 10000000 else tvl_low_text)
+            )
+            tvl_analysis_text = f"TVL为{tvl:,.2f}美元，{tvl_text}"
+
+            stability_low_text = "波动较大"
+            stability_med_text = "较稳定"
+            stability_high_text = "很稳定"
+            stability_text = (
+                stability_high_text
+                if tvl_stability > 0.8
+                else (stability_med_text if tvl_stability > 0.5 else stability_low_text)
+            )
+            stability_analysis_text = (
+                f"TVL稳定性为{tvl_stability*100:.2f}%，{stability_text}"
+            )
+
+            audit_text = (
+                "已通过" + str(audit_count) + "次专业审计"
+                if internal_audit_status.get("audited", False)
+                else "未经专业审计或缺乏审计信息"
+            )
+            source_text = "且代码开源" if is_open_source else "代码未开源"
+            audit_analysis_text = f"{audit_text}，{source_text}"
+
+            chain_text = "风险分散" if chain_count <= 2 else "增加了一定的风险面"
+            chain_analysis_text = f"部署在{chain_count}条链上，{chain_text}"
+
+            rec_high_text = "建议可以适量配置"
+            rec_med_text = "建议谨慎参与"
+            rec_low_text = "建议避免参与或严格控制仓位"
+            rec_text = (
+                rec_high_text
+                if normalized_risk_score >= 60
+                else (rec_med_text if normalized_risk_score >= 40 else rec_low_text)
+            )
+            recommendations_text = [
+                f"综合评估，{protocol_name}协议的基础风险等级为{risk_level}，{rec_text}"
+            ]
+
+            return RiskAnalysisResult(
+                asset_id=protocol_name,
+                risk_score=normalized_risk_score,
+                risk_level=risk_level,
+                metrics=RiskMetrics(
+                    tvl_stability=tvl_stability * 100,
+                    audit_score=internal_audit_status.get("audit_score", 0),
+                    market_cap=tvl,  # Using TVL as a proxy for market cap in this context
+                ),
+                # Ensure all required fields for RiskAnalysis are provided or Optional
+                analysis=RiskAnalysis(
+                    tvl_factor=tvl_analysis_text,
+                    stability_factor=stability_analysis_text,
+                    audit_factor=audit_analysis_text,
+                    chain_factor=chain_analysis_text,
+                    # Add other necessary fields for RiskAnalysis here if they exist and are required
+                    # e.g., liquidity_analysis="N/A (Base Protocol)", volatility_analysis="N/A (Base Protocol)", trend_analysis="N/A (Base Protocol)"...
+                ),
+                recommendations=recommendations_text,
+                raw_data={"protocol_data": protocol_data},  # Keep raw data if needed
+            )
+        except Exception as e:
+            self.logger.error(
+                f"计算基础协议风险失败 ({protocol_name}): {str(e)}", exc_info=True
+            )
+            # Return a default error result
+            return RiskAnalysisResult(
+                asset_id=protocol_name,
+                risk_score=0,
+                risk_level="未知",
+                metrics=RiskMetrics(),
+                analysis=RiskAnalysis(),
+                error=f"计算基础协议风险时出错: {str(e)}",
+            )
+
+    async def get_protocol_risk_analysis(self, protocol_name: str) -> Dict[str, Any]:
+        """
+        获取协议的风险摘要信息，协调AI和基础分析 (替代 BlockchainService._get_protocol_risk_summary)
+
+        Args:
+            protocol_name: 协议名称
+
+        Returns:
+            Dict: 包含风险等级、评分、建议等的字典
+        """
+        cache_key = f"protocol_risk_{protocol_name.lower()}"
+        # Correctly check cache
+        try:
+            cached_result = self.analysis_cache.get(cache_key)
+            if cached_result is not None:
+                self.logger.info(f"从缓存获取协议 {protocol_name} 的风险分析")
+                return cached_result
+        except KeyError:  # TTLCache raises KeyError if key not found
+            self.logger.debug(f"协议 {protocol_name} 的风险分析不在缓存中")
+            # Pass, continue to fetch and analyze
+            pass
+
+        try:
+            if not self.blockchain_service:
+                raise ValueError("BlockchainService is not initialized in RiskEngine")
+
+            # 1. 获取原始数据
+            protocol_data: Optional[Dict] = None
+            historical_tvl_raw: Optional[List] = None
+            audit_status: Optional[Dict] = None
+            try:
+                protocol_data = await self.blockchain_service.get_protocol(
+                    protocol_name
+                )
+                historical_tvl_raw = (
+                    await self.blockchain_service.get_protocol_historical_tvl(
+                        protocol_name
+                    )
+                )
+                audit_status = await self.blockchain_service.get_protocol_audit_status(
+                    protocol_name
+                )
+                # Basic validation
+                if not protocol_data or not audit_status:
+                    raise ValueError("获取到的协议数据或审计状态为空")
+            except Exception as data_err:
+                self.logger.error(
+                    f"获取协议 {protocol_name} 基础数据失败: {data_err}", exc_info=True
+                )
+                # Return error immediately if core data fetching fails
+                return {
+                    "risk_level": "未知",
+                    "risk_score": 0,
+                    "audit_status": False,
+                    "error": f"获取协议基础数据失败: {str(data_err)}",
+                    "analysis_source": "Data Error",
+                }
+
+            # 处理历史TVL格式 (如果需要)
+            historical_tvl = []
+            if historical_tvl_raw:  # Check if list is not None or empty
+                for item in historical_tvl_raw:
+                    try:
+                        # Assume item keys are 'date' (timestamp) and 'totalLiquidityUSD'
+                        date_val = item.get("date")
+                        tvl_val = item.get("totalLiquidityUSD")
+                        if date_val is not None and tvl_val is not None:
+                            dt_object = datetime.fromtimestamp(date_val)
+                            historical_tvl.append(
+                                {
+                                    "date": dt_object,
+                                    "tvl": tvl_val,
+                                }
+                            )
+                        else:
+                            self.logger.warning(
+                                f"历史TVL项缺少 date 或 totalLiquidityUSD: {item}"
+                            )
+                    except (TypeError, ValueError, OSError) as fmt_e:
+                        self.logger.warning(
+                            f"处理历史TVL项时出错 (跳过): {item}, 错误: {fmt_e}"
+                        )
+                        continue  # 跳过格式错误的数据点
+            else:
+                self.logger.warning(f"协议 {protocol_name} 的历史TVL数据为空或获取失败")
+
+            # 2. 准备AI分析数据
+            ai_protocol_data = {
+                "protocol_metadata": protocol_data,
+                "historical_tvl": (
+                    historical_tvl_raw if historical_tvl_raw else []
+                ),  # Pass raw or empty list
+                "audit_status": audit_status,
+                "basic_analysis": {
+                    "name": protocol_data.get("name", protocol_name),
+                    "category": protocol_data.get("category", "未知"),
+                    "chains": protocol_data.get("chains", []),
+                    "tvl": protocol_data.get("tvl", 0),
+                    "audit_count": audit_status.get("audit_count", 0),
+                    "is_open_source": audit_status.get("is_open_source", False),
+                },
+                "chain_distribution": protocol_data.get("chainTvls", {}),
+            }
+
+            # 3. 尝试AI分析
+            ai_success = False
+            risk_summary = None  # Initialize risk_summary
+            if self.ai_predictor:
+                try:
+                    self.logger.info(f"使用AI预测器分析协议 {protocol_name} 的风险")
+                    # Ensure predictor method exists and is callable
+                    if hasattr(
+                        self.ai_predictor, "analyze_defi_protocol_risk"
+                    ) and callable(
+                        getattr(self.ai_predictor, "analyze_defi_protocol_risk")
+                    ):
+                        ai_risk_analysis = self.ai_predictor.analyze_defi_protocol_risk(
+                            ai_protocol_data
+                        )
+
+                        if (
+                            ai_risk_analysis
+                            and isinstance(ai_risk_analysis, dict)
+                            and "risk_score" in ai_risk_analysis
+                        ):
+                            # 提取AI分析的关键风险信息
+                            risk_summary = {
+                                "risk_level": ai_risk_analysis.get(
+                                    "risk_level", "未知"
+                                ),
+                                "risk_score": ai_risk_analysis.get("risk_score", 0),
+                                "audit_status": audit_status.get("audited", False),
+                                "tvl_trend": ai_risk_analysis.get("tvl_trend", {}),
+                                "recommendations": ai_risk_analysis.get(
+                                    "recommendations", []
+                                )[:3],
+                                "ai_confidence": ai_risk_analysis.get(
+                                    "confidence", 0.8
+                                ),
+                                "analysis_timestamp": ai_risk_analysis.get(
+                                    "analysis_timestamp", datetime.utcnow().isoformat()
+                                ),
+                                "analysis_source": "AI Predictor",
+                            }
+                            ai_success = True
+                            self.logger.info(
+                                f"成功使用AI预测器分析协议 {protocol_name} 的风险"
+                            )
+                        else:
+                            self.logger.warning(
+                                f"AI预测器未返回有效的风险评分给 {protocol_name}. 返回: {ai_risk_analysis}"
+                            )
+                    else:
+                        self.logger.error(
+                            f"AI Predictor does not have a callable method 'analyze_defi_protocol_risk'"
+                        )
+
+                except Exception as ai_err:
+                    self.logger.error(
+                        f"使用AI预测器分析协议 {protocol_name} 风险失败: {str(ai_err)}，将使用基础方法",
+                        exc_info=True,
+                    )
+            else:
+                self.logger.info(
+                    f"AI预测器未配置，将使用基础方法分析协议 {protocol_name} 的风险"
+                )
+
+            # 4. 如果AI分析未成功，回退到基础分析
+            if not ai_success:
+                self.logger.info(f"使用基础方法分析协议 {protocol_name} 的风险")
+                base_risk_result: RiskAnalysisResult = (
+                    self._calculate_base_protocol_risk(
+                        protocol_data, historical_tvl, audit_status
+                    )
+                )
+
+                # 格式化基础分析结果
+                risk_summary = {
+                    "risk_level": base_risk_result.risk_level,
+                    "risk_score": base_risk_result.risk_score,
+                    "audit_status": audit_status.get("audited", False),
+                    "recommendations": (
+                        base_risk_result.recommendations[:3]
+                        if base_risk_result.recommendations
+                        else []
+                    ),
+                    "tvl_trend": {},  # 基础分析目前不提供TVL趋势字典
+                    "ai_confidence": 0.0,  # 基础分析没有AI置信度
+                    "analysis_timestamp": datetime.utcnow().isoformat(),
+                    "analysis_source": "Base Calculation",  # 标记来源
+                }
+                # Add error from base calculation if any
+                if base_risk_result.error:
+                    risk_summary["error"] = base_risk_result.error
+
+            # 5. 缓存并返回结果 (确保 risk_summary 被赋值)
+            if risk_summary is not None:
+                try:
+                    self.analysis_cache[cache_key] = risk_summary
+                    return risk_summary
+                except Exception as cache_err:
+                    self.logger.error(
+                        f"写入缓存失败 ({protocol_name}): {cache_err}", exc_info=True
+                    )
+                    # Return the result even if caching failed
+                    return risk_summary
+            else:
+                # This case should ideally not be reached if logic is correct
+                self.logger.error(
+                    f"未能生成 {protocol_name} 的风险分析结果，risk_summary 为 None"
+                )
+                raise ValueError(f"未能生成 {protocol_name} 的风险分析结果")
+
+        except Exception as e:
+            self.logger.error(
+                f"获取协议 {protocol_name} 风险分析失败: {str(e)}", exc_info=True
+            )
+            # 返回统一的错误结构
+            return {
+                "risk_level": "未知",
+                "risk_score": 0,
+                "audit_status": False,
+                "recommendations": [],
+                "tvl_trend": {},
+                "ai_confidence": 0.0,
+                "analysis_timestamp": datetime.utcnow().isoformat(),
+                "error": f"分析失败: {str(e)}",
+                "analysis_source": "Error",
+            }
+
+    # --- End of Migrated Methods ---

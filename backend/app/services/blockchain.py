@@ -175,34 +175,31 @@ class ProtocolPosition:
 
 
 class BlockchainService:
-    """区块链服务"""
+    """区块链服务，用于与各种区块链交互并提供统一接口"""
 
-    def __init__(self):
-        """初始化区块链服务"""
-        self.provider_url = settings.WEB3_PROVIDER_URL
-        self.web3 = Web3(Web3.HTTPProvider(self.provider_url))
-        self.proxy_url = settings.PROXY_URL
-        self.logger = logger
+    def __init__(self, risk_engine=None):
+        """初始化区块链服务
+
+        Args:
+            risk_engine: 风险引擎实例，用于委托风险分析
+        """
+        # 设置日志记录器
+        self.logger = logging.getLogger(__name__)
+
+        # 存储风险引擎引用
+        self.risk_engine = risk_engine
+
+        # 初始化协议数据缓存
+        self.protocol_cache = TTLCache(maxsize=100, ttl=3600)  # 缓存1小时
+
+        # 初始化历史数据缓存管理器
         self.historical_data_cache = HistoricalDataCache()
-        self.defi_llama_client = DefiLlama()
-        # OKX API 配置
-        self.okx_api_config = {
-            "api_key": "af83a6eb-080f-4287-af07-a5038a75f552",
-            "secret_key": "52BCC8FDDA57E991F917C58DE9A3186F",
-            "passphrase": "Jiashuai2190@",
-            "project": "",  # 此处仅适用于 WaaS APIs
-        }
-        # OKX API 基础 URL
-        self.okx_api_base_url = "https://www.okx.com"
-        self.okx_api_defi_path = "/api/v5/defi"
-        self.okx_api_wallet_path = "/api/v5/wallet"
 
-        # 添加HTTP会话属性
-        self._http_session = None
+        # 初始化API客户端
+        self._init_api_clients()
 
-        self._load_contract_abis()
-
-        logger.info("区块链服务初始化完成")
+        # 初始化各链浏览器API客户端
+        # self._init_blockchain_explorers()
 
     async def close(self):
         """
@@ -578,109 +575,42 @@ class BlockchainService:
 
         return data
 
-    async def _get_protocol_risk_summary(self, protocol: str) -> Dict[str, Any]:
-        """获取协议的风险摘要信息，集成AI预测功能
+    async def _get_protocol_risk_summary(self, protocol_name: str) -> Dict[str, Any]:
+        """
+        获取协议的风险摘要信息 (委托给RiskEngine)
 
         Args:
-            protocol: 协议名称
+            protocol_name: 协议名称
 
         Returns:
-            Dict: 包含风险等级和评分的字典
+            Dict: 包含风险等级、评分等的字典
         """
+        if not self.risk_engine:
+            self.logger.error("RiskEngine未初始化，无法分析协议风险")
+            return {
+                "risk_level": "未知",
+                "risk_score": 0,
+                "error": "RiskEngine未初始化",
+                "analysis_source": "Error",
+            }
+
         try:
-            # 尝试获取缓存的风险分析结果
-            cache_key = f"protocol_risk_{protocol.lower()}"
-            cache_interval = "1d"  # 使用1天缓存
-            cached_risk = self.historical_data_cache.get(cache_key, cache_interval)
-
-            if cached_risk is not None:
-                return cached_risk
-
-            # 获取协议数据
-            protocol_data = await self.get_protocol(protocol)
-
-            # 获取协议历史TVL数据
-            historical_tvl = await self.get_protocol_historical_tvl(protocol)
-
-            # 获取协议审计状态
-            audit_status = await self.get_protocol_audit_status(protocol)
-
-            # 准备用于AI分析的数据
-            ai_protocol_data = {
-                "protocol_metadata": protocol_data,
-                "historical_tvl": historical_tvl,
-                "audit_status": audit_status,
-                "basic_analysis": {
-                    "name": protocol_data.get("name", protocol),
-                    "category": protocol_data.get("category", "未知"),
-                    "chains": protocol_data.get("chains", []),
-                    "tvl": protocol_data.get("tvl", 0),
-                    "audit_count": audit_status.get("audit_count", 0),
-                    "is_open_source": audit_status.get("is_open_source", False),
-                },
-                "chain_distribution": protocol_data.get("chainTvls", {}),
-            }
-
-            # 尝试使用AI预测器进行高级风险分析
-            try:
-                from app.services.ai_predictor import AiPredictor
-
-                ai_predictor = AiPredictor()
-
-                self.logger.info(f"使用AI预测器分析协议 {protocol} 的风险")
-                ai_risk_analysis = ai_predictor.analyze_defi_protocol_risk(
-                    ai_protocol_data
-                )
-
-                if ai_risk_analysis and "risk_score" in ai_risk_analysis:
-                    # 提取AI分析的关键风险信息
-                    risk_summary = {
-                        "risk_level": ai_risk_analysis.get("risk_level", "未知"),
-                        "risk_score": ai_risk_analysis.get("risk_score", 0),
-                        "audit_status": audit_status.get("audited", False),
-                        "tvl_trend": ai_risk_analysis.get("tvl_trend", {}),
-                        "recommendations": ai_risk_analysis.get("recommendations", [])[
-                            :3
-                        ],  # 取前3条建议
-                        "ai_confidence": ai_risk_analysis.get("confidence", 0.8),
-                        "analysis_timestamp": ai_risk_analysis.get(
-                            "analysis_timestamp", datetime.now().isoformat()
-                        ),
-                    }
-
-                    # 缓存结果
-                    self.historical_data_cache.set(
-                        cache_key, risk_summary, cache_interval
-                    )
-                    self.logger.info(f"成功使用AI预测器分析协议 {protocol} 的风险")
-                    return risk_summary
-
-            except Exception as e:
-                self.logger.error(
-                    f"使用AI预测器分析协议 {protocol} 风险失败: {str(e)}，将使用基础方法"
-                )
-
-            # 如果AI分析失败，回退到基础风险分析
-            self.logger.info(f"使用基础方法分析协议 {protocol} 的风险")
-            risk_analysis = await self.analyze_protocol_risk(protocol)
-
-            # 提取关键风险信息
-            risk_summary = {
-                "risk_level": risk_analysis.get("risk_level", "未知"),
-                "risk_score": risk_analysis.get("risk_score", 0),
-                "audit_status": audit_status.get("audited", False),
-                "recommendations": risk_analysis.get("analysis", {})
-                .get("recommendation", "")
-                .split("，")[:3],
-            }
-
-            # 缓存结果
-            self.historical_data_cache.set(cache_key, risk_summary, cache_interval)
-
-            return risk_summary
+            self.logger.info(f"委托RiskEngine分析协议 {protocol_name} 的风险")
+            risk_analysis = await self.risk_engine.get_protocol_risk_analysis(
+                protocol_name
+            )
+            return risk_analysis
         except Exception as e:
-            self.logger.error(f"获取协议风险摘要失败: {str(e)}")
-            return {"risk_level": "未知", "risk_score": 0, "audit_status": False}
+            self.logger.error(
+                f"通过RiskEngine分析协议 {protocol_name} 风险失败: {str(e)}",
+                exc_info=True,
+            )
+            return {
+                "risk_level": "未知",
+                "risk_score": 0,
+                "error": f"风险分析失败: {str(e)}",
+                "analysis_source": "Error",
+            }
 
     async def _get_okx_positions(self, address: str) -> List[Dict[str, Any]]:
         """使用OKX API获取用户在各DeFi协议中的存款头寸
@@ -2961,3 +2891,51 @@ class BlockchainService:
         except Exception as e:
             self.logger.error(f"获取{asset}的流动性数据失败: {str(e)}")
             return None
+
+    def _init_api_clients(self):
+        """初始化API客户端"""
+        # 初始化DeFi Llama API客户端
+        self.defi_llama_client = DefiLlama()
+
+        # 初始化Web3实例
+        self.provider_url = settings.WEB3_PROVIDER_URL
+        self.web3 = Web3(Web3.HTTPProvider(self.provider_url))
+
+        # 初始化HTTP会话属性
+        self._http_session = None
+
+        # OKX API 配置
+        self.okx_api_config = {
+            "api_key": settings.OKX_API_KEY,
+            "secret_key": settings.OKX_SECRET_KEY,
+            "passphrase": settings.OKX_PASSPHRASE,
+            "project": "",  # 此处仅适用于 WaaS APIs
+        }
+
+        # OKX API 基础 URL
+        self.okx_api_base_url = "https://www.okx.com"
+        self.okx_api_defi_path = "/api/v5/defi"
+        self.okx_api_wallet_path = "/api/v5/wallet"
+
+        # 加载合约ABI
+        self._load_contract_abis()
+
+        self.logger.info("API客户端初始化完成")
+
+    def _init_blockchain_explorers(self):
+        """初始化区块链浏览器API客户端"""
+        # 设置代理
+        self.proxies = (
+            {"http": settings.PROXY_URL, "https": settings.PROXY_URL}
+            if settings.PROXY_URL
+            else None
+        )
+
+        # 以太坊浏览器API密钥
+        self.etherscan_api_key = settings.ETHERSCAN_API_KEY
+
+        # 添加其他链的浏览器API
+        # self.bscscan_api_key = settings.BSCSCAN_API_KEY
+        # 等等...
+
+        self.logger.info("区块链浏览器API客户端初始化完成")

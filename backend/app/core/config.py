@@ -31,8 +31,9 @@ class Settings(BaseSettings):
     """应用配置设置"""
 
     # 应用设置
-    APP_NAME: str = "DeFi风险分析API"
-    APP_VERSION: str = "1.0.0"
+    APP_NAME: str = "DeFi Risk API"
+    APP_VERSION: str = "0.1.0"
+    APP_DESCRIPTION: str = "DeFi风险分析和评估API"
     DEBUG: bool = Field(default=False, env="DEBUG")
 
     # 演示模式设置 - 从环境变量读取，不再硬编码
@@ -52,13 +53,18 @@ class Settings(BaseSettings):
     # AI设置
     OPENAI_API_KEY: str = Field(..., env="OPENAI_API_KEY")
     OPENAI_API_URL: str = Field(..., env="OPENAI_API_URL")
-    AI_MODEL: str = Field(default="gpt-3.5-turbo", env="OPENAI_API_MODEL")
+    AI_MODEL: str = Field(default="gpt-4o-mini", env="OPENAI_API_MODEL")
     ENABLE_EXTERNAL_AI: bool = Field(
         default=False, env="ENABLE_EXTERNAL_AI"
     )  # 控制是否启用外部AI服务
 
     # 代理设置
     PROXY_URL: str = Field(default="http://127.0.0.1:7890", env="PROXY_URL")
+
+    # OKX API 配置
+    OKX_API_KEY: str = Field(..., env="OKX_API_KEY")
+    OKX_SECRET_KEY: str = Field(..., env="OKX_SECRET_KEY")
+    OKX_PASSPHRASE: str = Field(..., env="OKX_PASSPHRASE")
 
     # 从外部配置文件加载风险权重
     RISK_WEIGHTS: Dict[str, float] = Field(
@@ -77,6 +83,9 @@ class Settings(BaseSettings):
 
     # 缓存设置
     CACHE_TTL: int = Field(default=300, env="CACHE_TTL")  # 默认5分钟
+
+    # CORS设置
+    CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 
     class Config:
         env_file = ".env"

@@ -13,12 +13,19 @@ import copy
 class SmartContractRiskAnalyzer(RiskAnalyzerBase):
     """智能合约风险分析器"""
 
-    def __init__(self, ai_service=None, ai_predictor=None, blockchain_service=None):
+    def __init__(
+        self,
+        ai_service=None,
+        ai_predictor=None,
+        blockchain_service=None,
+        risk_engine=None,
+    ):
         """初始化智能合约风险分析器"""
         super().__init__(ai_service, ai_predictor, blockchain_service)
         from app.services.recommendation_service import RecommendationService
 
         self.recommendation_service = RecommendationService()
+        self.risk_engine = risk_engine
 
     async def analyze(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """

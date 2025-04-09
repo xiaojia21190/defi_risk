@@ -1780,6 +1780,31 @@ class AiPredictor:
                 "confidence": 0.3,
             }
 
+    def _convert_to_serializable(self, obj):
+        """
+        将对象转换为可JSON序列化的格式
+
+        Args:
+            obj: 任意对象
+
+        Returns:
+            可序列化的对象
+        """
+        if hasattr(obj, "__dict__"):
+            # 处理具有__dict__属性的对象（如dataclass）
+            return {
+                k: self._convert_to_serializable(v) for k, v in obj.__dict__.items()
+            }
+        elif isinstance(obj, dict):
+            # 递归处理字典
+            return {k: self._convert_to_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list) or isinstance(obj, tuple):
+            # 递归处理列表或元组
+            return [self._convert_to_serializable(item) for item in obj]
+        else:
+            # 基本类型直接返回
+            return obj
+
     def _call_external_ai_service(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         调用外部AI服务来分析投资组合
@@ -1791,6 +1816,9 @@ class AiPredictor:
             Dict: AI服务返回的分析结果，如果调用失败则返回None
         """
         try:
+            # 将输入数据转换为可序列化格式
+            serializable_input = self._convert_to_serializable(input_data)
+
             # 构建提示语，包含投资组合信息
             system_message = """你是一个专业的DeFi投资组合分析师，擅长分析加密货币投资组合风险和提供投资建议。
 请根据提供的投资组合数据，提供深入的分析洞察、具体的改进建议和风险警告。
@@ -1798,25 +1826,23 @@ class AiPredictor:
 分析应该是全面的、专业的，并且提供可操作的建议。"""
 
             # 构建用户消息，确保输入数据大小合适
-            positions_sample = input_data.get("positions", [])[
-                :5
-            ]  # 最多取5个头寸作为样本
-            risk_factors_sample = input_data.get("risk_factors", [])[
-                :5
-            ]  # 最多取5个风险因子作为样本
+            positions = serializable_input.get("positions", [])
+            positions_sample = positions[:5]  # 最多取5个头寸作为样本
+            risk_factors = serializable_input.get("risk_factors", [])
+            risk_factors_sample = risk_factors[:5]  # 最多取5个风险因子作为样本
 
             user_message = f"""请分析以下投资组合数据并提供洞察、建议和风险警告:
 
-钱包地址: {input_data.get('wallet_address', '未知')}
-投资头寸数量: {len(input_data.get('positions', []))}
-总风险评分: {input_data.get('risk_metrics', {}).get('risk_score', 0)}
-风险等级: {input_data.get('rule_based_analysis', {}).get('risk_level', '未知')}
+钱包地址: {serializable_input.get('wallet_address', '未知')}
+投资头寸数量: {len(positions)}
+总风险评分: {serializable_input.get('risk_metrics', {}).get('risk_score', 0)}
+风险等级: {serializable_input.get('rule_based_analysis', {}).get('risk_level', '未知')}
 
 位置样本: {json.dumps(positions_sample, ensure_ascii=False)}
-(显示 {len(positions_sample)}/{len(input_data.get('positions', []))} 个头寸)
+(显示 {len(positions_sample)}/{len(positions)} 个头寸)
 
 风险因子样本: {json.dumps(risk_factors_sample, ensure_ascii=False)}
-(显示 {len(risk_factors_sample)}/{len(input_data.get('risk_factors', []))} 个风险因子)
+(显示 {len(risk_factors_sample)}/{len(risk_factors)} 个风险因子)
 
 请以JSON格式提供:
 1. insights: 投资组合分析洞察列表 (至少5条)

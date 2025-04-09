@@ -14,10 +14,17 @@ from app.services.recommendation_service import RecommendationService
 class CorrelationRiskAnalyzer(RiskAnalyzerBase):
     """相关性风险分析器"""
 
-    def __init__(self, ai_service=None, ai_predictor=None, blockchain_service=None):
+    def __init__(
+        self,
+        ai_service=None,
+        ai_predictor=None,
+        blockchain_service=None,
+        risk_engine=None,
+    ):
         """初始化相关性风险分析器"""
         super().__init__(ai_service, ai_predictor, blockchain_service)
         self.recommendation_service = RecommendationService()
+        self.risk_engine = risk_engine
 
         # 确保区块链服务可用
         self._ensure_blockchain_service_available("初始化")
