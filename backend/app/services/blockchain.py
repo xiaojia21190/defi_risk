@@ -29,6 +29,30 @@ from app.models.domain.risk import (
 )
 
 
+# --- Alert Thresholds ---
+PRICE_VOLATILITY_CRIT_THRESHOLD = 10.0
+PRICE_VOLATILITY_WARN_THRESHOLD = 5.0
+PRICE_VOLATILITY_INFO_THRESHOLD = 3.0
+LEVERAGE_CRIT_THRESHOLD = 5.0
+LEVERAGE_WARN_THRESHOLD = 3.0
+LEVERAGE_SAFE_THRESHOLD = 2.0
+HIGH_APY_CRIT_THRESHOLD = 50.0
+HIGH_APY_WARN_THRESHOLD = 30.0
+HIGH_APY_IGNORE_THRESHOLD = 20.0
+LOW_LIQUIDITY_WARN_THRESHOLD = 0.01  # Volume/MarketCap ratio < 1%
+STABLECOIN_DEPEG_CRIT_THRESHOLD = 0.03  # 3% deviation from $1
+STABLECOIN_DEPEG_WARN_THRESHOLD = 0.02  # 2% deviation from $1
+STABLECOINS = [
+    "USDC",
+    "USDT",
+    "DAI",
+    "BUSD",
+    "TUSD",
+    "USDD",
+    "FDUSD",
+]  # Common stablecoins
+
+
 logger = logging.getLogger("defi_risk.blockchain_service")
 
 # 使用settings中的代理设置
@@ -470,7 +494,8 @@ class BlockchainService:
             return []  # 出错时返回空列表
 
     def _get_invest_type_name(self, invest_type: int) -> str:
-        """获取投资类型的名称
+        """
+        根据投资类型ID获取投资类型名称
 
         Args:
             invest_type: 投资类型ID
@@ -1616,15 +1641,14 @@ class BlockchainService:
         self, wallet_address: str, positions: List[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """
-        获取钱包相关的警报，使用CoinGecko数据增强风险分析
-
-        注意：该方法已完全适配CoinGecko数据源，直接使用_get_coingecko_24h_data方法获取市场数据，
-        不再使用原有的_get_24h_data方法。
+        获取钱包相关的警报，使用CoinGecko数据增强风险分析.
+        Refactored for parallel data fetching and modular alert generation.
         """
-        try:
-            self.logger.info(f"获取钱包 {wallet_address} 的警报")
+        self.logger.info(f"开始为钱包 {wallet_address} 获取警报 (已重构)")
+        start_time = time.time()
 
-            # 如果没有提供头寸，则获取钱包头寸
+        try:
+            # 1. 如果没有提供头寸，则获取钱包头寸
             if positions is None:
                 positions = await self.get_all_positions(wallet_address)
 
@@ -1632,386 +1656,188 @@ class BlockchainService:
                 self.logger.info(f"钱包 {wallet_address} 没有头寸，无法生成警报")
                 return []
 
-            # 提取头寸中的资产和协议
-            assets = {}  # 资产价值映射
-            protocols = set()  # 协议集合
-            position_details = []  # 存储所有头寸的详细信息，避免重复遍历
+            # 2. 提取头寸中的资产和协议
+            assets_value_map: Dict[str, float] = {}  # 资产 -> 总价值 映射
+            protocols: set[str] = set()  # 协议集合
+            position_details: List[Dict] = []  # 存储所有头寸的详细信息
 
-            for position in positions:
-                # 检查position是否包含positions列表（代表平台资产）
-                if "positions" in position:
-                    # 这是一个平台资产对象，需要从内部positions列表提取资产信息
-                    platform_positions = position.get("positions", [])
-                    protocol = position.get("protocol", "unknown")
-                    platform_leverage = float(position.get("leverage", 1.0))
-                    protocols.add(protocol)
+            for position_info in positions:
+                # 兼容旧格式和OKX返回的格式
+                platform_positions = position_info.get("positions", [])
+                protocol = position_info.get("protocol", "unknown_protocol")
+                platform_leverage = float(
+                    position_info.get("leverage", 1.0)
+                )  # Use 1.0 if leverage not present
+                # Ensure protocol is a valid string
+                if (
+                    not isinstance(protocol, str)
+                    or not protocol
+                    or protocol.strip().lower() == "unknown_protocol"
+                ):
+                    protocol = f"unknown_protocol_{position_info.get('analysisPlatformId', 'N/A')}"  # Try to get an ID if name missing
+                protocols.add(protocol)
 
-                    for pos in platform_positions:
-                        # 处理PlatformAsset对象或字典
-                        if hasattr(pos, "asset"):
-                            # 如果是PlatformAsset对象
-                            asset = pos.asset
-                            usd_value = float(pos.amount)
-                            invest_type = pos.invest_type
-                            apy = float(pos.apy) if pos.apy is not None else 0
-                        else:
-                            # 如果是字典
-                            asset = pos.get("asset", "unknown")
-                            usd_value = float(pos.get("amount", 0))
-                            invest_type = pos.get("invest_type", 1)
-                            apy = float(pos.get("apy", 0))
+                for pos in platform_positions:
+                    # 处理PlatformAsset对象或字典
+                    if hasattr(pos, "asset"):  # PlatformAsset object
+                        asset_name = pos.asset
+                        usd_value = float(pos.amount)
+                        invest_type = pos.invest_type
+                        apy = float(pos.apy) if pos.apy is not None else 0.0
+                        leverage = platform_leverage  # Use platform leverage
+                    elif isinstance(pos, dict):  # Dictionary format
+                        asset_name = pos.get("asset", "unknown_asset")
+                        usd_value = float(pos.get("amount", 0.0))
+                        invest_type = pos.get("invest_type", 1)
+                        apy = float(pos.get("apy", 0.0))
+                        leverage = platform_leverage  # Use platform leverage
+                    else:
+                        self.logger.warning(f"跳过未知格式的头寸: {pos}")
+                        continue
 
-                        # 确保资产名称是有效的字符串
+                    # 确保资产名称是有效的字符串
+                    if (
+                        not isinstance(asset_name, str)
+                        or asset_name.lower() == "unknown_asset"
+                        or not asset_name.strip()
+                    ):
+                        # Try to infer from tokenList if available
+                        token_list = (
+                            getattr(pos, "tokenList", pos.get("tokenList", []))
+                            if hasattr(pos, "tokenList") or isinstance(pos, dict)
+                            else []
+                        )
                         if (
-                            not isinstance(asset, str)
-                            or asset.lower() == "unknown"
-                            or asset.strip() == ""
+                            token_list
+                            and isinstance(token_list, list)
+                            and len(token_list) > 0
+                            and isinstance(token_list[0], dict)
                         ):
+                            asset_name = token_list[0].get(
+                                "tokenSymbol", "unknown_inferred_asset"
+                            )
+                        else:
+                            self.logger.warning(f"跳过资产名称无效的头寸: {pos}")
                             continue
 
-                        # 处理复合资产名称（如"ETH/USDC"）
-                        if "/" in asset:
-                            asset = asset.split("/")[0]  # 使用主资产
+                    # 处理复合资产名称（如"ETH/USDC"），取第一个作为主要分析对象
+                    if "/" in asset_name:
+                        asset_name = asset_name.split("/")[0]
+                    elif "-" in asset_name:  # Handle formats like WBTC-ETH
+                        asset_name = asset_name.split("-")[0]
 
-                        # 处理资产名称中的特殊字符
-                        asset = asset.strip()
+                    asset_name = asset_name.strip()
+                    if not asset_name:
+                        continue  # Skip if empty after stripping
 
-                        # 更新资产价值映射
-                        if asset in assets:
-                            assets[asset] += usd_value
-                        else:
-                            assets[asset] = usd_value
-
-                        # 存储头寸详情，供后续检查使用
-                        position_details.append(
-                            {
-                                "asset": asset,
-                                "protocol": protocol,
-                                "usd_value": usd_value,
-                                "leverage": platform_leverage,
-                                "apy": apy,
-                                "invest_type": invest_type,
-                            }
-                        )
-
-            # 初始化警报列表
-            alerts = []
-
-            # 1. 检查资产价格波动
-            for asset, value in assets.items():
-                try:
-                    # 跳过价值为0或极小的资产
-                    if value <= 0.01:
-                        continue
-
-                    # 获取24小时数据 - 直接使用CoinGecko数据
-                    data_24h = await self._get_coingecko_24h_data(asset)
-                    if not data_24h:
-                        self.logger.warning(f"无法获取{asset}的24小时价格数据，跳过")
-                        continue
-
-                    # 计算价格波动率
-                    price_change = data_24h.get("price_change_percent", 0)
-                    current_price = data_24h.get("price", 0)
-
-                    # 如果价格为0，跳过
-                    if current_price <= 0:
-                        continue
-
-                    previous_price = current_price / (1 + price_change / 100)
-
-                    # 根据波动率确定警报级别
-                    severity = "info"
-                    if abs(price_change) > 10:
-                        severity = "critical"
-                    elif abs(price_change) > 5:
-                        severity = "warning"
-
-                    # 生成价格波动警报
-                    if abs(price_change) > 3:  # 只有波动超过3%才生成警报
-                        direction = "上涨" if price_change > 0 else "下跌"
-                        alerts.append(
-                            {
-                                "id": f"price-{asset}-{int(datetime.now().timestamp())}",
-                                "type": "price_volatility",
-                                "severity": severity,
-                                "protocol": "",
-                                "asset": asset,
-                                "message": f"{asset}价格24小时{direction} {abs(price_change):.1f}%，当前价格 ${current_price:.8f}",
-                                "timestamp": datetime.now().isoformat(),
-                                "details": {
-                                    "current_price": current_price,
-                                    "previous_price": previous_price,
-                                    "price_change_24h": price_change,
-                                    "volatility": abs(price_change),
-                                    "data_source": "CoinGecko",
-                                },
-                            }
-                        )
-                except Exception as e:
-                    self.logger.error(f"获取{asset}价格数据失败: {str(e)}")
-                    # 继续处理下一个资产，不中断流程
-
-            # 2. 检查杠杆风险
-            for pos_detail in position_details:
-                try:
-                    leverage = float(pos_detail.get("leverage", 1.0))
-                    if leverage <= 2.0:  # 如果杠杆不超过2.0，跳过
-                        continue
-
-                    asset = pos_detail.get("asset", "unknown")
-                    protocol = pos_detail.get("protocol", "unknown")
-
-                    # 根据杠杆率确定风险级别
-                    severity = "info"
-                    if leverage > 5:
-                        severity = "critical"
-                    elif leverage > 3:
-                        severity = "warning"
-
-                    # 估算清算价格（简化计算）
-                    current_price = 0
-                    try:
-                        # 直接使用CoinGecko数据
-                        data_24h = await self._get_coingecko_24h_data(asset)
-                        if data_24h:
-                            current_price = data_24h.get("price", 0)
-                    except Exception as e:
-                        self.logger.error(
-                            f"获取{asset}价格数据失败用于清算价格计算: {str(e)}"
-                        )
-                        # 继续使用当前价格为0
-
-                    # 假设清算阈值为杠杆率的80%
-                    liquidation_threshold = 0.8
-                    liquidation_price = (
-                        current_price * (1 - liquidation_threshold / leverage)
-                        if current_price > 0
-                        else 0
+                    # 更新资产价值映射
+                    assets_value_map[asset_name] = (
+                        assets_value_map.get(asset_name, 0.0) + usd_value
                     )
 
-                    alerts.append(
+                    # 存储头寸详情，供后续检查使用
+                    position_details.append(
                         {
-                            "id": f"leverage-{protocol}-{asset}-{int(datetime.now().timestamp())}",
-                            "type": "leverage_risk",
-                            "severity": severity,
+                            "asset": asset_name,
                             "protocol": protocol,
-                            "asset": asset,
-                            "message": f"{protocol}上的{asset}头寸使用了{leverage:.1f}倍杠杆，存在清算风险",
-                            "timestamp": datetime.now().isoformat(),
-                            "details": {
-                                "leverage": leverage,
-                                "safe_leverage": 2.0,
-                                "current_price": current_price,
-                                "liquidation_price": liquidation_price,
-                                "risk_ratio": (
-                                    (current_price - liquidation_price) / current_price
-                                    if current_price > 0
-                                    else 0
-                                ),
-                                "recommendation": "建议降低杠杆或增加抵押以降低清算风险",
-                            },
+                            "usd_value": usd_value,
+                            "leverage": leverage,
+                            "apy": apy,
+                            "invest_type": invest_type,
                         }
                     )
-                except Exception as e:
-                    self.logger.error(f"处理杠杆风险时出错: {str(e)}")
-                    # 继续处理下一个头寸
 
-            # 3. 检查协议风险
-            for protocol in protocols:
-                try:
-                    # 确保协议名称是有效的字符串
-                    if (
-                        not isinstance(protocol, str)
-                        or protocol.lower() == "unknown"
-                        or protocol.strip() == ""
-                    ):
-                        continue
+            unique_assets = list(assets_value_map.keys())
+            unique_protocols = list(protocols)
 
-                    # 获取协议风险摘要
-                    risk_summary = await self._get_protocol_risk_summary(protocol)
-                    if not risk_summary:
-                        continue
+            if not unique_assets:
+                self.logger.info(f"钱包 {wallet_address} 头寸中未找到有效资产")
+                return []
 
-                    risk_level = risk_summary.get("risk_level", "medium")
-                    risk_score = risk_summary.get("risk_score", 50)
+            # 3. 准备并发获取数据的任务
+            self.logger.info(
+                f"为 {len(unique_assets)} 个资产和 {len(unique_protocols)} 个协议准备并发数据获取任务"
+            )
+            tasks_24h = [self._get_coingecko_24h_data(asset) for asset in unique_assets]
+            tasks_protocol_risk = [
+                self._get_protocol_risk_summary(protocol)
+                for protocol in unique_protocols
+            ]
+            tasks_asset_risk = [
+                self.analyze_asset_risk(asset) for asset in unique_assets
+            ]
 
-                    # 根据风险等级确定警报级别
-                    severity = "info"
-                    if risk_level == "high":
-                        severity = "critical"
-                    elif risk_level == "medium":
-                        severity = "warning"
+            # 4. 使用asyncio.gather并发执行任务
+            gather_start_time = time.time()
+            results_24h, results_protocol_risk, results_asset_risk = (
+                await asyncio.gather(
+                    asyncio.gather(*tasks_24h, return_exceptions=True),
+                    asyncio.gather(*tasks_protocol_risk, return_exceptions=True),
+                    asyncio.gather(*tasks_asset_risk, return_exceptions=True),
+                )
+            )
+            gather_duration = time.time() - gather_start_time
+            self.logger.info(f"数据并发获取完成，耗时: {gather_duration:.2f} 秒")
 
-                    # 只有中高风险才生成警报
-                    if risk_level in ["medium", "high"]:
-                        alerts.append(
-                            {
-                                "id": f"protocol-{protocol}-{int(datetime.now().timestamp())}",
-                                "type": "protocol_risk",
-                                "severity": severity,
-                                "protocol": protocol,
-                                "asset": "",
-                                "message": f"{protocol}协议风险等级为{risk_level}，风险评分{risk_score}",
-                                "timestamp": datetime.now().isoformat(),
-                                "details": {
-                                    "risk_score": risk_score,
-                                    "risk_level": risk_level,
-                                    "recommendation": risk_summary.get(
-                                        "recommendation", "建议关注协议安全更新"
-                                    ),
-                                    "analysis": risk_summary.get("analysis", ""),
-                                },
-                            }
-                        )
-                except Exception as e:
-                    self.logger.error(f"获取{protocol}协议风险数据失败: {str(e)}")
-                    # 继续处理下一个协议
+            # 5. 处理获取结果，记录错误
+            asset_data_24h: Dict[str, Dict] = {}
+            for asset, result in zip(unique_assets, results_24h):
+                if isinstance(result, Exception):
+                    self.logger.error(f"获取 {asset} 24小时数据失败: {result}")
+                elif isinstance(result, dict):
+                    asset_data_24h[asset] = result
+                # else: None or other non-dict type, ignore
 
-            # 4. 检查APY异常
-            for pos_detail in position_details:
-                try:
-                    apy = float(pos_detail.get("apy", 0))
-                    if apy <= 20:  # 如果APY不超过20%，跳过
-                        continue
+            protocol_risk_data: Dict[str, Dict] = {}
+            for protocol, result in zip(unique_protocols, results_protocol_risk):
+                if isinstance(result, Exception):
+                    self.logger.error(f"获取 {protocol} 协议风险失败: {result}")
+                elif isinstance(result, dict):
+                    protocol_risk_data[protocol] = result
+                # else: None or other non-dict type, ignore
 
-                    asset = pos_detail.get("asset", "unknown")
-                    protocol = pos_detail.get("protocol", "unknown")
+            asset_risk_data: Dict[str, RiskAnalysisResult] = {}
+            for asset, result in zip(unique_assets, results_asset_risk):
+                if isinstance(result, Exception):
+                    self.logger.error(f"分析 {asset} 资产风险失败: {result}")
+                elif isinstance(result, RiskAnalysisResult):  # Check for expected type
+                    asset_risk_data[asset] = result
+                # else: None or other type, ignore
 
-                    # 根据APY确定风险级别
-                    severity = "info"
-                    if apy > 50:
-                        severity = "critical"
-                    elif apy > 30:
-                        severity = "warning"
+            # 6. 调用辅助函数生成警报
+            alerts_generation_start_time = time.time()
+            all_alerts = []
 
-                    alerts.append(
-                        {
-                            "id": f"apy-{protocol}-{asset}-{int(datetime.now().timestamp())}",
-                            "type": "high_apy",
-                            "severity": severity,
-                            "protocol": protocol,
-                            "asset": asset,
-                            "message": f"{protocol}上的{asset}头寸APY异常高({apy:.1f}%)，可能存在风险",
-                            "timestamp": datetime.now().isoformat(),
-                            "details": {
-                                "current_apy": apy,
-                                "average_apy": 5.0,  # 假设的行业平均APY
-                                "recommendation": "高收益通常伴随高风险，建议谨慎评估",
-                                "analysis": "异常高的APY可能意味着项目风险较高或处于早期阶段",
-                            },
-                        }
-                    )
-                except Exception as e:
-                    self.logger.error(f"处理APY异常风险时出错: {str(e)}")
-                    # 继续处理下一个头寸
+            all_alerts.extend(
+                await self._generate_price_volatility_alerts(
+                    asset_data_24h, assets_value_map
+                )
+            )
+            all_alerts.extend(
+                await self._generate_leverage_risk_alerts(
+                    position_details, asset_data_24h
+                )
+            )
+            all_alerts.extend(
+                await self._generate_protocol_risk_alerts(protocol_risk_data)
+            )
+            all_alerts.extend(await self._generate_high_apy_alerts(position_details))
+            all_alerts.extend(
+                await self._generate_market_cap_risk_alerts(asset_risk_data)
+            )
+            all_alerts.extend(
+                await self._generate_liquidity_risk_alerts(asset_data_24h)
+            )
+            all_alerts.extend(
+                await self._generate_stablecoin_depeg_alerts(asset_data_24h)
+            )
 
-            # 5. 检查币值风险
-            for asset, value in assets.items():
-                try:
-                    # 跳过价值为0或极小的资产
-                    if value <= 0.01:
-                        continue
+            alerts_generation_duration = time.time() - alerts_generation_start_time
+            self.logger.info(f"警报生成完成，耗时: {alerts_generation_duration:.2f} 秒")
 
-                    # 尝试分析资产风险
-                    asset_risk = await self.analyze_asset_risk(asset)
-
-                    # 检查返回值是否有效
-                    if (
-                        not asset_risk
-                        or not isinstance(asset_risk, dict)
-                        and not hasattr(asset_risk, "get")
-                    ):
-                        continue
-
-                    risk_level = (
-                        asset_risk.get("risk_level")
-                        if isinstance(asset_risk, dict)
-                        else getattr(asset_risk, "risk_level", "")
-                    )
-
-                    if risk_level in ["高风险", "中高风险"]:
-                        # 提取分析信息
-                        analysis = (
-                            asset_risk.get("analysis", {})
-                            if isinstance(asset_risk, dict)
-                            else getattr(asset_risk, "analysis", {})
-                        )
-                        market_cap_analysis = ""
-
-                        if isinstance(analysis, dict):
-                            market_cap_analysis = analysis.get(
-                                "market_cap_analysis", "市值风险较高"
-                            )
-                        else:
-                            market_cap_analysis = getattr(
-                                analysis, "market_cap_analysis", "市值风险较高"
-                            )
-
-                        alerts.append(
-                            {
-                                "id": f"market_cap-{asset}-{int(datetime.now().timestamp())}",
-                                "type": "market_cap_risk",
-                                "severity": "warning",
-                                "protocol": "",
-                                "asset": asset,
-                                "message": f"{asset}市值风险较高: {market_cap_analysis}",
-                                "timestamp": datetime.now().isoformat(),
-                                "details": (
-                                    asset_risk
-                                    if isinstance(asset_risk, dict)
-                                    else asset_risk.__dict__
-                                ),
-                            }
-                        )
-                except Exception as e:
-                    self.logger.error(f"分析{asset}市值风险失败: {str(e)}")
-                    # 继续处理下一个资产，不中断流程
-
-            # 6. 检查流动性风险
-            for asset, value in assets.items():
-                try:
-                    # 跳过价值为0或极小的资产
-                    if value <= 0.01:
-                        continue
-
-                    # 获取24小时数据
-                    data_24h = await self._get_coingecko_24h_data(asset)
-                    if not data_24h:
-                        continue
-
-                    volume = data_24h.get("volume", 0)
-                    market_cap = data_24h.get("market_cap", 0)
-
-                    # 防止除以零错误
-                    if market_cap <= 0:
-                        continue
-
-                    volume_to_mcap = volume / market_cap
-
-                    if volume_to_mcap < 0.01:  # 日交易量不到市值的1%
-                        alerts.append(
-                            {
-                                "id": f"liquidity-{asset}-{int(datetime.now().timestamp())}",
-                                "type": "liquidity_risk",
-                                "severity": "warning",
-                                "protocol": "",
-                                "asset": asset,
-                                "message": f"{asset}流动性风险较高，日交易量/市值比率{volume_to_mcap:.2%}",
-                                "timestamp": datetime.now().isoformat(),
-                                "details": {
-                                    "volume_to_mcap": volume_to_mcap,
-                                    "recommendation": "建议关注流动性风险，可能需要调整仓位",
-                                },
-                            }
-                        )
-                except Exception as e:
-                    self.logger.error(f"分析{asset}流动性风险失败: {str(e)}")
-                    # 继续处理下一个资产，不中断流程
-
-            # 如果没有生成任何警报，添加一个默认的"无警报"消息
-            if not alerts:
-                alerts.append(
+            # 7. 如果没有生成任何警报，添加一个默认的"无警报"消息
+            if not all_alerts:
+                all_alerts.append(
                     {
                         "id": f"info-{int(datetime.now().timestamp())}",
                         "type": "info",
@@ -2026,16 +1852,37 @@ class BlockchainService:
                     }
                 )
 
-            # 按照风险级别排序（critical->warning->info）
+            # 8. 按照风险级别排序（critical->warning->info）
             severity_order = {"critical": 0, "warning": 1, "info": 2}
-            alerts.sort(key=lambda x: severity_order.get(x.get("severity", "info"), 3))
+            all_alerts.sort(
+                key=lambda x: severity_order.get(x.get("severity", "info"), 3)
+            )
 
-            self.logger.info(f"为钱包 {wallet_address} 生成了 {len(alerts)} 个警报")
-            return alerts
+            total_duration = time.time() - start_time
+            self.logger.info(
+                f"为钱包 {wallet_address} 生成了 {len(all_alerts)} 个警报，总耗时: {total_duration:.2f} 秒"
+            )
+            return all_alerts
 
         except Exception as e:
-            self.logger.error(f"获取钱包警报失败: {str(e)}")
-            return [{"error": f"获取警报时出错: {str(e)}"}]
+            total_duration = time.time() - start_time
+            self.logger.error(
+                f"获取钱包警报失败 (总耗时: {total_duration:.2f} 秒): {str(e)}",
+                exc_info=True,
+            )
+            # Return a generic error alert
+            return [
+                {
+                    "id": f"error-{int(datetime.now().timestamp())}",
+                    "type": "error",
+                    "severity": "critical",
+                    "protocol": "",
+                    "asset": "",
+                    "message": "获取钱包警报时发生内部错误",
+                    "timestamp": datetime.now().isoformat(),
+                    "details": {"error": str(e)},
+                }
+            ]
 
     async def get_coingecko_historical_data(
         self,
@@ -2939,3 +2786,435 @@ class BlockchainService:
         # 等等...
 
         self.logger.info("区块链浏览器API客户端初始化完成")
+
+    async def _generate_stablecoin_depeg_alerts(
+        self, asset_data_24h: Dict[str, Dict]
+    ) -> List[Dict]:
+        """Generates alerts if stablecoins deviate significantly from $1."""
+        alerts = []
+        for asset, data_24h in asset_data_24h.items():
+            try:
+                # Check if asset symbol is in our list of stablecoins (case-insensitive)
+                if asset.upper() not in self.STABLECOINS:
+                    continue
+
+                if not data_24h:
+                    self.logger.warning(
+                        f"稳定币检查：无法获取{asset}的24小时价格数据，跳过"
+                    )
+                    continue
+
+                price = data_24h.get("price", 0)
+                if price <= 0:  # Skip if price is invalid
+                    continue
+
+                deviation = abs(price - 1.0)
+
+                severity = None
+                if deviation > self.STABLECOIN_DEPEG_CRIT_THRESHOLD:
+                    severity = "critical"
+                elif deviation > self.STABLECOIN_DEPEG_WARN_THRESHOLD:
+                    severity = "warning"
+
+                if severity:
+                    alerts.append(
+                        {
+                            "id": f"depeg-{asset}-{int(datetime.now().timestamp())}",
+                            "type": "stablecoin_depeg",
+                            "severity": severity,
+                            "protocol": "",
+                            "asset": asset,
+                            "message": f"稳定币 {asset} 价格 ${price:.4f}，偏离 $1.00 达到 {deviation:.2%}",
+                            "timestamp": datetime.now().isoformat(),
+                            "details": {
+                                "current_price": price,
+                                "deviation_usd": abs(price - 1.0),
+                                "deviation_percent": deviation * 100,
+                                "threshold_warn": self.STABLECOIN_DEPEG_WARN_THRESHOLD
+                                * 100,
+                                "threshold_crit": self.STABLECOIN_DEPEG_CRIT_THRESHOLD
+                                * 100,
+                                "recommendation": "监控稳定币价格，考虑风险敞口。",
+                                "data_source": "CoinGecko",
+                            },
+                        }
+                    )
+            except Exception as e:
+                self.logger.error(f"稳定币脱锚检查：分析{asset}时失败: {str(e)}")
+        return alerts
+
+    async def _generate_price_volatility_alerts(
+        self, asset_data_24h: Dict[str, Dict], assets_value_map: Dict[str, float]
+    ) -> List[Dict]:
+        """Generates alerts based on 24h price volatility."""
+        alerts = []
+        for asset, value in assets_value_map.items():
+            try:
+                # 跳过价值为0或极小的资产
+                if value <= 0.01:
+                    continue
+
+                data_24h = asset_data_24h.get(asset)
+                if not data_24h:
+                    self.logger.warning(
+                        f"价格波动检查：无法获取{asset}的24小时价格数据，跳过"
+                    )
+                    continue
+
+                # 计算价格波动率
+                price_change = data_24h.get("price_change_percent", 0)
+                current_price = data_24h.get("price", 0)
+
+                # 如果价格为0，跳过
+                if current_price <= 0:
+                    continue
+
+                previous_price = (
+                    current_price / (1 + price_change / 100)
+                    if (1 + price_change / 100) != 0
+                    else 0
+                )
+
+                # 根据波动率确定警报级别
+                severity = "info"
+                abs_price_change = abs(price_change)
+                if abs_price_change > self.PRICE_VOLATILITY_CRIT_THRESHOLD:
+                    severity = "critical"
+                elif abs_price_change > self.PRICE_VOLATILITY_WARN_THRESHOLD:
+                    severity = "warning"
+
+                # 生成价格波动警报
+                if (
+                    abs_price_change > self.PRICE_VOLATILITY_INFO_THRESHOLD
+                ):  # 只有波动超过阈值才生成警报
+                    direction = "上涨" if price_change > 0 else "下跌"
+                    alerts.append(
+                        {
+                            "id": f"price-{asset}-{int(datetime.now().timestamp())}",
+                            "type": "price_volatility",
+                            "severity": severity,
+                            "protocol": "",
+                            "asset": asset,
+                            "message": f"{asset}价格24小时{direction} {abs(price_change):.1f}%，当前价格 ${current_price:.8f}",
+                            "timestamp": datetime.now().isoformat(),
+                            "details": {
+                                "current_price": current_price,
+                                "previous_price": previous_price,
+                                "price_change_24h": price_change,
+                                "volatility": abs(price_change),
+                                "data_source": "CoinGecko",
+                            },
+                        }
+                    )
+            except Exception as e:
+                self.logger.error(f"价格波动检查：获取{asset}价格数据失败: {str(e)}")
+                # 继续处理下一个资产，不中断流程
+        return alerts
+
+    async def _generate_stablecoin_depeg_alerts(
+        self, asset_data_24h: Dict[str, Dict]
+    ) -> List[Dict]:
+        """Generates alerts if stablecoins deviate significantly from $1."""
+        alerts = []
+        for asset, data_24h in asset_data_24h.items():
+            try:
+                # Check if asset symbol is in our list of stablecoins (case-insensitive)
+                if asset.upper() not in self.STABLECOINS:
+                    continue
+
+                if not data_24h:
+                    self.logger.warning(
+                        f"稳定币检查：无法获取{asset}的24小时价格数据，跳过"
+                    )
+                    continue
+
+                price = data_24h.get("price", 0)
+                if price <= 0:  # Skip if price is invalid
+                    continue
+
+                deviation = abs(price - 1.0)
+
+                severity = None
+                if deviation > self.STABLECOIN_DEPEG_CRIT_THRESHOLD:
+                    severity = "critical"
+                elif deviation > self.STABLECOIN_DEPEG_WARN_THRESHOLD:
+                    severity = "warning"
+
+                if severity:
+                    alerts.append(
+                        {
+                            "id": f"depeg-{asset}-{int(datetime.now().timestamp())}",
+                            "type": "stablecoin_depeg",
+                            "severity": severity,
+                            "protocol": "",
+                            "asset": asset,
+                            "message": f"稳定币 {asset} 价格 ${price:.4f}，偏离 $1.00 达到 {deviation:.2%}",
+                            "timestamp": datetime.now().isoformat(),
+                            "details": {
+                                "current_price": price,
+                                "deviation_usd": abs(price - 1.0),
+                                "deviation_percent": deviation * 100,
+                                "threshold_warn": self.STABLECOIN_DEPEG_WARN_THRESHOLD
+                                * 100,
+                                "threshold_crit": self.STABLECOIN_DEPEG_CRIT_THRESHOLD
+                                * 100,
+                                "recommendation": "监控稳定币价格，考虑风险敞口。",
+                                "data_source": "CoinGecko",
+                            },
+                        }
+                    )
+            except Exception as e:
+                self.logger.error(f"稳定币脱锚检查：分析{asset}时失败: {str(e)}")
+        return alerts
+
+    async def _generate_leverage_risk_alerts(
+        self, position_details: List[Dict], asset_data_24h: Dict[str, Dict]
+    ) -> List[Dict]:
+        """Generates alerts based on leverage risk."""
+        alerts = []
+        for pos_detail in position_details:
+            try:
+                leverage = float(pos_detail.get("leverage", 1.0))
+                # 如果杠杆不超过安全阈值，跳过
+                if leverage <= self.LEVERAGE_SAFE_THRESHOLD:
+                    continue
+
+                asset = pos_detail.get("asset", "unknown")
+                protocol = pos_detail.get("protocol", "unknown")
+
+                # 根据杠杆率确定风险级别
+                severity = "warning"  # Default to warning if above safe threshold
+                if leverage > self.LEVERAGE_CRIT_THRESHOLD:
+                    severity = "critical"
+                elif leverage > self.LEVERAGE_WARN_THRESHOLD:
+                    severity = "warning"
+
+                # 估算清算价格（简化计算）
+                current_price = 0
+                try:
+                    # 直接使用CoinGecko数据
+                    data_24h = asset_data_24h.get(asset)
+                    if data_24h:
+                        current_price = data_24h.get("price", 0)
+                except Exception as e:
+                    self.logger.error(
+                        f"杠杆风险检查：获取{asset}价格数据失败用于清算价格计算: {str(e)}"
+                    )
+                    # 继续使用当前价格为0
+
+                # 假设清算阈值为杠杆率的80%
+                liquidation_threshold = 0.8
+                liquidation_price = (
+                    current_price * (1 - liquidation_threshold / leverage)
+                    if current_price > 0 and leverage > 0  # Avoid division by zero
+                    else 0
+                )
+
+                alerts.append(
+                    {
+                        "id": f"leverage-{protocol}-{asset}-{int(datetime.now().timestamp())}",
+                        "type": "leverage_risk",
+                        "severity": severity,
+                        "protocol": protocol,
+                        "asset": asset,
+                        "message": f"{protocol}上的{asset}头寸使用了{leverage:.1f}倍杠杆，存在清算风险",
+                        "timestamp": datetime.now().isoformat(),
+                        "details": {
+                            "leverage": leverage,
+                            "safe_leverage": self.LEVERAGE_SAFE_THRESHOLD,
+                            "current_price": current_price,
+                            "liquidation_price": liquidation_price,
+                            "risk_ratio": (
+                                (current_price - liquidation_price) / current_price
+                                if current_price > 0
+                                and liquidation_price <= current_price
+                                else 0
+                            ),
+                            "recommendation": "建议降低杠杆或增加抵押以降低清算风险",
+                        },
+                    }
+                )
+            except Exception as e:
+                self.logger.error(f"杠杆风险检查：处理时出错: {str(e)}")
+                # 继续处理下一个头寸
+        return alerts
+
+    async def _generate_protocol_risk_alerts(
+        self, protocol_risk_data: Dict[str, Dict]
+    ) -> List[Dict]:
+        """Generates alerts based on protocol risk."""
+        alerts = []
+        for protocol, risk_summary in protocol_risk_data.items():
+            try:
+                if not risk_summary:
+                    continue
+
+                risk_level = risk_summary.get(
+                    "risk_level", "medium"
+                ).lower()  # Ensure lowercase for comparison
+                risk_score = risk_summary.get("risk_score", 50)
+
+                # 根据风险等级确定警报级别
+                severity = "info"
+                if (
+                    risk_level == "high" or risk_level == "critical"
+                ):  # Treat high as critical
+                    severity = "critical"
+                elif risk_level == "medium":
+                    severity = "warning"
+
+                # 只有中高风险才生成警报
+                if severity in ["warning", "critical"]:
+                    alerts.append(
+                        {
+                            "id": f"protocol-{protocol}-{int(datetime.now().timestamp())}",
+                            "type": "protocol_risk",
+                            "severity": severity,
+                            "protocol": protocol,
+                            "asset": "",
+                            "message": f"{protocol}协议风险等级为{risk_level.capitalize()}，风险评分{risk_score}",
+                            "timestamp": datetime.now().isoformat(),
+                            "details": {
+                                "risk_score": risk_score,
+                                "risk_level": risk_level.capitalize(),
+                                "recommendation": risk_summary.get(
+                                    "recommendation", "建议关注协议安全更新"
+                                ),
+                                "analysis": risk_summary.get("analysis", {}),
+                                "source": risk_summary.get(
+                                    "analysis_source", "RiskEngine"
+                                ),
+                            },
+                        }
+                    )
+            except Exception as e:
+                self.logger.error(f"协议风险检查：处理{protocol}时出错: {str(e)}")
+                # 继续处理下一个协议
+        return alerts
+
+    async def _generate_high_apy_alerts(
+        self, position_details: List[Dict]
+    ) -> List[Dict]:
+        """Generates alerts based on abnormally high APY."""
+        alerts = []
+        for pos_detail in position_details:
+            try:
+                apy = float(pos_detail.get("apy", 0))
+                # 如果APY不超过忽略阈值，跳过
+                if apy <= self.HIGH_APY_IGNORE_THRESHOLD:
+                    continue
+
+                asset = pos_detail.get("asset", "unknown")
+                protocol = pos_detail.get("protocol", "unknown")
+
+                # 根据APY确定风险级别
+                severity = "warning"  # Default to warning if above ignore threshold
+                if apy > self.HIGH_APY_CRIT_THRESHOLD:
+                    severity = "critical"
+                elif apy > self.HIGH_APY_WARN_THRESHOLD:
+                    severity = "warning"
+
+                alerts.append(
+                    {
+                        "id": f"apy-{protocol}-{asset}-{int(datetime.now().timestamp())}",
+                        "type": "high_apy",
+                        "severity": severity,
+                        "protocol": protocol,
+                        "asset": asset,
+                        "message": f"{protocol}上的{asset}头寸APY异常高({apy:.1f}%)，可能存在风险",
+                        "timestamp": datetime.now().isoformat(),
+                        "details": {
+                            "current_apy": apy,
+                            "average_apy": 5.0,  # 假设的行业平均APY
+                            "recommendation": "高收益通常伴随高风险，建议谨慎评估",
+                            "analysis": "异常高的APY可能意味着项目风险较高或处于早期阶段",
+                        },
+                    }
+                )
+            except Exception as e:
+                self.logger.error(f"高APY检查：处理时出错: {str(e)}")
+                # 继续处理下一个头寸
+        return alerts
+
+    async def _generate_market_cap_risk_alerts(
+        self, asset_risk_data: Dict[str, RiskAnalysisResult]
+    ) -> List[Dict]:
+        """Generates alerts based on market capitalization risk."""
+        alerts = []
+        for asset, asset_risk in asset_risk_data.items():
+            try:
+                if not asset_risk:
+                    continue
+
+                risk_level = getattr(asset_risk, "risk_level", "未知")
+
+                if risk_level in ["高风险", "中高风险"]:
+                    analysis = getattr(asset_risk, "analysis", {})
+                    market_cap_analysis = getattr(
+                        analysis, "market_cap_analysis", "市值风险较高"
+                    )
+                    details_dict = (
+                        asset_risk.to_dict()
+                        if hasattr(asset_risk, "to_dict")
+                        else asset_risk.__dict__
+                    )
+
+                    alerts.append(
+                        {
+                            "id": f"market_cap-{asset}-{int(datetime.now().timestamp())}",
+                            "type": "market_cap_risk",
+                            "severity": "warning",  # Market cap risk usually a warning
+                            "protocol": "",
+                            "asset": asset,
+                            "message": f"{asset}市值风险较高: {market_cap_analysis}",
+                            "timestamp": datetime.now().isoformat(),
+                            "details": details_dict,
+                        }
+                    )
+            except Exception as e:
+                self.logger.error(f"市值风险检查：分析{asset}时失败: {str(e)}")
+                # 继续处理下一个资产，不中断流程
+        return alerts
+
+    async def _generate_liquidity_risk_alerts(
+        self, asset_data_24h: Dict[str, Dict]
+    ) -> List[Dict]:
+        """Generates alerts based on liquidity risk (Volume/MarketCap ratio)."""
+        alerts = []
+        for asset, data_24h in asset_data_24h.items():
+            try:
+                if not data_24h:
+                    continue
+
+                volume = data_24h.get("volume", 0)
+                market_cap = data_24h.get("market_cap", 0)
+
+                # 防止除以零错误
+                if market_cap <= 0:
+                    continue
+
+                volume_to_mcap = volume / market_cap
+
+                if volume_to_mcap < self.LOW_LIQUIDITY_WARN_THRESHOLD:
+                    alerts.append(
+                        {
+                            "id": f"liquidity-{asset}-{int(datetime.now().timestamp())}",
+                            "type": "liquidity_risk",
+                            "severity": "warning",
+                            "protocol": "",
+                            "asset": asset,
+                            "message": f"{asset}流动性风险较高，日交易量/市值比率{volume_to_mcap:.2%}",
+                            "timestamp": datetime.now().isoformat(),
+                            "details": {
+                                "volume_24h": volume,
+                                "market_cap": market_cap,
+                                "volume_to_mcap": volume_to_mcap,
+                                "recommendation": "建议关注流动性风险，可能需要调整仓位",
+                                "data_source": "CoinGecko",
+                            },
+                        }
+                    )
+            except Exception as e:
+                self.logger.error(f"流动性风险检查：分析{asset}时失败: {str(e)}")
+                # 继续处理下一个资产，不中断流程
+        return alerts
