@@ -284,7 +284,7 @@ class BlockchainService:
                 response = requests.get(url, proxies=proxies)
                 if response.status_code == 200:
                     data = response.json()
-                    gas_price = float(data["result"]["suggestBaseFee"])
+                    gas_price = float(data["result"]["ProposeGasPrice"])
                     self.historical_data_cache.set("gas_price", gas_price, "1m")
                     logger.info(f"从ETH API估算gas价格: {gas_price:.2f} Gwei")
                     return gas_price
