@@ -223,13 +223,29 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
 
                     # 提取AI分析结果
                     risk_score = ai_analysis.get("risk_score", 50)
-                    risk_level = ai_analysis.get("risk_level", "中")
                     description = ai_analysis.get(
-                        "description", f"对{protocol_name}协议的安全风险分析"
-                    )
-                    trend = ai_analysis.get("trend", "稳定")
-                    data_points = ai_analysis.get("data_points", [])
+                        "recommendations", ["对协议的安全风险分析"]
+                    ).join(",")
+                    trend = ai_analysis.get("tvl_trend", {}).get("trend", "稳定")
+                    data_points = [
+                        {"metric": k, "value": v}
+                        for k, v in ai_analysis.get("risk_metrics", {}).items()
+                    ]
 
+                    return self.create_risk_factor(
+                        risk_type=RiskType.PROTOCOL.value,
+                        factor_name="协议安全风险",
+                        score=risk_score,
+                        weight=0.4,  # 安全风险权重较高
+                        description=description,
+                        trend=trend,
+                        data_points=data_points,
+                        metadata={
+                            "protocol": protocol_name,
+                            "protocol_data": protocol_data,
+                            "ai_analysis": ai_analysis,
+                        },
+                    )
                 except Exception as e:
                     self.logger.error(f"使用AI分析协议安全风险时出错: {str(e)}")
                     # 如果AI分析失败，使用基于规则的分析
@@ -238,20 +254,6 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
                 # 如果没有AI服务，使用基于规则的分析
                 return await self._rule_based_security_analysis(protocol_data)
 
-            return self.create_risk_factor(
-                risk_type=RiskType.PROTOCOL.value,
-                factor_name="协议安全风险",
-                score=risk_score,
-                weight=0.4,  # 安全风险权重较高
-                description=description,
-                trend=trend,
-                data_points=data_points,
-                metadata={
-                    "protocol": protocol_name,
-                    "protocol_data": protocol_data,
-                    "ai_analysis": ai_analysis,
-                },
-            )
         except Exception as e:
             self.logger.error(f"分析协议 {protocol} 安全风险时出错: {str(e)}")
             return None
@@ -427,11 +429,28 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
                     # 提取AI分析结果
                     risk_score = ai_analysis.get("risk_score", 50)
                     description = ai_analysis.get(
-                        "description", f"对{protocol_name}协议的治理风险分析"
-                    )
-                    trend = ai_analysis.get("trend", "稳定")
-                    data_points = ai_analysis.get("data_points", [])
+                        "recommendations", ["对协议的治理风险分析"]
+                    ).join(",")
+                    trend = ai_analysis.get("tvl_trend", {}).get("trend", "稳定")
+                    data_points = [
+                        {"metric": k, "value": v}
+                        for k, v in ai_analysis.get("risk_metrics", {}).items()
+                    ]
 
+                    return self.create_risk_factor(
+                        risk_type=RiskType.PROTOCOL.value,
+                        factor_name="协议治理风险",
+                        score=risk_score,
+                        weight=0.3,
+                        description=description,
+                        trend=trend,
+                        data_points=data_points,
+                        metadata={
+                            "protocol": protocol_name,
+                            "protocol_data": protocol_data,
+                            "ai_analysis": ai_analysis,
+                        },
+                    )
                 except Exception as e:
                     self.logger.error(f"使用AI分析协议治理风险时出错: {str(e)}")
                     # 如果AI分析失败，使用基于规则的分析
@@ -440,20 +459,6 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
                 # 如果没有AI服务，使用基于规则的分析
                 return await self._rule_based_governance_analysis(protocol_data)
 
-            return self.create_risk_factor(
-                risk_type=RiskType.PROTOCOL.value,
-                factor_name="协议治理风险",
-                score=risk_score,
-                weight=0.3,
-                description=description,
-                trend=trend,
-                data_points=data_points,
-                metadata={
-                    "protocol": protocol_name,
-                    "protocol_data": protocol_data,
-                    "ai_analysis": ai_analysis,
-                },
-            )
         except Exception as e:
             self.logger.error(f"分析协议 {protocol} 治理风险时出错: {str(e)}")
             return None
@@ -633,11 +638,28 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
                     # 提取AI分析结果
                     risk_score = ai_analysis.get("risk_score", 50)
                     description = ai_analysis.get(
-                        "description", f"对{protocol_name}协议的历史风险分析"
-                    )
-                    trend = ai_analysis.get("trend", "稳定")
-                    data_points = ai_analysis.get("data_points", [])
+                        "recommendations", ["对协议的历史风险分析"]
+                    ).join(",")
+                    trend = ai_analysis.get("tvl_trend", {}).get("trend", "稳定")
+                    data_points = [
+                        {"metric": k, "value": v}
+                        for k, v in ai_analysis.get("risk_metrics", {}).items()
+                    ]
 
+                    return self.create_risk_factor(
+                        risk_type=RiskType.PROTOCOL.value,
+                        factor_name="协议历史风险",
+                        score=risk_score,
+                        weight=0.2,
+                        description=description,
+                        trend=trend,
+                        data_points=data_points,
+                        metadata={
+                            "protocol": protocol_name,
+                            "protocol_data": protocol_data,
+                            "ai_analysis": ai_analysis,
+                        },
+                    )
                 except Exception as e:
                     self.logger.error(f"使用AI分析协议历史风险时出错: {str(e)}")
                     # 如果AI分析失败，使用基于规则的分析
@@ -646,20 +668,6 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
                 # 如果没有AI服务，使用基于规则的分析
                 return await self._rule_based_history_analysis(protocol_data)
 
-            return self.create_risk_factor(
-                risk_type=RiskType.PROTOCOL.value,
-                factor_name="协议历史风险",
-                score=risk_score,
-                weight=0.2,
-                description=description,
-                trend=trend,
-                data_points=data_points,
-                metadata={
-                    "protocol": protocol_name,
-                    "protocol_data": protocol_data,
-                    "ai_analysis": ai_analysis,
-                },
-            )
         except Exception as e:
             self.logger.error(f"分析协议 {protocol} 历史风险时出错: {str(e)}")
             return None
@@ -895,11 +903,28 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
                     # 提取AI分析结果
                     risk_score = ai_analysis.get("risk_score", 50)
                     description = ai_analysis.get(
-                        "description", f"对{protocol_name}协议的复杂性风险分析"
-                    )
-                    trend = ai_analysis.get("trend", "稳定")
-                    data_points = ai_analysis.get("data_points", [])
+                        "recommendations", ["对协议的复杂性风险分析"]
+                    ).join(",")
+                    trend = ai_analysis.get("tvl_trend", {}).get("trend", "稳定")
+                    data_points = [
+                        {"metric": k, "value": v}
+                        for k, v in ai_analysis.get("risk_metrics", {}).items()
+                    ]
 
+                    return self.create_risk_factor(
+                        risk_type=RiskType.PROTOCOL.value,
+                        factor_name="协议复杂性风险",
+                        score=risk_score,
+                        weight=0.2,
+                        description=description,
+                        trend=trend,
+                        data_points=data_points,
+                        metadata={
+                            "protocol": protocol_name,
+                            "protocol_data": protocol_data,
+                            "ai_analysis": ai_analysis,
+                        },
+                    )
                 except Exception as e:
                     self.logger.error(f"使用AI分析协议复杂性风险时出错: {str(e)}")
                     # 如果AI分析失败，使用基于规则的分析
@@ -908,20 +933,6 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
                 # 如果没有AI服务，使用基于规则的分析
                 return await self._rule_based_complexity_analysis(protocol_data)
 
-            return self.create_risk_factor(
-                risk_type=RiskType.PROTOCOL.value,
-                factor_name="协议复杂性风险",
-                score=risk_score,
-                weight=0.2,
-                description=description,
-                trend=trend,
-                data_points=data_points,
-                metadata={
-                    "protocol": protocol_name,
-                    "protocol_data": protocol_data,
-                    "ai_analysis": ai_analysis,
-                },
-            )
         except Exception as e:
             self.logger.error(f"分析协议 {protocol} 复杂性风险时出错: {str(e)}")
             return None

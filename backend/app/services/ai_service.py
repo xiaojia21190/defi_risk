@@ -21,12 +21,14 @@ import os
 import logging
 from datetime import datetime
 import uuid
+import traceback
 from app.models.domain.ai import AiAnalysis, AiPrediction, AiInsight, AiRequest
 from app.core.config import settings
 import requests
 from app.services.ai_predictor import AiPredictor
 import inspect
-
+from app.services.sentiment_data_service import SentimentDataService
+from app.services.sentiment_analysis_service import SentimentAnalysisService
 
 logger = logging.getLogger("defi_risk.ai_service")
 
@@ -47,6 +49,9 @@ class AiService:
         self._ai_predictor = None
         self._http_session = None
 
+        # 惰性初始化情绪分析服务
+        self._sentiment_service = None
+
         logger.info("AI服务初始化完成")
 
     def get_predictor(self) -> AiPredictor:
@@ -58,8 +63,56 @@ class AiService:
         """
         if self._ai_predictor is None:
             logger.info("创建AI预测器实例")
-            self._ai_predictor = AiPredictor()
+            try:
+                from app.services.ai_predictor import AiPredictor
+
+                self._ai_predictor = AiPredictor()
+                logger.info(
+                    f"AI预测器实例创建成功: {type(self._ai_predictor).__name__}"
+                )
+            except Exception as e:
+                logger.error(f"创建AI预测器实例失败: {str(e)}")
+                # 尝试返回一个简单的AiPredictor实例
+                try:
+                    from app.services.ai_predictor import AiPredictor
+
+                    self._ai_predictor = AiPredictor()
+                except Exception as inner_e:
+                    logger.error(f"再次尝试创建AI预测器失败: {str(inner_e)}")
+                    raise Exception(f"无法创建AI预测器实例: {str(e)} -> {str(inner_e)}")
         return self._ai_predictor
+
+    def get_sentiment_service(self):
+        """
+        获取情绪分析服务实例
+
+        Returns:
+            SentimentAnalysisService: 情绪分析服务实例
+        """
+        # 如果情绪分析服务未启用，返回None
+        if not settings.ENABLE_SENTIMENT_ANALYSIS:
+            logger.info("情绪分析服务未启用")
+            return None
+
+        # 惰性初始化情绪分析服务
+        if self._sentiment_service is None:
+            try:
+                logger.info("创建情绪分析服务实例")
+
+                # 创建情绪数据服务
+                data_service = SentimentDataService()
+
+                # 创建情绪分析服务
+                self._sentiment_service = SentimentAnalysisService(
+                    ai_service=self, data_service=data_service
+                )
+
+                logger.info("情绪分析服务初始化完成")
+            except Exception as e:
+                logger.error(f"初始化情绪分析服务失败: {str(e)}")
+                return None
+
+        return self._sentiment_service
 
     async def close(self):
         """
@@ -76,6 +129,13 @@ class AiService:
         if self._ai_predictor is not None and hasattr(self._ai_predictor, "close"):
             await self._ai_predictor.close()
             self._ai_predictor = None
+
+        # 释放情绪分析服务资源
+        if self._sentiment_service is not None and hasattr(
+            self._sentiment_service, "close"
+        ):
+            await self._sentiment_service.close()
+            self._sentiment_service = None
 
         logger.info("AI服务已关闭")
 
@@ -563,6 +623,60 @@ class AiService:
 }
 ```
             """,
+            "crypto_sentiment": """
+请分析以下加密货币相关的文本内容，进行情绪分析:
+
+上下文数据:
+{context}
+
+参数:
+{parameters}
+
+请对每个文本项目进行情绪分析，并提供以下格式的JSON响应:
+1. 置信度分数（0-1之间）
+2. 情绪分析结果列表，每个结果包含：
+   - 原始项目ID
+   - 情绪类型（positive, negative, neutral, mixed）
+   - 情绪分数（-1到1之间，-1表示极度负面，1表示极度正面）
+   - 置信度（0-1之间）
+   - 关键词列表（至少5个）
+   - 主题列表（至少2个）
+   - 实体列表（可选）
+   - 见解（可选）
+
+响应格式示例:
+```json
+{{
+  "confidence": 0.85,
+  "supporting_data": {{
+    "sentiment_results": [
+      {{
+        "id": "item1",
+        "sentiment_type": "positive",
+        "sentiment_score": 0.75,
+        "confidence": 0.8,
+        "keywords": ["bullish", "growth", "adoption", "institutional", "future"],
+        "topics": ["price", "adoption"],
+        "entities": ["Bitcoin", "Tesla", "Elon Musk"],
+        "insights": ["机构采用是推动本次积极情绪的主要因素"]
+      }},
+      {{
+        "id": "item2",
+        "sentiment_type": "negative",
+        "sentiment_score": -0.65,
+        "confidence": 0.9,
+        "keywords": ["crash", "dump", "bearish", "regulation", "ban"],
+        "topics": ["regulation", "price"],
+        "entities": ["China", "PBOC", "miners"],
+        "insights": ["监管担忧是负面情绪的主要驱动因素"]
+      }}
+    ]
+  }}
+}}
+```
+
+请确保返回的是有效的JSON格式，并包含所有必要的字段。对于每个文本项目，都应该有相应的分析结果。
+            """,
             # 添加更多模板...
         }
 
@@ -721,6 +835,24 @@ class AiService:
 
         logger.info(f"开始AI预测器分析: {analysis_type}")
 
+        # 检查AI预测器是否存在
+        if self._ai_predictor is None:
+            logger.warning("AI预测器未初始化，尝试获取预测器实例")
+            try:
+                predictor = self.get_predictor()
+                logger.info(f"成功获取AI预测器: {predictor is not None}")
+            except Exception as e:
+                error_message = f"获取AI预测器失败: {str(e)}"
+                logger.error(error_message)
+                return {
+                    "error": error_message,
+                    "risk_score": 0,
+                    "confidence": 0.0,
+                    "recommendations": ["无法初始化AI预测器，请检查系统配置"],
+                }
+        else:
+            logger.info("AI预测器已初始化")
+
         # 定义分析类型到方法的映射
         ANALYSIS_METHOD_MAPPING = {
             "protocol_risk": "analyze_defi_protocol_risk",
@@ -728,8 +860,19 @@ class AiService:
             "portfolio_risk": "analyze_portfolio_risk",
             "concentration_risk": "analyze_concentration_risk",
             "correlation_risk": "analyze_correlation_risk",
+            "trend_risk": "analyze_market_trend",
             "market_risk_recommendations": "generate_market_risk_recommendations",
             "market_risk_monitoring_points": "generate_market_risk_monitoring_points",
+            "liquidity_pool_risk": "analyze_liquidity_pool_risk",
+            # 添加缺失的协议分析类型映射
+            "protocol_complexity": "analyze_defi_protocol_risk",  # 使用通用协议分析方法
+            "protocol_security": "analyze_defi_protocol_risk",  # 使用通用协议分析方法
+            "protocol_governance": "analyze_defi_protocol_risk",  # 使用通用协议分析方法
+            "protocol_history": "analyze_defi_protocol_risk",  # 使用通用协议分析方法，已有处理但统一格式
+            # 添加新的流动性分析类型映射
+            "asset_liquidity": "analyze_liquidity_risk",
+            "protocol_liquidity": "analyze_liquidity_risk",
+            "investment_type_liquidity": "analyze_liquidity_risk",
         }
 
         # 定义相关性分析类型集合
@@ -782,7 +925,6 @@ class AiService:
                     )  # 这是普通函数
                 else:
                     result = self._get_default_result(analysis_type)
-
             # 尝试使用通用分析
             elif hasattr(predictor, "analyze_generic") and callable(
                 getattr(predictor, "analyze_generic")
@@ -806,12 +948,17 @@ class AiService:
         except Exception as e:
             error_message = f"AI预测器分析失败: {str(e)}"
             logger.error(error_message)
+            logger.error(
+                f"分析类型: {analysis_type}, 错误详情: {traceback.format_exc()}"
+            )
             # 返回带有错误信息的字典
             return {
                 "error": error_message,
                 "risk_score": 0,
                 "confidence": 0.0,
                 "recommendations": ["无法完成分析，请检查数据"],
+                "analysis_type": analysis_type,
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
     def _process_predictor_result(

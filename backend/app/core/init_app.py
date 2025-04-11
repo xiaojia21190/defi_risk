@@ -58,30 +58,44 @@ def setup_risk_analyzers(risk_engine, ai_service, blockchain_service):
     """
     logger.info("设置风险分析器")
 
+    # 确保AI服务有有效的预测器
+    if not hasattr(ai_service, "_ai_predictor") or ai_service._ai_predictor is None:
+        logger.info("风险分析器初始化时设置AI预测器")
+        try:
+            ai_predictor = ai_service.get_predictor()
+            logger.info(f"风险分析器初始化获取AI预测器: {ai_predictor is not None}")
+        except Exception as e:
+            logger.error(f"风险分析器初始化时获取AI预测器失败: {str(e)}")
+
     # 创建风险分析器
     analyzers = {
         "market": MarketRiskAnalyzer(
-            ai_predictor=ai_service,
+            ai_service=ai_service,  # 修正：将ai_service传递给ai_service参数
+            ai_predictor=ai_service.get_predictor(),  # 确保ai_predictor被正确初始化
             blockchain_service=blockchain_service,
             risk_engine=risk_engine,
         ),
         "protocol": ProtocolRiskAnalyzer(
-            ai_predictor=ai_service,
+            ai_service=ai_service,  # 修正：将ai_service传递给ai_service参数
+            ai_predictor=ai_service.get_predictor(),  # 确保ai_predictor被正确初始化
             blockchain_service=blockchain_service,
             risk_engine=risk_engine,
         ),
         "liquidity": LiquidityRiskAnalyzer(
-            ai_predictor=ai_service,
+            ai_service=ai_service,  # 修正：将ai_service传递给ai_service参数
+            ai_predictor=ai_service.get_predictor(),  # 确保ai_predictor被正确初始化
             blockchain_service=blockchain_service,
             risk_engine=risk_engine,
         ),
         "correlation": CorrelationRiskAnalyzer(
-            ai_predictor=ai_service,
+            ai_service=ai_service,  # 修正：将ai_service传递给ai_service参数
+            ai_predictor=ai_service.get_predictor(),  # 确保ai_predictor被正确初始化
             blockchain_service=blockchain_service,
             risk_engine=risk_engine,
         ),
         "smart_contract": SmartContractRiskAnalyzer(
-            ai_predictor=ai_service,
+            ai_service=ai_service,  # 修正：将ai_service传递给ai_service参数
+            ai_predictor=ai_service.get_predictor(),  # 确保ai_predictor被正确初始化
             blockchain_service=blockchain_service,
             risk_engine=risk_engine,
         ),
@@ -173,7 +187,7 @@ def init_services(app: FastAPI) -> None:
 
     # 使用 BlockchainService 创建 RiskEngine
     risk_engine = RiskEngine(
-        blockchain_service=blockchain_service, ai_service=ai_predictor
+        blockchain_service=blockchain_service, ai_service=ai_service
     )
     service_instances["risk_engine"] = risk_engine
 
@@ -208,6 +222,24 @@ def init_services(app: FastAPI) -> None:
         """应用启动时执行的事件处理"""
         logger.info("应用启动事件触发")
         # 可以在这里添加启动时需要执行的异步初始化操作
+
+        # 确保AI服务正确初始化AI预测器
+        if hasattr(app.state, "ai_service"):
+            logger.info("启动时初始化AI预测器")
+            try:
+                # 预初始化AI预测器，避免首次调用时延迟
+                predictor = app.state.ai_service.get_predictor()
+                logger.info(f"AI预测器初始化状态: {predictor is not None}")
+
+                # 设置到ai_service._ai_predictor
+                app.state.ai_service._ai_predictor = predictor
+
+                # 设置到risk_engine中
+                if hasattr(app.state, "risk_engine"):
+                    app.state.risk_engine.ai_service = app.state.ai_service
+                    logger.info("已将AI服务设置到风险引擎")
+            except Exception as e:
+                logger.error(f"启动时初始化AI预测器失败: {str(e)}")
 
     @app.on_event("shutdown")
     async def shutdown_event():

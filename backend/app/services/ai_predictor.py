@@ -52,16 +52,29 @@ class AiPredictor:
 
         Args:
             protocol_data: 协议数据，包含基本分析和历史数据
+                可包含analysis_focus字段指定分析重点：
+                - "security" - 安全风险分析
+                - "governance" - 治理风险分析
+                - "history" - 历史风险分析
+                - "complexity" - 复杂性风险分析
+                - 不指定时进行综合风险分析
 
         Returns:
             Dict: 风险分析结果
         """
         try:
+            # 提取分析重点
+            analysis_focus = protocol_data.get("analysis_focus", "general")
+            self.logger.info(f"分析DeFi协议风险，重点: {analysis_focus}")
+
             # 提取基本信息
             basic_analysis = protocol_data.get("basic_analysis", {})
             historical_tvl = protocol_data.get("historical_tvl", [])
             protocol_metadata = protocol_data.get("protocol_metadata", {})
             chain_distribution = protocol_data.get("chain_distribution", {})
+            protocol_name = protocol_data.get(
+                "protocol_name", protocol_metadata.get("name", "未知协议")
+            )
 
             # 处理TVL数据
             tvl_df = self._process_tvl_data(historical_tvl)
@@ -86,9 +99,49 @@ class AiPredictor:
                 risk_score, risk_metrics, protocol_metadata
             )
 
-            # 构建完整分析结果
+            # 根据分析重点定制结果
+            if analysis_focus == "security":
+                # 针对安全风险的特定处理
+                return self._analyze_protocol_security(
+                    protocol_name,
+                    protocol_metadata,
+                    risk_score,
+                    risk_metrics,
+                    risk_level,
+                )
+            elif analysis_focus == "governance":
+                # 针对治理风险的特定处理
+                return self._analyze_protocol_governance(
+                    protocol_name,
+                    protocol_metadata,
+                    risk_score,
+                    risk_metrics,
+                    risk_level,
+                )
+            elif analysis_focus == "history":
+                # 针对历史风险的特定处理
+                return self._analyze_protocol_history(
+                    protocol_name,
+                    protocol_metadata,
+                    tvl_df,
+                    risk_score,
+                    risk_metrics,
+                    risk_level,
+                )
+            elif analysis_focus == "complexity":
+                # 针对复杂性风险的特定处理
+                return self._analyze_protocol_complexity(
+                    protocol_name,
+                    protocol_metadata,
+                    chain_distribution,
+                    risk_score,
+                    risk_metrics,
+                    risk_level,
+                )
+
+            # 构建完整分析结果 (综合分析)
             analysis_result = {
-                "protocol_name": protocol_metadata.get("name", "未知协议"),
+                "protocol_name": protocol_name,
                 "risk_score": risk_score,
                 "risk_level": risk_level,
                 "risk_metrics": risk_metrics,
@@ -1714,7 +1767,6 @@ class AiPredictor:
 
             # 如果有外部AI服务可用，优先使用
             try:
-                # 使用AI服务的analyze_with_predictor方法
                 self.logger.info("尝试使用外部AI服务...")
                 # 调用时需要基于规则的结果作为基础，所以先获取基础分析
                 rule_based_results = self._rule_based_portfolio_analysis(
@@ -2412,13 +2464,13 @@ class AiPredictor:
         self, data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        根据风险因子生成市场风险监控点
+        生成市场风险监控点
 
         Args:
-            data: 包含风险因子的数据，格式为 {"risk_factors": [{"name": "...", "score": 75, ...}, ...]}
+            data: 风险因子数据
 
         Returns:
-            Dict: 包含监控点列表的结果
+            Dict: 监控点列表和优先级信息
         """
         try:
             self.logger.info("开始生成市场风险监控点")
@@ -3645,3 +3697,1281 @@ class AiPredictor:
             self.logger.error(traceback.format_exc())
             # 出错时回退到规则结果
             return rule_based_results
+
+    def analyze_liquidity_pool_risk(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        分析流动性池风险
+
+        Args:
+            data: 流动性池数据，包含 liquidity_pools 字段，是一个列表，每个元素包含:
+                protocol: 协议名称
+                asset: 资产名称（通常是代币对，如 'ETH/USDC'）
+                tokens: 代币列表
+                valid_tokens: 用于风险计算的有效代币列表
+                weight: 在投资组合中的权重
+                amount: 投资金额
+
+        Returns:
+            Dict: 风险分析结果，包含风险评分、描述、趋势和数据点
+        """
+        try:
+            self.logger.info("开始分析流动性池风险")
+
+            # 提取流动性池数据
+            liquidity_pools = data.get("liquidity_pools", [])
+
+            if not liquidity_pools:
+                self.logger.warning("未提供流动性池数据，无法分析流动性池风险")
+                return {
+                    "risk_score": 50,
+                    "description": "未提供流动性池数据，返回默认风险评分",
+                    "trend": "稳定",
+                    "data_points": [],
+                }
+
+            # 计算每个池子的风险分数
+            pool_risk_scores = []
+            data_points = []
+
+            for pool in liquidity_pools:
+                protocol = pool.get("protocol", "Unknown")
+                asset = pool.get("asset", "Unknown")
+                tokens = pool.get("tokens", [])
+                valid_tokens = pool.get(
+                    "valid_tokens", tokens
+                )  # 使用valid_tokens，如果没有则使用tokens
+                weight = pool.get("weight", 0)
+                amount = pool.get("amount", 0)
+
+                # 分析代币组合风险
+                token_risk = self._analyze_token_composition(valid_tokens)
+
+                # 计算基于协议的风险调整（例如，知名协议风险较低）
+                protocol_risk_factor = self._get_protocol_risk_factor(protocol)
+
+                # 计算最终池子风险分数
+                pool_risk = min(100, max(0, token_risk * protocol_risk_factor))
+
+                # 保存池子风险分数（加权）
+                if weight > 0:
+                    pool_risk_scores.append((pool_risk, weight))
+
+                # 添加数据点
+                token_str = "/".join(tokens) if tokens else asset
+                data_points.append(
+                    {
+                        "protocol": protocol,
+                        "pool": asset,
+                        "tokens": token_str,
+                        "risk_score": pool_risk,
+                        "weight": weight,
+                        "amount": amount,
+                    }
+                )
+
+            # 计算加权平均风险分数
+            if pool_risk_scores:
+                total_weight = sum(weight for _, weight in pool_risk_scores)
+                if total_weight > 0:
+                    weighted_risk = (
+                        sum(score * weight for score, weight in pool_risk_scores)
+                        / total_weight
+                    )
+                else:
+                    weighted_risk = 50  # 默认中等风险
+            else:
+                weighted_risk = 50
+
+            # 确保分数在0-100范围内
+            risk_score = min(100, max(0, weighted_risk))
+
+            # 确定风险趋势
+            trend = self._determine_liquidity_pool_trend(data_points)
+
+            # 生成风险描述
+            description = self._generate_liquidity_pool_description(
+                risk_score, data_points
+            )
+
+            # 构建完整分析结果
+            result = {
+                "risk_score": risk_score,
+                "description": description,
+                "trend": trend,
+                "data_points": data_points,
+            }
+
+            self.logger.info(f"流动性池风险分析完成，总体风险评分: {risk_score:.2f}")
+            return result
+
+        except Exception as e:
+            self.logger.error(f"分析流动性池风险时出错: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            return {
+                "risk_score": 50,  # 默认中等风险
+                "description": f"分析流动性池风险时出错: {str(e)}",
+                "trend": "稳定",
+                "data_points": [],
+            }
+
+    def _analyze_token_composition(self, tokens: List[str]) -> float:
+        """
+        分析代币组合风险
+
+        Args:
+            tokens: 代币列表
+
+        Returns:
+            float: 代币组合风险分数 (0-100)
+        """
+        if not tokens:
+            return 50  # 默认中等风险
+
+        # 定义稳定币列表
+        stablecoins = [
+            "USDT",
+            "USDC",
+            "DAI",
+            "BUSD",
+            "TUSD",
+            "USDP",
+            "GUSD",
+            "USDK",
+            "USDJ",
+        ]
+        bluechip_tokens = ["BTC", "ETH", "BNB", "SOL", "ADA", "DOT", "AVAX", "MATIC"]
+
+        # 计算稳定币数量和蓝筹代币数量
+        stablecoin_count = sum(1 for token in tokens if token in stablecoins)
+        bluechip_count = sum(1 for token in tokens if token in bluechip_tokens)
+        volatile_count = len(tokens) - stablecoin_count - bluechip_count
+
+        # 计算风险分数
+        if len(tokens) == 1:
+            # 单一资产，不是真正的LP
+            return 30
+        elif stablecoin_count == len(tokens):
+            # 纯稳定币池，风险低
+            return 20
+        elif stablecoin_count > 0 and bluechip_count > 0 and volatile_count == 0:
+            # 稳定币+蓝筹组合，中低风险
+            return 40
+        elif stablecoin_count > 0 and volatile_count > 0:
+            # 稳定币+波动币组合，中等风险
+            return 60
+        elif bluechip_count == len(tokens):
+            # 纯蓝筹组合，中等风险
+            return 50
+        elif bluechip_count > 0 and volatile_count > 0:
+            # 蓝筹+波动币组合，中高风险
+            return 70
+        else:
+            # 纯波动币组合，高风险
+            return 85
+
+    def _get_protocol_risk_factor(self, protocol: str) -> float:
+        """
+        获取协议风险因子
+
+        Args:
+            protocol: 协议名称
+
+        Returns:
+            float: 协议风险因子 (通常是0.8-1.2之间，值越小风险越低)
+        """
+        # 主流稳定协议，风险较低
+        low_risk_protocols = [
+            "uniswap",
+            "curve",
+            "aave",
+            "compound",
+            "balancer",
+            "sushiswap",
+        ]
+        # 中等风险协议
+        medium_risk_protocols = ["pancakeswap", "trader joe", "quickswap", "spookyswap"]
+
+        # 将协议名称转换为小写进行比较
+        protocol_lower = protocol.lower()
+
+        if protocol_lower in low_risk_protocols:
+            return 0.85  # 降低15%风险
+        elif protocol_lower in medium_risk_protocols:
+            return 1.0  # 保持原有风险
+        else:
+            return 1.15  # 增加15%风险
+
+    def _determine_liquidity_pool_trend(self, data_points: List[Dict]) -> str:
+        """
+        确定流动性池趋势
+
+        Args:
+            data_points: 流动性池数据点列表
+
+        Returns:
+            str: 趋势描述 (上升/稳定/下降)
+        """
+        # 目前简单返回稳定，未来可扩展为基于历史数据的趋势分析
+        return "稳定"
+
+    def _generate_liquidity_pool_description(
+        self, risk_score: float, data_points: List[Dict]
+    ) -> str:
+        """
+        生成流动性池风险描述
+
+        Args:
+            risk_score: 风险评分
+            data_points: 流动性池数据点
+
+        Returns:
+            str: 风险描述
+        """
+        # 计算高风险和低风险池子的数量
+        high_risk_pools = [p for p in data_points if p.get("risk_score", 0) > 70]
+        low_risk_pools = [p for p in data_points if p.get("risk_score", 0) < 30]
+        total_pools = len(data_points)
+
+        if risk_score >= 80:
+            return f"流动性池组合风险较高，{len(high_risk_pools)}/{total_pools}的池子风险评分超过70分，建议减少高风险池子敞口。"
+        elif risk_score >= 60:
+            return f"流动性池组合风险中等偏高，包含一些高波动性代币池，考虑增加稳定币池比例。"
+        elif risk_score >= 40:
+            return (
+                f"流动性池组合风险适中，代币组合相对平衡，继续监控个别高风险池子表现。"
+            )
+        elif risk_score >= 20:
+            return f"流动性池组合风险较低，{len(low_risk_pools)}/{total_pools}的池子风险评分低于30分，以稳定币池和蓝筹代币池为主。"
+        else:
+            return "流动性池组合风险非常低，主要由稳定币池构成，预期收益和风险都较低。"
+
+    def _analyze_protocol_security(
+        self,
+        protocol_name: str,
+        protocol_metadata: Dict[str, Any],
+        risk_score: float,
+        risk_metrics: Dict[str, Any],
+        risk_level: str,
+    ) -> Dict[str, Any]:
+        """
+        分析协议的安全风险
+
+        Args:
+            protocol_name: 协议名称
+            protocol_metadata: 协议元数据
+            risk_score: 基础风险评分
+            risk_metrics: 风险指标
+            risk_level: 风险等级
+
+        Returns:
+            Dict: 安全风险分析结果
+        """
+        try:
+            # 从协议元数据中提取安全相关信息
+            audit_count = protocol_metadata.get("audits", 0)
+            audit_links = protocol_metadata.get("audit_links", [])
+            is_open_source = protocol_metadata.get("openSource", False)
+            github_repos = protocol_metadata.get("github", [])
+
+            # 根据安全指标调整风险评分
+            security_risk_score = risk_score
+
+            # 审计数量对风险评分的影响
+            if audit_count > 0:
+                security_risk_score = max(0, security_risk_score - (audit_count * 5))
+
+            # 开源状态对风险评分的影响
+            if is_open_source:
+                security_risk_score = max(0, security_risk_score - 10)
+
+            # GitHub仓库对风险评分的影响
+            if github_repos and len(github_repos) > 0:
+                security_risk_score = max(0, security_risk_score - 5)
+
+            # 确保评分在0-100范围内
+            security_risk_score = min(100, max(0, security_risk_score))
+
+            # 确定风险等级
+            security_risk_level = self._get_risk_level(security_risk_score)
+
+            # 构建安全风险描述
+            if security_risk_score < 30:
+                trend = "下降"
+                description = f"{protocol_name}协议的安全风险评分较低，"
+            elif security_risk_score < 60:
+                trend = "稳定"
+                description = f"{protocol_name}协议的安全风险评分中等，"
+            else:
+                trend = "上升"
+                description = f"{protocol_name}协议的安全风险评分较高，"
+
+            # 添加审计信息
+            if audit_count > 0:
+                description += f"已通过{audit_count}次安全审计，"
+            else:
+                description += "未发现安全审计记录，"
+
+            # 添加开源状态
+            if is_open_source:
+                description += "代码已开源，"
+            else:
+                description += "代码未开源，"
+
+            # 添加GitHub仓库信息
+            if github_repos and len(github_repos) > 0:
+                description += f"有{len(github_repos)}个GitHub仓库。"
+            else:
+                description += "未发现GitHub仓库。"
+
+            # 构建数据点
+            data_points = [
+                {"name": "安全风险评分", "value": security_risk_score},
+                {"name": "安全风险等级", "value": security_risk_level},
+                {"name": "审计次数", "value": audit_count},
+                {"name": "是否开源", "value": "是" if is_open_source else "否"},
+                {
+                    "name": "GitHub仓库数",
+                    "value": len(github_repos) if github_repos else 0,
+                },
+            ]
+
+            # 添加审计链接
+            if audit_links:
+                data_points.append({"name": "审计链接", "value": audit_links})
+
+            # 构建安全风险分析结果
+            return {
+                "protocol_name": protocol_name,
+                "risk_score": security_risk_score,
+                "risk_level": security_risk_level,
+                "description": description,
+                "trend": trend,
+                "data_points": data_points,
+                "confidence": 0.85,
+                "analysis_type": "security",
+                "analysis_timestamp": datetime.now().isoformat(),
+            }
+        except Exception as e:
+            self.logger.error(f"分析协议安全风险时出错: {str(e)}")
+            return {
+                "error": f"安全风险分析失败: {str(e)}",
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "description": f"无法完成{protocol_name}的安全风险分析",
+                "trend": "未知",
+                "data_points": [],
+                "confidence": 0.3,
+            }
+
+    def _analyze_protocol_governance(
+        self,
+        protocol_name: str,
+        protocol_metadata: Dict[str, Any],
+        risk_score: float,
+        risk_metrics: Dict[str, Any],
+        risk_level: str,
+    ) -> Dict[str, Any]:
+        """
+        分析协议的治理风险
+
+        Args:
+            protocol_name: 协议名称
+            protocol_metadata: 协议元数据
+            risk_score: 基础风险评分
+            risk_metrics: 风险指标
+            risk_level: 风险等级
+
+        Returns:
+            Dict: 治理风险分析结果
+        """
+        try:
+            # 从协议元数据中提取治理相关信息
+            category = protocol_metadata.get("category", "未知")
+            governance_token = protocol_metadata.get("governanceToken", "")
+            tvl = protocol_metadata.get("tvl", 0)
+
+            # 根据治理指标调整风险评分
+            governance_risk_score = risk_score
+
+            # 是否有治理代币对风险的影响
+            has_governance = bool(governance_token)
+            if not has_governance:
+                governance_risk_score += 15  # 无治理代币增加风险
+
+            # 基于协议类别的治理风险调整
+            high_governance_risk_categories = [
+                "Lending",
+                "Derivatives",
+                "Insurance",
+                "Options",
+            ]
+            medium_governance_risk_categories = ["Dexes", "Yield", "Bridges"]
+
+            if category in high_governance_risk_categories:
+                governance_risk_score += 10
+            elif category in medium_governance_risk_categories:
+                governance_risk_score += 5
+
+            # TVL对治理风险的影响 (高TVL通常意味着更成熟的治理)
+            if tvl > 1000000000:  # > 10亿
+                governance_risk_score = max(0, governance_risk_score - 15)
+            elif tvl > 100000000:  # > 1亿
+                governance_risk_score = max(0, governance_risk_score - 10)
+            elif tvl > 10000000:  # > 1000万
+                governance_risk_score = max(0, governance_risk_score - 5)
+
+            # 确保评分在0-100范围内
+            governance_risk_score = min(100, max(0, governance_risk_score))
+
+            # 确定风险等级
+            governance_risk_level = self._get_risk_level(governance_risk_score)
+
+            # 构建治理风险描述
+            if governance_risk_score < 30:
+                trend = "下降"
+                description = f"{protocol_name}的治理风险较低，"
+            elif governance_risk_score < 60:
+                trend = "稳定"
+                description = f"{protocol_name}的治理风险适中，"
+            else:
+                trend = "上升"
+                description = f"{protocol_name}的治理风险较高，"
+
+            # 添加治理代币信息
+            if has_governance:
+                description += f"拥有治理代币({governance_token})，"
+            else:
+                description += "无治理代币，"
+
+            # 添加协议类别信息
+            description += f"作为{category}类别的协议，"
+
+            if category in high_governance_risk_categories:
+                description += "此类协议通常具有较高的治理复杂性。"
+            elif category in medium_governance_risk_categories:
+                description += "此类协议具有中等治理复杂性。"
+            else:
+                description += "此类协议治理复杂性相对较低。"
+
+            # 添加TVL信息
+            if tvl > 0:
+                description += f" 当前锁仓量(TVL)为{tvl:.2f}美元，"
+                if tvl > 100000000:
+                    description += "较大的TVL通常意味着更成熟和稳定的治理结构。"
+                elif tvl > 10000000:
+                    description += "中等规模的TVL对应适中的治理成熟度。"
+                else:
+                    description += "较小的TVL可能意味着治理结构尚未充分发展。"
+
+            # 构建数据点
+            data_points = [
+                {"name": "治理风险评分", "value": governance_risk_score},
+                {"name": "治理风险等级", "value": governance_risk_level},
+                {"name": "协议类别", "value": category},
+                {
+                    "name": "治理代币",
+                    "value": governance_token if has_governance else "无",
+                },
+                {"name": "TVL", "value": tvl},
+            ]
+
+            # 构建治理风险分析结果
+            return {
+                "protocol_name": protocol_name,
+                "risk_score": governance_risk_score,
+                "risk_level": governance_risk_level,
+                "description": description,
+                "trend": trend,
+                "data_points": data_points,
+                "confidence": 0.8,
+                "analysis_type": "governance",
+                "analysis_timestamp": datetime.now().isoformat(),
+            }
+        except Exception as e:
+            self.logger.error(f"分析协议治理风险时出错: {str(e)}")
+            return {
+                "error": f"治理风险分析失败: {str(e)}",
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "description": f"无法完成{protocol_name}的治理风险分析",
+                "trend": "未知",
+                "data_points": [],
+                "confidence": 0.3,
+            }
+
+    def _analyze_protocol_history(
+        self,
+        protocol_name: str,
+        protocol_metadata: Dict[str, Any],
+        tvl_df: pd.DataFrame,
+        risk_score: float,
+        risk_metrics: Dict[str, Any],
+        risk_level: str,
+    ) -> Dict[str, Any]:
+        """
+        分析协议的历史风险
+
+        Args:
+            protocol_name: 协议名称
+            protocol_metadata: 协议元数据
+            tvl_df: TVL历史数据
+            risk_score: 基础风险评分
+            risk_metrics: 风险指标
+            risk_level: 风险等级
+
+        Returns:
+            Dict: 历史风险分析结果
+        """
+        try:
+            # 获取协议年龄和历史数据
+            category = protocol_metadata.get("category", "未知")
+            tvl_history = []
+
+            if (
+                not tvl_df.empty
+                and "date" in tvl_df.columns
+                and "tvl" in tvl_df.columns
+            ):
+                # 计算协议年龄（天数）
+                first_date = tvl_df["date"].min()
+                last_date = tvl_df["date"].max()
+
+                if isinstance(first_date, datetime) and isinstance(last_date, datetime):
+                    protocol_age_days = (last_date - first_date).days
+                else:
+                    protocol_age_days = 0
+
+                # 提取TVL历史趋势数据
+                tvl_history = tvl_df[["date", "tvl"]].to_dict("records")
+            else:
+                protocol_age_days = 0
+
+            # 根据历史指标调整风险评分
+            history_risk_score = risk_score
+
+            # 协议年龄对风险的影响
+            if protocol_age_days > 365 * 2:  # > 2年
+                history_risk_score = max(0, history_risk_score - 20)
+            elif protocol_age_days > 365:  # > 1年
+                history_risk_score = max(0, history_risk_score - 15)
+            elif protocol_age_days > 180:  # > 6个月
+                history_risk_score = max(0, history_risk_score - 10)
+            elif protocol_age_days > 90:  # > 3个月
+                history_risk_score = max(0, history_risk_score - 5)
+            else:  # 新协议
+                history_risk_score += 10
+
+            # TVL波动性对历史风险的影响
+            tvl_volatility = risk_metrics.get("tvl_volatility", 0)
+            if tvl_volatility > 30:  # 高波动性
+                history_risk_score += 15
+            elif tvl_volatility > 20:  # 中高波动性
+                history_risk_score += 10
+            elif tvl_volatility > 10:  # 中等波动性
+                history_risk_score += 5
+
+            # TVL趋势对历史风险的影响
+            tvl_growth_30d = risk_metrics.get("tvl_growth_30d", 0)
+            if tvl_growth_30d < -20:  # 大幅下降
+                history_risk_score += 15
+            elif tvl_growth_30d < -10:  # 中度下降
+                history_risk_score += 10
+            elif tvl_growth_30d < 0:  # 轻微下降
+                history_risk_score += 5
+            elif tvl_growth_30d > 20:  # 大幅增长
+                history_risk_score = max(0, history_risk_score - 10)
+            elif tvl_growth_30d > 10:  # 中度增长
+                history_risk_score = max(0, history_risk_score - 5)
+
+            # 确保评分在0-100范围内
+            history_risk_score = min(100, max(0, history_risk_score))
+
+            # 确定风险等级
+            history_risk_level = self._get_risk_level(history_risk_score)
+
+            # 构建历史风险描述
+            if history_risk_score < 30:
+                trend = "下降"
+                description = f"{protocol_name}的历史风险较低，"
+            elif history_risk_score < 60:
+                trend = "稳定"
+                description = f"{protocol_name}的历史风险适中，"
+            else:
+                trend = "上升"
+                description = f"{protocol_name}的历史风险较高，"
+
+            # 添加协议年龄信息
+            if protocol_age_days > 0:
+                years = protocol_age_days // 365
+                months = (protocol_age_days % 365) // 30
+
+                if years > 0:
+                    age_desc = f"{years}年"
+                    if months > 0:
+                        age_desc += f"{months}个月"
+                else:
+                    age_desc = f"{months}个月"
+
+                description += f"协议运行时间为{age_desc}，"
+
+                if protocol_age_days > 365:
+                    description += "较长的运行历史表明一定的稳定性。"
+                else:
+                    description += "运行历史较短，可能存在不确定性。"
+            else:
+                description += "无法确定协议运行时间，可能是较新的协议或数据不完整。"
+
+            # 添加TVL趋势信息
+            if tvl_growth_30d != 0:
+                description += f" 近30天TVL{tvl_growth_30d:.2f}%的变化，"
+                if tvl_growth_30d > 0:
+                    description += "呈现增长趋势。"
+                else:
+                    description += "呈现下降趋势。"
+
+            # 添加TVL波动性信息
+            if tvl_volatility > 0:
+                description += f" TVL波动性为{tvl_volatility:.2f}%，"
+                if tvl_volatility > 20:
+                    description += "波动性较大。"
+                elif tvl_volatility > 10:
+                    description += "波动性中等。"
+                else:
+                    description += "波动性较小。"
+
+            # 构建数据点
+            data_points = [
+                {"name": "历史风险评分", "value": history_risk_score},
+                {"name": "历史风险等级", "value": history_risk_level},
+                {"name": "协议年龄(天)", "value": protocol_age_days},
+                {"name": "TVL 30天增长率(%)", "value": tvl_growth_30d},
+                {"name": "TVL波动性(%)", "value": tvl_volatility},
+                {"name": "协议类别", "value": category},
+            ]
+
+            # 如果有历史数据，添加
+            if tvl_history:
+                data_points.append(
+                    {"name": "TVL历史", "value": tvl_history[:10]}
+                )  # 仅取前10条记录
+
+            # 构建历史风险分析结果
+            return {
+                "protocol_name": protocol_name,
+                "risk_score": history_risk_score,
+                "risk_level": history_risk_level,
+                "description": description,
+                "trend": trend,
+                "data_points": data_points,
+                "confidence": 0.8,
+                "analysis_type": "history",
+                "analysis_timestamp": datetime.now().isoformat(),
+            }
+        except Exception as e:
+            self.logger.error(f"分析协议历史风险时出错: {str(e)}")
+            return {
+                "error": f"历史风险分析失败: {str(e)}",
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "description": f"无法完成{protocol_name}的历史风险分析",
+                "trend": "未知",
+                "data_points": [],
+                "confidence": 0.3,
+            }
+
+    def _analyze_protocol_complexity(
+        self,
+        protocol_name: str,
+        protocol_metadata: Dict[str, Any],
+        chain_distribution: Dict[str, Any],
+        risk_score: float,
+        risk_metrics: Dict[str, Any],
+        risk_level: str,
+    ) -> Dict[str, Any]:
+        """
+        分析协议的复杂性风险
+
+        Args:
+            protocol_name: 协议名称
+            protocol_metadata: 协议元数据
+            chain_distribution: 链分布数据
+            risk_score: 基础风险评分
+            risk_metrics: 风险指标
+            risk_level: 风险等级
+
+        Returns:
+            Dict: 复杂性风险分析结果
+        """
+        try:
+            # 从协议元数据中提取复杂性相关信息
+            category = protocol_metadata.get("category", "未知")
+            chains = list(chain_distribution.keys()) if chain_distribution else []
+            github_repos = protocol_metadata.get("github", [])
+            is_open_source = protocol_metadata.get("openSource", False)
+
+            # 根据复杂性指标调整风险评分
+            complexity_risk_score = risk_score
+
+            # 多链部署对复杂性的影响
+            chain_factor = min(30, len(chains) * 5)  # 每条链增加5分，最多30分
+            complexity_risk_score += chain_factor
+
+            # 协议类别复杂性因素
+            category_complexity = {
+                "Dexes": 15,  # DEX复杂性中等
+                "Lending": 20,  # 借贷协议复杂性较高
+                "Yield": 25,  # 收益协议复杂性高
+                "Derivatives": 30,  # 衍生品协议复杂性高
+                "Options": 35,  # 期权协议复杂性很高
+                "Staking": 10,  # 质押协议复杂性较低
+                "Bridges": 25,  # 跨链桥复杂性高
+                "Yield Aggregator": 30,  # 收益聚合器复杂性高
+                "Insurance": 20,  # 保险协议复杂性较高
+                "Payments": 15,  # 支付协议复杂性中等
+                "Privacy": 25,  # 隐私协议复杂性高
+            }
+
+            category_factor = category_complexity.get(category, 20)  # 默认中等复杂性
+            complexity_risk_score += category_factor
+
+            # 开源和GitHub仓库对复杂性的理解和透明度的影响
+            if is_open_source:
+                complexity_risk_score = max(0, complexity_risk_score - 10)
+
+            if github_repos and len(github_repos) > 0:
+                complexity_risk_score = max(0, complexity_risk_score - 10)
+
+            # 确保评分在0-100范围内
+            complexity_risk_score = min(100, max(0, complexity_risk_score))
+
+            # 确定风险等级
+            complexity_risk_level = self._get_risk_level(complexity_risk_score)
+
+            # 构建复杂性风险描述
+            if complexity_risk_score < 30:
+                trend = "下降"
+                description = f"{protocol_name}的复杂性风险较低，"
+            elif complexity_risk_score < 60:
+                trend = "稳定"
+                description = f"{protocol_name}的复杂性风险适中，"
+            else:
+                trend = "上升"
+                description = f"{protocol_name}的复杂性风险较高，"
+
+            # 添加多链信息
+            if chains:
+                description += f"部署在{len(chains)}条区块链上"
+                if len(chains) > 3:
+                    chain_examples = ", ".join(chains[:3]) + "等"
+                else:
+                    chain_examples = ", ".join(chains)
+                description += f"（{chain_examples}），"
+
+                if len(chains) > 5:
+                    description += "多链部署显著增加了协议的复杂性。"
+                elif len(chains) > 2:
+                    description += "跨链操作增加了一定的复杂性。"
+                else:
+                    description += "链支持有限，复杂性较低。"
+            else:
+                description += "未提供链部署信息。"
+
+            # 添加协议类别信息
+            description += f" 作为{category}类别的协议，"
+
+            if category_factor > 25:
+                description += "该类别通常具有较高的技术复杂性。"
+            elif category_factor > 15:
+                description += "该类别具有中等技术复杂性。"
+            else:
+                description += "该类别技术复杂性相对较低。"
+
+            # 添加开源和GitHub信息
+            if is_open_source:
+                description += " 代码开源增加了透明度，"
+            else:
+                description += " 代码不开源增加了理解难度，"
+
+            if github_repos and len(github_repos) > 0:
+                description += f"有{len(github_repos)}个公开的GitHub仓库提供参考。"
+            else:
+                description += "缺乏公开的代码仓库。"
+
+            # 构建数据点
+            data_points = [
+                {"name": "复杂性风险评分", "value": complexity_risk_score},
+                {"name": "复杂性风险等级", "value": complexity_risk_level},
+                {"name": "支持的区块链数量", "value": len(chains)},
+                {"name": "协议类别", "value": category},
+                {"name": "协议类别复杂性因子", "value": category_factor},
+                {"name": "是否开源", "value": "是" if is_open_source else "否"},
+                {
+                    "name": "GitHub仓库数",
+                    "value": len(github_repos) if github_repos else 0,
+                },
+            ]
+
+            # 添加链列表
+            if chains:
+                data_points.append({"name": "支持的区块链", "value": chains})
+
+            # 添加GitHub仓库
+            if github_repos and len(github_repos) > 0:
+                data_points.append({"name": "GitHub仓库", "value": github_repos})
+
+            # 构建复杂性风险分析结果
+            return {
+                "protocol_name": protocol_name,
+                "risk_score": complexity_risk_score,
+                "risk_level": complexity_risk_level,
+                "description": description,
+                "trend": trend,
+                "data_points": data_points,
+                "confidence": 0.75,
+                "analysis_type": "complexity",
+                "analysis_timestamp": datetime.now().isoformat(),
+            }
+        except Exception as e:
+            self.logger.error(f"分析协议复杂性风险时出错: {str(e)}")
+            return {
+                "error": f"复杂性风险分析失败: {str(e)}",
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "description": f"无法完成{protocol_name}的复杂性风险分析",
+                "trend": "未知",
+                "data_points": [],
+                "confidence": 0.3,
+            }
+
+    def analyze_liquidity_risk(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        流动性风险分析路由方法 - 根据分析类型调用适当的分析方法
+
+        Args:
+            data: 分析数据，必须包含 'analysis_type' 字段指明具体分析类型:
+                - 'asset_liquidity': 资产流动性分析
+                - 'protocol_liquidity': 协议流动性分析
+                - 'investment_type_liquidity': 投资类型流动性分析
+                如果未指定，默认为综合流动性分析
+
+        Returns:
+            Dict: 相应类型的流动性风险分析结果
+        """
+        try:
+            # 从数据中提取分析类型
+            analysis_type = data.get("analysis_type", "general_liquidity")
+            self.logger.info(f"开始流动性风险分析，类型: {analysis_type}")
+
+            # 根据分析类型调用相应的方法
+            if analysis_type == "asset_liquidity":
+                return self.analyze_asset_liquidity(data)
+            elif analysis_type == "protocol_liquidity":
+                return self.analyze_protocol_liquidity(data)
+            elif analysis_type == "investment_type_liquidity":
+                return self.analyze_investment_type_liquidity(data)
+            else:
+                # 默认行为：如果数据中包含流动性池信息，则分析流动性池风险
+                if "liquidity_pools" in data:
+                    return self.analyze_liquidity_pool_risk(data)
+                else:
+                    self.logger.warning(
+                        f"未知的流动性分析类型: {analysis_type}，返回默认风险评估"
+                    )
+                    return {
+                        "risk_score": 50,
+                        "description": f"未知的流动性分析类型: {analysis_type}，返回默认风险评估",
+                        "trend": "稳定",
+                        "data_points": [],
+                    }
+
+        except Exception as e:
+            self.logger.error(f"流动性风险分析路由出错: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            return {
+                "risk_score": 50,
+                "description": f"流动性风险分析出错: {str(e)}",
+                "trend": "稳定",
+                "data_points": [],
+                "error": str(e),
+            }
+
+    def analyze_asset_liquidity(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        分析资产流动性风险
+
+        Args:
+            data: 资产数据，包含 'assets' 字段，是一个字典，键为资产名称，值为资产金额
+
+        Returns:
+            Dict: 资产流动性风险分析结果
+        """
+        try:
+            self.logger.info("开始分析资产流动性风险")
+
+            # 提取资产数据
+            assets = data.get("assets", {})
+            if not assets:
+                self.logger.warning("未提供资产数据，无法分析资产流动性风险")
+                return {
+                    "risk_score": 50,
+                    "description": "未提供资产数据，返回默认风险评分",
+                    "trend": "稳定",
+                    "data_points": [],
+                }
+
+            # 计算总资产价值
+            total_value = sum(assets.values())
+            if total_value == 0:
+                self.logger.warning("资产总价值为0，无法分析资产流动性风险")
+                return {
+                    "risk_score": 50,
+                    "description": "资产总价值为0，返回默认风险评分",
+                    "trend": "稳定",
+                    "data_points": [],
+                }
+
+            # 定义高流动性资产（常见代币）
+            high_liquidity_assets = [
+                "BTC",
+                "ETH",
+                "USDT",
+                "USDC",
+                "DAI",
+                "BNB",
+                "SOL",
+                "ADA",
+                "DOT",
+                "AVAX",
+                "MATIC",
+                "LINK",
+                "UNI",
+                "AAVE",
+            ]
+
+            # 定义中等流动性资产
+            medium_liquidity_assets = [
+                "SUSHI",
+                "CRV",
+                "COMP",
+                "SNX",
+                "MKR",
+                "YFI",
+                "FTM",
+                "ATOM",
+                "ALGO",
+                "NEAR",
+                "ONE",
+                "FTT",
+                "KCS",
+            ]
+
+            # 计算资产流动性评分
+            assets_data = []
+            weighted_liquidity_score = 0
+
+            for asset, amount in assets.items():
+                weight = amount / total_value
+
+                # 基于资产类型分配流动性评分
+                if asset in high_liquidity_assets:
+                    liquidity_score = 20  # 高流动性，低风险
+                elif asset in medium_liquidity_assets:
+                    liquidity_score = 50  # 中等流动性，中等风险
+                else:
+                    liquidity_score = 80  # 低流动性，高风险
+
+                # 计算加权评分
+                weighted_liquidity_score += liquidity_score * weight
+
+                assets_data.append(
+                    {
+                        "asset": asset,
+                        "amount": amount,
+                        "weight": weight,
+                        "liquidity_score": liquidity_score,
+                    }
+                )
+
+            # 生成描述
+            if weighted_liquidity_score < 30:
+                description = "投资组合主要由高流动性资产组成，流动性风险较低"
+                trend = "稳定"
+            elif weighted_liquidity_score < 60:
+                description = "投资组合流动性适中，包含一定比例的中低流动性资产"
+                trend = "稳定"
+            else:
+                description = "投资组合包含较多低流动性资产，流动性风险较高"
+                trend = "上升"  # 风险趋势上升
+
+            # 构建分析结果
+            result = {
+                "risk_score": weighted_liquidity_score,
+                "description": description,
+                "trend": trend,
+                "data_points": assets_data,
+            }
+
+            self.logger.info(
+                f"资产流动性风险分析完成，总体风险评分: {weighted_liquidity_score:.2f}"
+            )
+            return result
+
+        except Exception as e:
+            self.logger.error(f"分析资产流动性风险时出错: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            return {
+                "risk_score": 50,
+                "description": f"分析资产流动性风险时出错: {str(e)}",
+                "trend": "稳定",
+                "data_points": [],
+                "error": str(e),
+            }
+
+    def analyze_protocol_liquidity(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        分析协议流动性风险
+
+        Args:
+            data: 协议数据，包含 'protocols' 字段（协议列表）和 'weights' 字段（协议权重字典）
+
+        Returns:
+            Dict: 协议流动性风险分析结果
+        """
+        try:
+            self.logger.info("开始分析协议流动性风险")
+
+            # 提取协议数据
+            protocols = data.get("protocols", [])
+            weights = data.get("weights", {})
+
+            if not protocols:
+                self.logger.warning("未提供协议数据，无法分析协议流动性风险")
+                return {
+                    "risk_score": 50,
+                    "description": "未提供协议数据，返回默认风险评分",
+                    "trend": "稳定",
+                    "data_points": [],
+                }
+
+            # 定义各协议流动性风险评分
+            protocol_risk_scores = {
+                # 主流协议，流动性高，风险低
+                "aave": 20,
+                "compound": 20,
+                "uniswap": 25,
+                "curve": 25,
+                "makerdao": 25,
+                "balancer": 30,
+                "sushiswap": 35,
+                "yearn": 40,
+                "pancakeswap": 40,
+                # 中等流动性协议
+                "trader joe": 50,
+                "quickswap": 55,
+                "spookyswap": 60,
+                # 默认分数
+                "default": 65,  # 默认为中高风险
+            }
+
+            # 计算加权风险评分
+            protocols_data = []
+            weighted_protocol_liquidity_score = 0
+            total_weight = sum(weights.values()) if weights else 0
+
+            for protocol in protocols:
+                protocol_lower = protocol.lower()
+                # 获取协议权重
+                weight = weights.get(protocol, 0) if weights else (1.0 / len(protocols))
+
+                # 获取协议风险评分
+                liquidity_score = protocol_risk_scores.get(
+                    protocol_lower, protocol_risk_scores["default"]
+                )
+
+                # 计算加权评分
+                weighted_protocol_liquidity_score += liquidity_score * weight
+
+                protocols_data.append(
+                    {
+                        "protocol": protocol,
+                        "weight": weight,
+                        "liquidity_score": liquidity_score,
+                    }
+                )
+
+            # 生成描述
+            if weighted_protocol_liquidity_score < 30:
+                description = "投资主要集中在流动性高的主流协议，流动性风险较低"
+                trend = "稳定"
+            elif weighted_protocol_liquidity_score < 50:
+                description = "投资分布于多种协议，整体流动性风险适中"
+                trend = "稳定"
+            else:
+                description = "投资包含较多流动性有限的小型协议，流动性风险较高"
+                trend = "上升"
+
+            # 构建分析结果
+            result = {
+                "risk_score": weighted_protocol_liquidity_score,
+                "description": description,
+                "trend": trend,
+                "data_points": protocols_data,
+            }
+
+            self.logger.info(
+                f"协议流动性风险分析完成，总体风险评分: {weighted_protocol_liquidity_score:.2f}"
+            )
+            return result
+
+        except Exception as e:
+            self.logger.error(f"分析协议流动性风险时出错: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            return {
+                "risk_score": 50,
+                "description": f"分析协议流动性风险时出错: {str(e)}",
+                "trend": "稳定",
+                "data_points": [],
+                "error": str(e),
+            }
+
+    def analyze_investment_type_liquidity(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        分析投资类型流动性风险
+
+        Args:
+            data: 投资类型数据，包含 'investment_types' 字段，是一个字典，
+                 键为投资类型名称，值为该类型的投资金额
+
+        Returns:
+            Dict: 投资类型流动性风险分析结果
+        """
+        try:
+            self.logger.info("开始分析投资类型流动性风险")
+
+            # 提取投资类型数据
+            investment_types = data.get("investment_types", {})
+
+            if not investment_types:
+                self.logger.warning("未提供投资类型数据，无法分析投资类型流动性风险")
+                return {
+                    "risk_score": 50,
+                    "description": "未提供投资类型数据，返回默认风险评分",
+                    "trend": "稳定",
+                    "data_points": [],
+                }
+
+            # 计算总投资价值
+            total_value = sum(investment_types.values())
+            if total_value == 0:
+                self.logger.warning("投资总价值为0，无法分析投资类型流动性风险")
+                return {
+                    "risk_score": 50,
+                    "description": "投资总价值为0，返回默认风险评分",
+                    "trend": "稳定",
+                    "data_points": [],
+                }
+
+            # 定义投资类型的流动性风险评分
+            type_risk_scores = {
+                "spot": 20,  # 现货持有，流动性高
+                "staking": 40,  # 质押，中等流动性
+                "lending": 35,  # 借贷，中高流动性
+                "liquidity_pool": 60,  # 流动性池，中等流动性
+                "leveraged": 75,  # 杠杆，流动性风险高
+                "borrowed": 70,  # 借入，流动性风险较高
+                "other": 65,  # 其他类型，默认中高风险
+            }
+
+            # 计算加权风险评分
+            investment_types_data = []
+            weighted_investment_type_liquidity_score = 0
+
+            for inv_type, amount in investment_types.items():
+                weight = amount / total_value
+
+                # 获取投资类型流动性风险评分
+                liquidity_score = type_risk_scores.get(
+                    inv_type, type_risk_scores["other"]
+                )
+
+                # 计算加权评分
+                weighted_investment_type_liquidity_score += liquidity_score * weight
+
+                investment_types_data.append(
+                    {
+                        "investment_type": inv_type,
+                        "amount": amount,
+                        "weight": weight,
+                        "liquidity_score": liquidity_score,
+                    }
+                )
+
+            # 生成描述
+            if weighted_investment_type_liquidity_score < 30:
+                description = (
+                    "投资组合主要由高流动性投资类型组成，如现货持有，流动性风险低"
+                )
+                trend = "稳定"
+            elif weighted_investment_type_liquidity_score < 60:
+                description = "投资组合包含不同流动性级别的投资类型，整体流动性风险适中"
+                trend = "稳定"
+            else:
+                description = (
+                    "投资组合包含较多低流动性投资类型，如杠杆和借入资产，流动性风险较高"
+                )
+                trend = "上升"
+
+            # 构建分析结果
+            result = {
+                "risk_score": weighted_investment_type_liquidity_score,
+                "description": description,
+                "trend": trend,
+                "data_points": investment_types_data,
+            }
+
+            self.logger.info(
+                f"投资类型流动性风险分析完成，总体风险评分: {weighted_investment_type_liquidity_score:.2f}"
+            )
+            return result
+
+        except Exception as e:
+            self.logger.error(f"分析投资类型流动性风险时出错: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            return {
+                "risk_score": 50,
+                "description": f"分析投资类型流动性风险时出错: {str(e)}",
+                "trend": "稳定",
+                "data_points": [],
+                "error": str(e),
+            }
+
+    def _generate_liquidity_pool_description(
+        self, risk_score: float, data_points: List[Dict]
+    ) -> str:
+        """
+        生成流动性池风险描述
+
+        Args:
+            risk_score: 风险评分
+            data_points: 流动性池数据点
+
+        Returns:
+            str: 风险描述
+        """
+        # 计算高风险和低风险池子的数量
+        high_risk_pools = [p for p in data_points if p.get("risk_score", 0) > 70]
+        low_risk_pools = [p for p in data_points if p.get("risk_score", 0) < 30]
+        total_pools = len(data_points)
+
+        if risk_score >= 80:
+            return f"流动性池组合风险较高，{len(high_risk_pools)}/{total_pools}的池子风险评分超过70分，建议减少高风险池子敞口。"
+        elif risk_score >= 60:
+            return f"流动性池组合风险中等偏高，包含一些高波动性代币池，考虑增加稳定币池比例。"
+        elif risk_score >= 40:
+            return (
+                f"流动性池组合风险适中，代币组合相对平衡，继续监控个别高风险池子表现。"
+            )
+        elif risk_score >= 20:
+            return f"流动性池组合风险较低，{len(low_risk_pools)}/{total_pools}的池子风险评分低于30分，以稳定币池和蓝筹代币池为主。"
+        else:
+            return "流动性池组合风险非常低，主要由稳定币池构成，预期收益和风险都较低。"

@@ -3,11 +3,10 @@
 """
 
 from typing import Dict, List, Any, Optional
-import logging
-import asyncio
 from app.models.domain.risk import RiskFactor, RiskType, RiskAnalysisResult
 from app.risk_modules.base import RiskAnalyzerBase
 from app.services.recommendation_service import RecommendationService
+from dataclasses import asdict
 import numpy as np
 from app.core.utility import safe_get
 
@@ -151,6 +150,11 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
         if correlation_risk:
             risk_factors.append(correlation_risk)
 
+        # 分析市场情绪风险
+        # sentiment_risk = await self._analyze_sentiment_risk(positions)
+        # if sentiment_risk:
+        #     risk_factors.append(sentiment_risk)
+
         return risk_factors
 
     async def _analyze_concentration_risk(
@@ -227,61 +231,81 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                             assets[asset] = 0
                         assets[asset] += position_amount
 
-            if total_value == 0:
-                self.logger.warning("投资组合总价值为0，无法分析市场集中度风险")
+            if not assets:
+                self.logger.warning("没有检测到任何资产，无法分析市场集中度风险")
                 return None
 
-            # 尝试使用AI服务进行集中度分析
-            if self.ai_service:
-                try:
-                    # 准备AI分析的数据
-                    ai_input_data = {
-                        "assets": {
-                            asset: value / total_value
-                            for asset, value in assets.items()
-                        },
-                        "protocols": {
-                            protocol: value / total_value
-                            for protocol, value in protocols.items()
-                        },
-                        "analysis_type": "concentration_risk",
-                    }
+            # 计算风险
+            if len(assets) >= 2 and total_value > 0:
+                # 尝试使用AI分析
+                if self.ai_service:
+                    try:
+                        # 增加日志，记录AI服务和AI预测器的状态
+                        self.logger.info(f"AI服务状态: {self.ai_service is not None}")
 
-                    # 使用AI服务进行分析
-                    ai_analysis = await self.ai_service.analyze_with_predictor(
-                        analysis_type="concentration_risk", data=ai_input_data
-                    )
+                        # 检查AI预测器
+                        ai_predictor = self.ai_service._ai_predictor
+                        self.logger.info(f"AI预测器状态: {ai_predictor is not None}")
 
-                    # 提取AI分析结果
-                    if ai_analysis and "risk_score" in ai_analysis:
-                        risk_score = ai_analysis.get("risk_score", 50)
-                        description = ai_analysis.get("description", "市场集中度分析")
-                        trend = ai_analysis.get("trend", "稳定")
-                        data_points = ai_analysis.get("data_points", [])
+                        # 如果AI预测器未初始化，尝试调用get_predictor方法
+                        if ai_predictor is None:
+                            self.logger.info(
+                                "AI预测器未初始化，尝试调用get_predictor方法"
+                            )
+                            ai_predictor = self.ai_service.get_predictor()
+                            self.logger.info(
+                                f"get_predictor后AI预测器状态: {ai_predictor is not None}"
+                            )
 
-                        return self.create_risk_factor(
-                            risk_type=RiskType.MARKET.value,
-                            factor_name="市场集中度风险",
-                            score=risk_score,
-                            weight=0.3,
-                            description=description,
-                            trend=trend,
-                            data_points=data_points,
-                            metadata={
-                                "asset_weights": {
-                                    asset: value / total_value
-                                    for asset, value in assets.items()
-                                },
-                                "protocol_weights": {
-                                    protocol: value / total_value
-                                    for protocol, value in protocols.items()
-                                },
-                                "ai_analysis": ai_analysis,
+                        # 准备AI分析输入数据
+                        ai_input_data = {
+                            "assets": assets,
+                            "total_value": total_value,
+                            "protocols": protocols,
+                            "metrics": {
+                                "asset_count": len(assets),
+                                "protocol_count": len(protocols),
                             },
+                            "analysis_type": "concentration_risk",
+                        }
+
+                        # 使用AI服务进行分析
+                        ai_analysis = await self.ai_service.analyze_with_predictor(
+                            analysis_type="concentration_risk", data=ai_input_data
                         )
-                except Exception as e:
-                    self.logger.error(f"使用AI分析市场集中度风险时出错: {str(e)}")
-                    # 如果AI分析失败，继续使用传统方法
+
+                        # 提取AI分析结果
+                        if ai_analysis and "risk_score" in ai_analysis:
+                            risk_score = ai_analysis.get("risk_score", 50)
+                            description = ai_analysis.get(
+                                "description", "市场集中度分析"
+                            )
+                            trend = ai_analysis.get("trend", "稳定")
+                            data_points = ai_analysis.get("data_points", [])
+
+                            return self.create_risk_factor(
+                                risk_type=RiskType.MARKET.value,
+                                factor_name="市场集中度风险",
+                                score=risk_score,
+                                weight=0.3,
+                                description=description,
+                                trend=trend,
+                                data_points=data_points,
+                                metadata={
+                                    "asset_weights": {
+                                        asset: value / total_value
+                                        for asset, value in assets.items()
+                                    },
+                                    "protocol_weights": {
+                                        protocol: value / total_value
+                                        for protocol, value in protocols.items()
+                                    },
+                                    "ai_analysis": ai_analysis,
+                                },
+                            )
+                    except Exception as e:
+                        self.logger.error(f"使用AI分析市场集中度风险时出错: {str(e)}")
+                        # 如果AI分析失败，继续使用传统方法
 
             # 如果AI分析失败或不可用，使用传统方法
             # 计算资产集中度（赫芬达尔指数）
@@ -996,6 +1020,212 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
         except Exception as e:
             self.logger.error(f"分析市场相关性风险时出错: {str(e)}")
             return None
+
+    # async def _analyze_sentiment_risk(
+    #     self, positions: List[Any]
+    # ) -> Optional[RiskFactor]:
+    #     """分析市场(基于协议)情绪风险"""
+    #     try:
+    #         # 检查AI服务可用性
+    #         if not self.ai_service:
+    #             self.logger.warning("AI服务未初始化，无法分析市场情绪风险")
+    #             return None
+
+    #         sentiment_service = self.ai_service.get_sentiment_service()
+    #         if not sentiment_service:
+    #             self.logger.warning("情绪分析服务不可用，无法分析市场情绪风险")
+    #             return None
+
+    #         # 提取协议列表和权重
+    #         protocols = {}
+    #         total_value = 0
+
+    #         # 处理嵌套的positions结构以获取协议及其价值
+    #         for protocol_position in positions:
+    #             protocol = safe_get(protocol_position, "protocol", "Unknown")
+    #             protocol_value = 0
+    #             inner_positions = safe_get(protocol_position, "positions", [])
+    #             for pos in inner_positions:
+    #                 # 优先从tokenList获取更精确的价值
+    #                 if safe_get(pos, "tokenList"):
+    #                     filtered_tokens = self.filter_token_list(
+    #                         safe_get(pos, "tokenList", [])
+    #                     )
+    #                     for token in filtered_tokens:
+    #                         if safe_get(token, "currencyAmount"):
+    #                             token_value = float(
+    #                                 safe_get(token, "currencyAmount", "0")
+    #                             )
+    #                             protocol_value += token_value
+    #                         # else: 考虑如何处理没有明确价值的代币，这里暂时忽略
+    #                 else:  # 回退到使用 position amount (如果适用)
+    #                     # 注意：直接使用 pos['amount'] 可能不准确，因为它可能是基础资产数量而非价值
+    #                     # 如果没有 tokenList 且 pos['amount'] 不是 USD 价值，这里的计算可能需要调整
+    #                     # 假设 pos['amount'] 在没有 tokenList 时代表 USD 价值（需要确认）
+    #                     protocol_value += safe_get(pos, "amount", 0)
+
+    #             if protocol not in protocols:
+    #                 protocols[protocol] = 0
+    #             protocols[protocol] += protocol_value
+    #             total_value += protocol_value  # 确保累加到总价值
+
+    #         if not protocols:
+    #             self.logger.warning("未检测到任何协议，无法分析市场情绪风险")
+    #             return None
+
+    #         if total_value == 0:
+    #             self.logger.warning("投资组合总价值为0，无法分析市场情绪风险")
+    #             return None
+
+    #         # 对协议按价值排序，只分析占比较大的协议
+    #         sorted_protocols = sorted(
+    #             [(protocol, value) for protocol, value in protocols.items()],
+    #             key=lambda x: x[1],
+    #             reverse=True,
+    #         )
+
+    #         # 只分析总价值占比前80%的协议或者前5个协议
+    #         top_protocols = []
+    #         cumulative_value = 0
+
+    #         for protocol, value in sorted_protocols:
+    #             top_protocols.append(protocol)
+    #             cumulative_value += value
+    #             if cumulative_value / total_value > 0.8 or len(top_protocols) >= 5:
+    #                 break
+
+    #         # 获取每个主要协议的情绪分析数据
+    #         protocol_sentiments = {}
+    #         for protocol in top_protocols:
+    #             try:
+    #                 # 获取协议的情绪分析摘要
+    #                 sentiment_summary = (
+    #                     await sentiment_service.get_asset_sentiment_summary(protocol)
+    #                 )
+    #                 if sentiment_summary:
+    #                     protocol_sentiments[protocol] = {
+    #                         "overall_sentiment": sentiment_summary.overall_sentiment,
+    #                         "sentiment_change_24h": sentiment_summary.sentiment_change_24h,
+    #                         "sentiment_change_7d": sentiment_summary.sentiment_change_7d,
+    #                         "bullish_percentage": sentiment_summary.bullish_percentage,
+    #                         "bearish_percentage": sentiment_summary.bearish_percentage,
+    #                         "weight": protocols[protocol] / total_value,
+    #                         "risk_factors": [
+    #                             asdict(rf) for rf in sentiment_summary.risk_factors
+    #                         ],
+    #                     }
+    #             except Exception as e:
+    #                 self.logger.warning(f"获取{protocol}情绪分析数据时出错: {str(e)}")
+
+    #         # 如果没有获取到任何情绪数据
+    #         if not protocol_sentiments:
+    #             self.logger.warning(
+    #                 "未能获取到任何协议的情绪数据，无法分析市场情绪风险"
+    #             )
+    #             return None
+
+    #         # 计算投资组合的加权情绪分数
+    #         weighted_sentiment = 0
+    #         weighted_sentiment_change = 0
+    #         total_sentiment_weight = 0
+    #         sentiment_risk_data = []
+
+    #         for protocol, data in protocol_sentiments.items():
+    #             weight = data["weight"]
+    #             weighted_sentiment += data["overall_sentiment"] * weight
+    #             weighted_sentiment_change += data["sentiment_change_24h"] * weight
+    #             total_sentiment_weight += weight
+
+    #             # 收集风险数据
+    #             sentiment_risk_data.append(
+    #                 {
+    #                     "protocol": protocol,
+    #                     "sentiment": data["overall_sentiment"],
+    #                     "change_24h": data["sentiment_change_24h"],
+    #                     "bullish_percentage": data["bullish_percentage"],
+    #                     "bearish_percentage": data["bearish_percentage"],
+    #                     "weight": weight,
+    #                 }
+    #             )
+
+    #         # 计算最终的情绪风险评分
+    #         if total_sentiment_weight > 0:
+    #             avg_sentiment = weighted_sentiment / total_sentiment_weight
+    #             avg_sentiment_change = (
+    #                 weighted_sentiment_change / total_sentiment_weight
+    #             )
+    #         else:
+    #             avg_sentiment = 0
+    #             avg_sentiment_change = 0
+
+    #         # 情绪风险处理逻辑:
+    #         # 1. 极度负面情绪是高风险 (情绪 < -0.5)
+    #         # 2. 极度正面情绪也是中等风险 (情绪 > 0.7) - 可能导致过度乐观
+    #         # 3. 中性偏正面情绪是低风险 (0 < 情绪 < 0.5)
+    #         # 4. 快速变化的情绪是高风险
+
+    #         sentiment_magnitude = abs(avg_sentiment)
+    #         change_magnitude = abs(avg_sentiment_change)
+
+    #         # 基础情绪风险分数 (0-100)
+    #         if avg_sentiment < -0.5:  # 极度负面
+    #             base_risk = 80 + (abs(avg_sentiment) - 0.5) * 40  # 80-100
+    #         elif avg_sentiment > 0.7:  # 极度正面
+    #             base_risk = 50 + (avg_sentiment - 0.7) * 100  # 50-80
+    #         elif avg_sentiment > 0:  # 中性偏正面
+    #             base_risk = 30 + avg_sentiment * 40  # 30-50
+    #         else:  # 中性偏负面
+    #             base_risk = 50 + abs(avg_sentiment) * 60  # 50-80
+
+    #         # 情绪变化风险调整
+    #         change_risk = change_magnitude * 100  # 0-100 基于24小时变化
+
+    #         # 最终风险评分 (结合基础风险和变化风险)
+    #         risk_score = 0.7 * base_risk + 0.3 * change_risk
+    #         risk_score = min(100, max(0, risk_score))  # 确保在0-100范围内
+
+    #         # 确定趋势
+    #         if avg_sentiment_change > 0.1:
+    #             trend = "下降"  # 情绪上升，风险下降
+    #         elif avg_sentiment_change < -0.1:
+    #             trend = "上升"  # 情绪下降，风险上升
+    #         else:
+    #             trend = "稳定"
+
+    #         # 构建描述
+    #         if avg_sentiment < -0.5:
+    #             description = f"投资组合主要协议的市场情绪极度负面(指数: {avg_sentiment:.2f})，存在显著下行风险。"
+    #         elif avg_sentiment < -0.2:
+    #             description = f"投资组合主要协议的市场情绪负面(指数: {avg_sentiment:.2f})，可能存在下行压力。"
+    #         elif avg_sentiment > 0.5:
+    #             description = f"投资组合主要协议的市场情绪极度正面(指数: {avg_sentiment:.2f})，但需警惕过度乐观。"
+    #         elif avg_sentiment > 0.2:
+    #             description = f"投资组合主要协议的市场情绪正面(指数: {avg_sentiment:.2f})，短期内上行概率较高。"
+    #         else:
+    #             description = f"投资组合主要协议的市场情绪中性(指数: {avg_sentiment:.2f})，无明显方向性信号。"
+
+    #         if abs(avg_sentiment_change) > 0.2:
+    #             description += f" 情绪正在快速{('好转' if avg_sentiment_change > 0 else '恶化')}，波动风险增加。"
+
+    #         # 创建风险因子
+    #         return self.create_risk_factor(
+    #             risk_type=RiskType.MARKET.value,
+    #             factor_name="协议情绪风险",
+    #             score=risk_score,
+    #             weight=0.25,
+    #             description=description,
+    #             trend=trend,
+    #             data_points=sentiment_risk_data,
+    #             metadata={
+    #                 "average_sentiment": avg_sentiment,
+    #                 "sentiment_change_24h": avg_sentiment_change,
+    #                 "protocol_sentiments": protocol_sentiments,
+    #             },
+    #         )
+
+    #     except Exception as e:
+    #         self.logger.error(f"分析协议情绪风险时出错: {str(e)}")
+    #         return None
 
     async def get_recommendations(self, risk_factors: List[RiskFactor]) -> List[str]:
         """

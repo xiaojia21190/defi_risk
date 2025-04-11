@@ -109,7 +109,7 @@ async def get_wallet_positions(
                         {
                             "name": protocol_name,
                             "chain": protocol_info.get(
-                                "chain", position.get("chain", "Unknown")
+                                "chain", position.get("chain", "Ethereum")
                             ),
                             "tvl": protocol_info.get("tvl", 0),
                             "supported_assets": protocol_info.get(

@@ -87,6 +87,28 @@ class Settings(BaseSettings):
     # CORS设置
     CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 
+    # 情绪分析配置
+    ENABLE_SENTIMENT_ANALYSIS: bool = Field(
+        default=True, env="ENABLE_SENTIMENT_ANALYSIS"
+    )
+    ENABLE_TWITTER_API: bool = Field(default=True, env="ENABLE_TWITTER_API")
+    ENABLE_NEWS_API: bool = Field(default=True, env="ENABLE_NEWS_API")
+    ENABLE_GOOGLE_TRENDS_API: bool = Field(default=True, env="ENABLE_GOOGLE_TRENDS_API")
+    ENABLE_AI_SENTIMENT_ANALYSIS: bool = Field(
+        default=True, env="ENABLE_AI_SENTIMENT_ANALYSIS"
+    )
+
+    # Twitter Cookies 配置
+    TWITTER_COOKIE_CT0: Optional[str] = Field(default=None, env="TWITTER_COOKIE_CT0")
+    TWITTER_COOKIE_AUTH_TOKEN: Optional[str] = Field(
+        default=None, env="TWITTER_COOKIE_AUTH_TOKEN"
+    )
+
+    # 加密货币新闻API配置
+    CRYPTOCOMPARE_API_KEY: Optional[str] = Field(
+        default=None, env="CRYPTOCOMPARE_API_KEY"
+    )
+
     class Config:
         env_file = ".env"
         case_sensitive = True

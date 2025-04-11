@@ -35,7 +35,7 @@ export function ConnectButton() {
   // 在外部浏览器查看地址
   const viewOnExplorer = () => {
     if (address) {
-      window.open(`https://sepolia.etherscan.io/address/${address}`, "_blank");
+      window.open(`https://etherscan.io/address/${address}`, "_blank");
     }
   };
 
