@@ -29,30 +29,6 @@ from app.models.domain.risk import (
 )
 
 
-# --- Alert Thresholds ---
-PRICE_VOLATILITY_CRIT_THRESHOLD = 10.0
-PRICE_VOLATILITY_WARN_THRESHOLD = 5.0
-PRICE_VOLATILITY_INFO_THRESHOLD = 3.0
-LEVERAGE_CRIT_THRESHOLD = 5.0
-LEVERAGE_WARN_THRESHOLD = 3.0
-LEVERAGE_SAFE_THRESHOLD = 2.0
-HIGH_APY_CRIT_THRESHOLD = 50.0
-HIGH_APY_WARN_THRESHOLD = 30.0
-HIGH_APY_IGNORE_THRESHOLD = 20.0
-LOW_LIQUIDITY_WARN_THRESHOLD = 0.01  # Volume/MarketCap ratio < 1%
-STABLECOIN_DEPEG_CRIT_THRESHOLD = 0.03  # 3% deviation from $1
-STABLECOIN_DEPEG_WARN_THRESHOLD = 0.02  # 2% deviation from $1
-STABLECOINS = [
-    "USDC",
-    "USDT",
-    "DAI",
-    "BUSD",
-    "TUSD",
-    "USDD",
-    "FDUSD",
-]  # Common stablecoins
-
-
 logger = logging.getLogger("defi_risk.blockchain_service")
 
 # 使用settings中的代理设置
@@ -218,6 +194,42 @@ class BlockchainService:
 
         # 初始化历史数据缓存管理器
         self.historical_data_cache = HistoricalDataCache()
+
+        # --- 风险阈值常量 ---
+        # 价格波动阈值
+        self.PRICE_VOLATILITY_CRIT_THRESHOLD = 10.0  # 严重波动阈值 10%
+        self.PRICE_VOLATILITY_WARN_THRESHOLD = 5.0  # 警告波动阈值 5%
+        self.PRICE_VOLATILITY_INFO_THRESHOLD = 3.0  # 提示波动阈值 3%
+
+        # 杠杆率阈值
+        self.LEVERAGE_CRIT_THRESHOLD = 5.0  # 严重杠杆阈值 5倍
+        self.LEVERAGE_WARN_THRESHOLD = 3.0  # 警告杠杆阈值 3倍
+        self.LEVERAGE_SAFE_THRESHOLD = 2.0  # 安全杠杆阈值 2倍
+
+        # 高APY阈值
+        self.HIGH_APY_CRIT_THRESHOLD = 50.0  # 严重高APY阈值 50%
+        self.HIGH_APY_WARN_THRESHOLD = 30.0  # 警告高APY阈值 30%
+        self.HIGH_APY_IGNORE_THRESHOLD = 20.0  # 忽略高APY阈值 20%
+
+        # 流动性阈值
+        self.LOW_LIQUIDITY_WARN_THRESHOLD = (
+            0.01  # 低流动性警告阈值 (交易量/市值比 < 1%)
+        )
+
+        # 稳定币脱锚阈值
+        self.STABLECOIN_DEPEG_CRIT_THRESHOLD = 0.03  # 严重脱锚阈值 (偏离$1达到3%)
+        self.STABLECOIN_DEPEG_WARN_THRESHOLD = 0.02  # 警告脱锚阈值 (偏离$1达到2%)
+
+        # 常见稳定币列表
+        self.STABLECOINS = [
+            "USDC",
+            "USDT",
+            "DAI",
+            "BUSD",
+            "TUSD",
+            "USDD",
+            "FDUSD",
+        ]
 
         # 初始化API客户端
         self._init_api_clients()
