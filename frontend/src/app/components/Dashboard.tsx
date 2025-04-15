@@ -7,6 +7,7 @@ import PortfolioOverview from "./PortfolioOverview";
 import AlertsList from "./AlertsList";
 import MarketAnalysis from "./MarketAnalysis";
 import ApiTest from "./ApiTest";
+import { ConnectButton } from "./ConnectButton";
 import { apiService } from "../services/api";
 import type { Portfolio, WalletRiskAssessment, WalletMarketRisk } from "../services/api";
 import { Loader2, RefreshCw, AlertTriangle, Shield, Zap } from "lucide-react";
@@ -183,12 +184,145 @@ export const Dashboard: React.FC = () => {
 
   if (!isConnected) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>连接钱包</CardTitle>
-          <CardDescription>请连接您的钱包以查看DeFi投资组合和风险分析。</CardDescription>
-        </CardHeader>
-      </Card>
+      <div className="space-y-8">
+        {/* 欢迎卡片 */}
+        <Card className="relative overflow-hidden border shadow-xl rounded-xl border-slate-200/60 dark:border-slate-800/60 backdrop-blur-sm">
+          {/* 背景装饰元素 */}
+          <div className="absolute top-0 right-0 -mt-20 -mr-20 rounded-full w-96 h-96 opacity-20 bg-gradient-to-br from-blue-400 to-purple-600 blur-3xl"></div>
+          <div className="absolute bottom-0 left-0 -mb-20 -ml-20 rounded-full w-96 h-96 opacity-20 bg-gradient-to-tr from-green-400 to-cyan-500 blur-3xl"></div>
+
+          <div className="relative z-10 p-8 md:p-12">
+            <div className="flex flex-col items-start justify-between gap-6 md:flex-row md:items-center">
+              <div className="max-w-3xl space-y-4">
+                <div className="space-y-2">
+                  <h1 className="text-3xl font-bold tracking-tight text-transparent md:text-4xl bg-clip-text bg-gradient-to-r from-slate-900 to-slate-600 dark:from-slate-100 dark:to-slate-400">DeFi风险监控仪表板</h1>
+                  <p className="text-lg md:text-xl text-slate-600 dark:text-slate-300">实时监控您的DeFi投资组合，分析风险暴露，保护您的加密资产安全</p>
+                </div>
+
+                <div className="pt-2">
+                  {/* 使用ConnectButton组件替换无功能按钮，添加自定义样式 */}
+                  <ConnectButton size="lg" variant="custom" />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-center p-5 border shadow-lg bg-white/80 dark:bg-slate-800/80 rounded-xl border-slate-200/60 dark:border-slate-700/60 backdrop-blur-md">
+                <div className="relative w-20 h-20 md:w-32 md:h-32">
+                  {/* 安全盾牌图标 */}
+                  <div className="absolute inset-0 flex items-center justify-center text-blue-500 dark:text-blue-400 animate-pulse">
+                    <Shield className="w-16 h-16 md:w-24 md:h-24" />
+                  </div>
+                  {/* 旋转的外环 */}
+                  <div className="absolute inset-0 border-4 rounded-full border-t-transparent border-blue-400/30 dark:border-blue-500/30 animate-spin"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        {/* 功能预览卡片 */}
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+          {/* 功能卡片1：投资组合跟踪 */}
+          <Card className="relative overflow-hidden transition-all duration-300 border shadow-md rounded-xl border-slate-200/60 dark:border-slate-800/60 hover:shadow-lg hover:translate-y-[-5px]">
+            <div className="absolute top-0 right-0 w-32 h-32 -mt-8 -mr-8 rounded-full opacity-10 bg-gradient-to-br from-blue-300 to-blue-600 blur-2xl"></div>
+            <CardHeader>
+              <div className="flex items-center justify-center w-12 h-12 mb-4 bg-blue-100 rounded-lg dark:bg-blue-900/40">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+                </svg>
+              </div>
+              <CardTitle>投资组合跟踪</CardTitle>
+              <CardDescription>实时监控您的DeFi资产分布、收益和表现</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
+                <li className="flex items-center">
+                  <span className="mr-2 text-green-500">✓</span>
+                  跨协议资产聚合
+                </li>
+                <li className="flex items-center">
+                  <span className="mr-2 text-green-500">✓</span>
+                  实时价格和APY更新
+                </li>
+                <li className="flex items-center">
+                  <span className="mr-2 text-green-500">✓</span>
+                  历史表现分析
+                </li>
+              </ul>
+            </CardContent>
+          </Card>
+
+          {/* 功能卡片2：风险分析 */}
+          <Card className="relative overflow-hidden transition-all duration-300 border shadow-md rounded-xl border-slate-200/60 dark:border-slate-800/60 hover:shadow-lg hover:translate-y-[-5px]">
+            <div className="absolute top-0 right-0 w-32 h-32 -mt-8 -mr-8 rounded-full opacity-10 bg-gradient-to-br from-amber-300 to-amber-600 blur-2xl"></div>
+            <CardHeader>
+              <div className="flex items-center justify-center w-12 h-12 mb-4 rounded-lg bg-amber-100 dark:bg-amber-900/40">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <CardTitle>风险分析</CardTitle>
+              <CardDescription>全面评估您的DeFi投资风险暴露</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
+                <li className="flex items-center">
+                  <span className="mr-2 text-green-500">✓</span>
+                  协议风险评估
+                </li>
+                <li className="flex items-center">
+                  <span className="mr-2 text-green-500">✓</span>
+                  流动性和波动性分析
+                </li>
+                <li className="flex items-center">
+                  <span className="mr-2 text-green-500">✓</span>
+                  智能合约风险监控
+                </li>
+              </ul>
+            </CardContent>
+          </Card>
+
+          {/* 功能卡片3：智能警报 */}
+          <Card className="relative overflow-hidden transition-all duration-300 border shadow-md rounded-xl border-slate-200/60 dark:border-slate-800/60 hover:shadow-lg hover:translate-y-[-5px]">
+            <div className="absolute top-0 right-0 w-32 h-32 -mt-8 -mr-8 rounded-full opacity-10 bg-gradient-to-br from-red-300 to-red-600 blur-2xl"></div>
+            <CardHeader>
+              <div className="flex items-center justify-center w-12 h-12 mb-4 bg-red-100 rounded-lg dark:bg-red-900/40">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                </svg>
+              </div>
+              <CardTitle>智能警报</CardTitle>
+              <CardDescription>获取重要风险事件的实时通知</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
+                <li className="flex items-center">
+                  <span className="mr-2 text-green-500">✓</span>
+                  价格异常波动提醒
+                </li>
+                <li className="flex items-center">
+                  <span className="mr-2 text-green-500">✓</span>
+                  流动性危机预警
+                </li>
+                <li className="flex items-center">
+                  <span className="mr-2 text-green-500">✓</span>
+                  智能合约漏洞警报
+                </li>
+              </ul>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* 试用选项 */}
+        {/* <div className="flex justify-center mt-8">
+          <Button variant="outline" className="relative overflow-hidden font-medium transition-all duration-300 bg-white border shadow-sm group hover:shadow-md border-slate-200 dark:border-slate-700 dark:bg-slate-900">
+            <span className="absolute inset-0 w-full h-full transition-all duration-300 opacity-0 bg-gradient-to-r from-slate-200/20 via-white/20 to-slate-200/20 group-hover:opacity-100 group-hover:animate-shimmer"></span>
+            <span className="relative flex items-center">
+              <Loader2 className="w-4 h-4 mr-2 transition-transform duration-300 group-hover:animate-spin" />
+              查看演示数据
+            </span>
+          </Button>
+        </div> */}
+      </div>
     );
   }
 

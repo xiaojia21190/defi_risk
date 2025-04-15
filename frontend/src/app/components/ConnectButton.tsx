@@ -2,14 +2,21 @@
 
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { useState, useEffect } from "react";
-import { LogOut, ChevronDown, Copy, ExternalLink, Check, Wallet, Coins } from "lucide-react";
+import { LogOut, ChevronDown, Copy, ExternalLink, Check, Wallet, Coins, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { MetaMaskIcon, WalletConnectIcon } from "./WalletIcons";
 
-export function ConnectButton() {
+// 定义组件属性类型
+interface ConnectButtonProps {
+  size?: "default" | "sm" | "lg"; // 按钮尺寸
+  variant?: "default" | "outline" | "custom"; // 按钮变体
+  className?: string; // 自定义类名
+}
+
+export function ConnectButton({ size = "default", variant = "outline", className }: ConnectButtonProps) {
   const { address, isConnected } = useAccount();
   const { connect, connectors, isPending } = useConnect();
   const { disconnect } = useDisconnect();
@@ -69,11 +76,20 @@ export function ConnectButton() {
     }
   };
 
+  // 生成连接按钮样式
+  const getConnectButtonStyles = () => {
+    if (variant === "custom") {
+      return "relative overflow-hidden font-medium text-white transition-all duration-300 shadow-lg group bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 hover:shadow-blue-500/30";
+    }
+    return variant === "outline" ? "relative overflow-hidden group" : "";
+  };
+
+  // 已连接状态
   if (isConnected && address) {
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" className="gap-2">
+          <Button variant="outline" size={size} className={cn("gap-2", className)}>
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
             <span className="font-medium">{`${address.slice(0, 6)}...${address.slice(-4)}`}</span>
             <ChevronDown className="w-4 h-4" />
@@ -104,19 +120,23 @@ export function ConnectButton() {
     );
   }
 
+  // 未连接状态
   return (
     <div className="flex gap-2">
       {demoMode && (
-        <Button variant="outline" className="bg-amber-500/10 text-amber-500 hover:bg-amber-500/20">
+        <Button variant="outline" size={size} className="bg-amber-500/10 text-amber-500 hover:bg-amber-500/20">
           <Wallet className="w-4 h-4 mr-2" />
           演示模式
         </Button>
       )}
 
-      <Button variant="outline" className="relative overflow-hidden group" onClick={() => setDialogOpen(true)}>
-        <span className={cn("absolute inset-0 w-full h-full bg-gradient-to-r from-primary/0 via-primary-foreground/20 to-primary/0 -translate-x-full", "group-hover:animate-shimmer")} />
-        <Wallet className="w-4 h-4 mr-2" />
-        连接钱包
+      <Button variant={variant === "custom" ? "default" : variant} size={size} className={cn(getConnectButtonStyles(), className)} onClick={() => setDialogOpen(true)}>
+        {variant === "custom" && <span className="absolute inset-0 w-full h-full transition-all duration-300 opacity-0 bg-gradient-to-r from-blue-300/20 via-white/20 to-blue-300/20 group-hover:opacity-100 group-hover:animate-shimmer"></span>}
+        <span className={cn("relative flex items-center", variant === "outline" && "z-10")}>
+          {variant === "custom" ? <Shield className="w-5 h-5 mr-2 transition-transform duration-300 group-hover:scale-110" /> : <Wallet className="w-4 h-4 mr-2" />}
+          连接钱包
+        </span>
+        {variant === "outline" && <span className={cn("absolute inset-0 w-full h-full bg-gradient-to-r from-primary/0 via-primary-foreground/20 to-primary/0 -translate-x-full", "group-hover:animate-shimmer")} />}
       </Button>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
