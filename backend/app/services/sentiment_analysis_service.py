@@ -95,6 +95,14 @@ class SentimentAnalysisService:
                 "positive": 0.2,
                 "very_positive": 0.6,
             },
+            # 不同来源的权重配置
+            "source_weights": {
+                "twitter": 0.6,  # 社交媒体
+                "reddit": 0.6,  # 社交媒体
+                "crypto_news": 0.4,  # 新闻
+                "blog": 0.4,  # 博客
+                "default": 0.5,  # 默认权重
+            },
         }
 
         self.logger.info("情绪分析服务初始化完成")
@@ -500,157 +508,166 @@ class SentimentAnalysisService:
         Returns:
             情绪时间序列
         """
-        if not analysis_results:
+        try:
+            if not analysis_results:
+                self.logger.warning(
+                    f"无情绪分析结果用于创建{asset}的时间序列，返回空序列"
+                )
+                return SentimentTimeSeries(
+                    asset=asset, source="combined", resolution=resolution, data=[]
+                )
+
+            self.logger.info(
+                f"开始为{asset}创建情绪时间序列，分辨率为{resolution}，共{len(analysis_results)}条分析结果"
+            )
+
+            # 按来源分组
+            results_by_source = {}
+            for result in analysis_results:
+                if result.source not in results_by_source:
+                    results_by_source[result.source] = []
+                results_by_source[result.source].append(result)
+
+            self.logger.debug(f"按来源分组完成，共有{len(results_by_source)}个不同来源")
+
+            # 设置时间间隔
+            if resolution == "1h":
+                interval = timedelta(hours=1)
+            elif resolution == "6h":
+                interval = timedelta(hours=6)
+            elif resolution == "1d":
+                interval = timedelta(days=1)
+            else:
+                # 默认为1天
+                self.logger.warning(f"不支持的分辨率'{resolution}'，默认使用'1d'。")
+                interval = timedelta(days=1)
+                resolution = "1d"  # 确保resolution与interval匹配
+
+            # 为每个来源创建时间序列
+            source_series = {}
+
+            for source, results in results_by_source.items():
+                try:
+                    self.logger.debug(f"处理来源'{source}'的{len(results)}条结果")
+                    series_data = []
+
+                    # 动态创建时间桶
+                    time_buckets = {}  # 初始化空字典
+
+                    # 将结果放入对应的时间桶
+                    for result in results:
+                        try:
+                            # 计算标准化的桶开始时间
+                            bucket_start_time = self._get_bucket_start_time(
+                                result.timestamp, interval
+                            )
+                            # 使用标准化的开始时间生成唯一的键 (ISO格式推荐)
+                            bucket_key = bucket_start_time.isoformat()
+
+                            # 如果桶不存在，则创建
+                            if bucket_key not in time_buckets:
+                                time_buckets[bucket_key] = {
+                                    "timestamp": bucket_start_time,  # 存储标准化的时间戳
+                                    "scores": [],
+                                    "volume": 0,
+                                }
+
+                            # 添加数据到桶
+                            time_buckets[bucket_key]["scores"].append(
+                                result.sentiment_score
+                            )
+                            time_buckets[bucket_key]["volume"] += 1
+                        except Exception as e:
+                            self.logger.error(f"处理单个结果时出错: {str(e)}")
+                            continue
+
+                    # 创建时间序列数据点 (使用 time_buckets.values())
+                    for bucket_data in time_buckets.values():
+                        if bucket_data["volume"] > 0:
+                            try:
+                                avg_score = sum(bucket_data["scores"]) / len(
+                                    bucket_data["scores"]
+                                )
+                                series_data.append(
+                                    SentimentTimeSeriesPoint(
+                                        timestamp=bucket_data[
+                                            "timestamp"
+                                        ],  # 使用桶的标准时间戳
+                                        sentiment_score=avg_score,
+                                        volume=bucket_data["volume"],
+                                        source=source,
+                                    )
+                                )
+                            except Exception as e:
+                                self.logger.error(f"创建时间序列点时出错: {str(e)}")
+                                continue
+
+                    # 按时间排序
+                    series_data.sort(key=lambda x: x.timestamp)
+
+                    # 保存该来源的时间序列
+                    source_series[source] = SentimentTimeSeries(
+                        asset=asset,
+                        source=source,
+                        resolution=resolution,
+                        data=series_data,
+                    )
+                except Exception as e:
+                    self.logger.error(f"处理来源'{source}'时出错: {str(e)}")
+                    continue
+
+            self.logger.info(f"已为{len(source_series)}个来源创建时间序列，开始合并")
+
+            # 检查是否有可用的来源序列
+            if not source_series:
+                self.logger.warning(f"没有可用的来源序列用于合并，返回空的组合序列")
+                return SentimentTimeSeries(
+                    asset=asset, source="combined", resolution=resolution, data=[]
+                )
+
+            # 创建合并的时间序列
+            try:
+                # 查找所有唯一的时间戳
+                all_timestamps = set()
+                for source, series in source_series.items():
+                    for point in series.data:
+                        all_timestamps.add(point.timestamp)
+
+                # 按时间排序
+                sorted_timestamps = sorted(all_timestamps)
+                self.logger.debug(
+                    f"合并时间序列：共有{len(sorted_timestamps)}个唯一时间戳"
+                )
+
+                # 使用辅助方法合并时间序列数据点
+                combined_data = self._merge_time_series_points(
+                    source_series, sorted_timestamps
+                )
+
+                self.logger.info(f"合并时间序列完成，共有{len(combined_data)}个数据点")
+
+                # 创建合并的时间序列
+                combined_series = SentimentTimeSeries(
+                    asset=asset,
+                    source="combined",
+                    resolution=resolution,
+                    data=combined_data,
+                )
+
+                return combined_series
+            except Exception as e:
+                self.logger.error(f"合并时间序列时出错: {str(e)}")
+                # 失败时，返回一个空的合并序列
+                return SentimentTimeSeries(
+                    asset=asset, source="combined", resolution=resolution, data=[]
+                )
+
+        except Exception as e:
+            self.logger.error(f"创建时间序列过程中发生未处理的异常: {str(e)}")
+            # 发生异常时返回空序列
             return SentimentTimeSeries(
                 asset=asset, source="combined", resolution=resolution, data=[]
             )
-
-        # 按来源分组
-        results_by_source = {}
-        for result in analysis_results:
-            if result.source not in results_by_source:
-                results_by_source[result.source] = []
-            results_by_source[result.source].append(result)
-
-        # 按时间分组
-        now = datetime.utcnow()  # 'now' 仍然可能需要，但不再用于定义桶范围
-        time_frames = {}  # 'time_frames' 似乎未使用，可以考虑移除
-
-        if resolution == "1h":
-            interval = timedelta(hours=1)
-        elif resolution == "6h":
-            interval = timedelta(hours=6)
-        elif resolution == "1d":
-            interval = timedelta(days=1)
-        else:
-            # 默认为1天
-            self.logger.warning(
-                f"Unsupported resolution '{resolution}', defaulting to '1d'."
-            )
-            interval = timedelta(days=1)
-            resolution = "1d"  # 确保resolution与interval匹配
-
-        # 为每个来源创建时间序列
-        source_series = {}
-
-        for source, results in results_by_source.items():
-            series_data = []
-
-            # --- 修改开始 ---
-            # 动态创建时间桶
-            time_buckets = {}  # 初始化空字典
-
-            # 将结果放入对应的时间桶
-            for result in results:
-                # 计算标准化的桶开始时间
-                bucket_start_time = self._get_bucket_start_time(
-                    result.timestamp, interval
-                )
-                # 使用标准化的开始时间生成唯一的键 (ISO格式推荐)
-                bucket_key = bucket_start_time.isoformat()
-
-                # 如果桶不存在，则创建
-                if bucket_key not in time_buckets:
-                    time_buckets[bucket_key] = {
-                        "timestamp": bucket_start_time,  # 存储标准化的时间戳
-                        "scores": [],
-                        "volume": 0,
-                    }
-
-                # 添加数据到桶
-                time_buckets[bucket_key]["scores"].append(result.sentiment_score)
-                time_buckets[bucket_key]["volume"] += 1
-            # --- 修改结束 ---
-
-            # 创建时间序列数据点 (使用 time_buckets.values())
-            for bucket_data in time_buckets.values():
-                if bucket_data["volume"] > 0:
-                    avg_score = sum(bucket_data["scores"]) / len(bucket_data["scores"])
-                    series_data.append(
-                        SentimentTimeSeriesPoint(
-                            timestamp=bucket_data["timestamp"],  # 使用桶的标准时间戳
-                            sentiment_score=avg_score,
-                            volume=bucket_data["volume"],
-                            source=source,
-                        )
-                    )
-
-            # 按时间排序
-            series_data.sort(key=lambda x: x.timestamp)
-
-            # 只保留有数据的部分 (这步现在可能不需要，因为只创建了有数据的桶，但保留无害)
-            # series_data = [point for point in series_data if point.volume > 0]
-
-            # 保存该来源的时间序列
-            source_series[source] = SentimentTimeSeries(
-                asset=asset, source=source, resolution=resolution, data=series_data
-            )
-
-        # 创建合并的时间序列
-        combined_data = []
-
-        # 查找所有唯一的时间戳
-        all_timestamps = set()
-        for source, series in source_series.items():
-            for point in series.data:
-                all_timestamps.add(point.timestamp.strftime("%Y-%m-%d %H:%M:%S"))
-
-        # 按时间排序
-        sorted_timestamps = sorted(all_timestamps)
-
-        # 为每个时间戳计算合并的情绪分数
-        for ts_str in sorted_timestamps:
-            ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
-            points_at_ts = []
-
-            # 收集该时间戳的所有数据点
-            for source, series in source_series.items():
-                for point in series.data:
-                    if point.timestamp.strftime("%Y-%m-%d %H:%M:%S") == ts_str:
-                        points_at_ts.append(point)
-
-            if points_at_ts:
-                # 计算加权平均分数
-                total_weighted_score = 0
-                total_volume = 0
-
-                for point in points_at_ts:
-                    # 社交媒体和新闻的权重不同
-                    if point.source in ["twitter"]:
-                        weight = self.config["social_weight"]
-                    else:
-                        weight = self.config["news_weight"]
-
-                    total_weighted_score += (
-                        point.sentiment_score * point.volume * weight
-                    )
-                    total_volume += point.volume * weight
-
-                avg_score = (
-                    total_weighted_score / total_volume if total_volume > 0 else 0
-                )
-                total_vol = sum(p.volume for p in points_at_ts)
-
-                combined_data.append(
-                    SentimentTimeSeriesPoint(
-                        timestamp=ts,
-                        sentiment_score=avg_score,
-                        volume=total_vol,
-                        source="combined",
-                        metadata={
-                            "source_breakdown": {
-                                p.source: p.volume for p in points_at_ts
-                            }
-                        },
-                    )
-                )
-
-        # 创建合并的时间序列
-        combined_series = SentimentTimeSeries(
-            asset=asset, source="combined", resolution=resolution, data=combined_data
-        )
-
-        return combined_series
 
     def calculate_sentiment_risk_metrics(
         self,
@@ -980,6 +997,9 @@ class SentimentAnalysisService:
             self.logger.warning(
                 f"generate_asset_sentiment_summary: Failed to calculate risk metrics for asset {asset}."
             )
+
+        # 初始化风险因子列表
+        risk_factors = []
 
         # 1. 情绪波动风险因子
         if risk_metrics.sentiment_volatility > 0:
@@ -1334,3 +1354,65 @@ class SentimentAnalysisService:
             self.cache.clear()
 
         self.logger.info("情绪分析服务已关闭")
+
+    def _merge_time_series_points(
+        self, source_series: Dict[str, SentimentTimeSeries], timestamps: List[datetime]
+    ) -> List[SentimentTimeSeriesPoint]:
+        """
+        合并多个来源的时间序列数据点
+
+        Args:
+            source_series: 按来源分组的时间序列字典
+            timestamps: 排序后的唯一时间戳列表
+
+        Returns:
+            合并后的时间序列数据点列表
+        """
+        combined_data = []
+
+        # 为每个时间戳计算合并的情绪分数
+        for ts in timestamps:
+            points_at_ts = []
+
+            # 收集该时间戳的所有数据点
+            for source, series in source_series.items():
+                for point in series.data:
+                    if point.timestamp == ts:
+                        points_at_ts.append(point)
+
+            if points_at_ts:
+                # 计算加权平均分数
+                total_weighted_score = 0
+                total_volume = 0
+
+                for point in points_at_ts:
+                    # 获取来源权重
+                    weight = self.config["source_weights"].get(
+                        point.source, self.config["source_weights"]["default"]
+                    )
+
+                    total_weighted_score += (
+                        point.sentiment_score * point.volume * weight
+                    )
+                    total_volume += point.volume * weight
+
+                avg_score = (
+                    total_weighted_score / total_volume if total_volume > 0 else 0
+                )
+                total_vol = sum(p.volume for p in points_at_ts)
+
+                combined_data.append(
+                    SentimentTimeSeriesPoint(
+                        timestamp=ts,
+                        sentiment_score=avg_score,
+                        volume=total_vol,
+                        source="combined",
+                        metadata={
+                            "source_breakdown": {
+                                p.source: p.volume for p in points_at_ts
+                            }
+                        },
+                    )
+                )
+
+        return combined_data
