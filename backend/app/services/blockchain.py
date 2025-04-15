@@ -231,6 +231,21 @@ class BlockchainService:
             "FDUSD",
         ]
 
+        # 定义DEX协议列表
+        self.dex_protocols = {
+            "uniswap",
+            "sushiswap",
+            "curve",
+            "balancer",
+            "pancakeswap",
+            "traderjoe",
+            "quickswap",
+            "spiritswap",
+            "spookyswap",
+            "orca",
+            "raydium",
+        }
+
         # 初始化API客户端
         self._init_api_clients()
 
@@ -325,6 +340,15 @@ class BlockchainService:
             代币价格（USD）
         """
         try:
+            symbol = asset["symbol"]
+
+            # 检查是否为Pendle的PT或YT代币
+            if symbol and (symbol.startswith("PT-") or symbol.startswith("YT-")):
+                self.logger.info(f"检测到Pendle {symbol}代币，尝试获取其价格")
+                pendle_price = await self._get_pendle_token_price(asset)
+                if pendle_price > 0:
+                    return pendle_price
+
             # 缓存检查
             cache_key = f"token_price_{asset['symbol']}_{asset['chain']}"
             cache_interval = "1m"  # 1分钟缓存
@@ -347,6 +371,100 @@ class BlockchainService:
             return 1.0
         except Exception as e:
             self.logger.error(f"获取代币价格失败: {str(e)}")
+            return 0.0
+
+    async def _get_pendle_token_price(self, asset: Dict[str, str]) -> float:
+        """
+        获取Pendle PT和YT代币的价格
+
+        Args:
+            asset: 包含代币信息的字典，包括symbol和address
+
+        Returns:
+            代币价格（USD）
+        """
+        try:
+            symbol = asset["symbol"]
+            self.logger.info(f"尝试获取Pendle代币 {symbol} 的价格")
+
+            # 检查缓存
+            cache_key = f"pendle_token_price_{symbol}_{asset['chain']}"
+            cache_interval = "1m"  # 1分钟缓存
+            cached_price = self.historical_data_cache.get(cache_key, cache_interval)
+            if cached_price is not None:
+                self.logger.info(f"从缓存获取Pendle代币价格: {symbol}")
+                return cached_price
+
+            # 提取基础代币符号 (从 "PT-TOKEN-DATE" 或 "YT-TOKEN-DATE" 中提取 "TOKEN")
+            if symbol.startswith("PT-") or symbol.startswith("YT-"):
+                # 移除前缀PT-或YT-
+                remaining = symbol[3:]
+
+                # 查找最后一个"-"的位置，以分离基础代币和日期部分
+                last_dash_index = remaining.rfind("-")
+
+                if last_dash_index > 0:
+                    # 如果找到了"-"，取其前面的部分作为基础代币
+                    base_token_symbol = remaining[:last_dash_index]
+                    self.logger.info(
+                        f"从带日期的Pendle代币 {symbol} 提取基础代币 {base_token_symbol}"
+                    )
+                else:
+                    # 如果没有额外的"-"，整个剩余部分就是基础代币
+                    base_token_symbol = remaining
+                    self.logger.info(
+                        f"从Pendle代币 {symbol} 提取基础代币 {base_token_symbol}"
+                    )
+
+                # 创建基础代币的资产字典
+                base_asset = {
+                    "symbol": base_token_symbol,
+                    "chain": asset.get("chain", "ethereum"),
+                    "address": "",  # 可能需要映射获取基础代币地址
+                }
+
+                # 获取基础代币价格
+                try:
+                    base_token_price = await self._get_okx_token_price(base_asset)
+                    if base_token_price <= 0:
+                        self.logger.warning(
+                            f"无法获取基础代币 {base_token_symbol} 的价格"
+                        )
+                        return 0.0
+
+                    # PT代币价格估算 (通常略低于基础代币，因为它代表本金)
+                    # YT代币价格估算 (通常是基础代币收益部分的价值)
+                    if symbol.startswith("PT-"):
+                        # PT代币估算为基础代币价格的80-90%
+                        estimated_price = base_token_price * 0.85
+                        self.logger.info(
+                            f"估算{symbol}价格为{estimated_price} (基于{base_token_symbol}价格{base_token_price})"
+                        )
+                    else:  # YT-
+                        # YT代币估算为基础代币价格的10-20%
+                        estimated_price = base_token_price * 0.15
+                        self.logger.info(
+                            f"估算{symbol}价格为{estimated_price} (基于{base_token_symbol}价格{base_token_price})"
+                        )
+
+                    # 缓存结果
+                    self.historical_data_cache.set(
+                        cache_key, estimated_price, cache_interval
+                    )
+                    return estimated_price
+                except Exception as e:
+                    self.logger.error(f"估算Pendle代币{symbol}价格时出错: {str(e)}")
+
+            # 如果其他方法都失败，默认返回一个合理值
+            # PT和YT代币通常价值较小，但不为零
+            default_price = 0.5
+            self.logger.warning(
+                f"无法获取或估算{symbol}的价格，使用默认值{default_price}"
+            )
+            return default_price
+
+        except Exception as e:
+            self.logger.error(f"获取Pendle代币价格失败: {str(e)}")
             return 0.0
 
     async def _get_okx_token_price(self, asset: Dict[str, str]) -> float:
@@ -697,8 +815,8 @@ class BlockchainService:
                     if platform_name not in platform_assets:
                         platform_assets[platform_name] = {
                             "protocol": platform_name,
-                            "total_assets": platform.get(
-                                "currencyAmount", 0
+                            "total_assets": float(
+                                platform.get("currencyAmount", 0)
                             ),  # 总资产价值
                             "total_debts": 0.0,  # 总负债价值
                             "leverage": 0.0,  # 杠杆率
@@ -766,45 +884,148 @@ class BlockchainService:
                                             invest_type=invest_type,
                                             apy=None,
                                         )
+
                                         if invest_type == 2:
                                             # 流动性池
                                             positionList = invest_token.get(
                                                 "positionList", []
                                             )
-                                            for position in positionList:
-                                                assets = position.get("assets", [])
-                                                for asset in assets:
-                                                    tokenSymbol = asset.get(
+
+                                            # 为每个LP位置创建单独的PlatformAsset
+                                            for lp_position in positionList:
+                                                # 获取新增的rangeInfo和positionStatus信息
+                                                range_info = lp_position.get(
+                                                    "rangeInfo", {}
+                                                )
+                                                position_status = lp_position.get(
+                                                    "positionStatus", "UNKNOWN"
+                                                )
+                                                token_id = lp_position.get(
+                                                    "tokenId", ""
+                                                )
+                                                position_name = lp_position.get(
+                                                    "positionName", ""
+                                                )
+                                                lp_total_value = float(
+                                                    lp_position.get("totalValue", 0)
+                                                )
+
+                                                # 提取资产列表
+                                                assets_token_list = lp_position.get(
+                                                    "assetsTokenList", []
+                                                )
+                                                token_list = []
+
+                                                for asset in assets_token_list:
+                                                    token_symbol = asset.get(
                                                         "tokenSymbol", ""
                                                     )
-                                                    tokenLogo = asset.get(
+                                                    token_logo = asset.get(
                                                         "tokenLogo", ""
                                                     )
-                                                    coinAmount = asset.get(
+                                                    coin_amount = asset.get(
                                                         "coinAmount", ""
                                                     )
-                                                    currencyAmount = asset.get(
+                                                    currency_amount = asset.get(
                                                         "currencyAmount", ""
                                                     )
-                                                    tokenPrecision = asset.get(
+                                                    token_precision = asset.get(
                                                         "tokenPrecision", ""
                                                     )
-                                                    tokenAddress = asset.get(
+                                                    token_address = asset.get(
                                                         "tokenAddress", ""
                                                     )
                                                     network = asset.get("network", "")
-                                                    position.tokenList.append(
+
+                                                    token_list.append(
                                                         {
-                                                            "tokenSymbol": tokenSymbol,
-                                                            "tokenLogo": tokenLogo,
-                                                            "coinAmount": coinAmount,
-                                                            "currencyAmount": currencyAmount,
-                                                            "tokenPrecision": tokenPrecision,
-                                                            "tokenAddress": tokenAddress,
+                                                            "tokenSymbol": token_symbol,
+                                                            "tokenLogo": token_logo,
+                                                            "coinAmount": coin_amount,
+                                                            "currencyAmount": currency_amount,
+                                                            "tokenPrecision": token_precision,
+                                                            "tokenAddress": token_address,
                                                             "network": network,
                                                         }
                                                     )
+
+                                                # 处理未认领的手续费信息
+                                                unclaim_fees = lp_position.get(
+                                                    "unclaimFeesDefiTokenInfo", []
+                                                )
+                                                if unclaim_fees:
+                                                    for unclaim_fee in unclaim_fees:
+                                                        base_tokens = unclaim_fee.get(
+                                                            "baseDefiTokenInfos", []
+                                                        )
+                                                        fee_currency_amount = (
+                                                            unclaim_fee.get(
+                                                                "currencyAmount", 0
+                                                            )
+                                                        )
+
+                                                        for token in base_tokens:
+                                                            token_symbol = token.get(
+                                                                "tokenSymbol", ""
+                                                            )
+                                                            token_logo = token.get(
+                                                                "tokenLogo", ""
+                                                            )
+                                                            coin_amount = token.get(
+                                                                "coinAmount", ""
+                                                            )
+                                                            token_currency_amount = (
+                                                                token.get(
+                                                                    "currencyAmount", ""
+                                                                )
+                                                            )
+                                                            token_precision = token.get(
+                                                                "tokenPrecision", ""
+                                                            )
+                                                            token_address = token.get(
+                                                                "tokenAddress", ""
+                                                            )
+                                                            network = token.get(
+                                                                "network", ""
+                                                            )
+
+                                                            token_list.append(
+                                                                {
+                                                                    "tokenSymbol": token_symbol,
+                                                                    "tokenLogo": token_logo,
+                                                                    "coinAmount": coin_amount,
+                                                                    "currencyAmount": token_currency_amount,
+                                                                    "tokenPrecision": token_precision,
+                                                                    "tokenAddress": token_address,
+                                                                    "network": network,
+                                                                    "feeType": "unclaimed",
+                                                                }
+                                                            )
+
+                                                # 创建LP位置对象
+                                                lp_asset = PlatformAsset(
+                                                    protocol=platform_name,
+                                                    asset=position_name,
+                                                    tokenList=token_list,
+                                                    amount=lp_total_value,
+                                                    invest_type=invest_type,
+                                                    apy=None,
+                                                )
+
+                                                # 添加Uniswap V4特定元数据
+                                                lp_asset.metadata = {
+                                                    "range_info": range_info,
+                                                    "position_status": position_status,
+                                                    "token_id": token_id,
+                                                    "parent_asset": investment_name,
+                                                }
+
+                                                # 添加到平台头寸列表
+                                                platform_assets[platform_name][
+                                                    "positions"
+                                                ].append(lp_asset)
                                         else:
+                                            # 非流动性池资产处理（保持原来的逻辑）
                                             assets = invest_token.get(
                                                 "assetsTokenList", []
                                             )
@@ -883,15 +1104,17 @@ class BlockchainService:
                                                 "total_debts"
                                             ] += total_value
 
-                                        # 添加到平台头寸列表
+                                        # 添加到平台头寸列表（仅对非流动性池的资产）
                                         platform_assets[platform_name][
                                             "positions"
                                         ].append(position)
                             # 计算每个平台的杠杆率
-                            total_assets = platform_assets[platform_name][
-                                "total_assets"
-                            ]
-                            total_debts = platform_assets[platform_name]["total_debts"]
+                            total_assets = float(
+                                platform_assets[platform_name]["total_assets"]
+                            )
+                            total_debts = float(
+                                platform_assets[platform_name]["total_debts"]
+                            )
                             leverage = (
                                 total_assets / (total_assets - total_debts)
                                 if total_debts < total_assets and total_assets > 0
@@ -1006,47 +1229,38 @@ class BlockchainService:
         return await self._get_coingecko_24h_data(asset)
 
     def _normalize_asset_symbol(self, asset: str, format: str = "binance") -> str:
-        """
-        标准化资产名称符号
+        """将资产符号标准化为指定格式"""
+        if not asset:
+            return ""
 
-        Args:
-            asset: 资产名称或代币符号
-            format: 输出格式，可选 'binance' 或 'coingecko'
+        # 1. 去除空白字符并转为大写
+        asset = asset.strip().upper()
 
-        Returns:
-            str: 标准化后的符号
-        """
+        # 2. 标准化常见前缀/后缀
+        if format.lower() == "binance":
+            # Binance格式 - 去除USD, USDT等后缀
+            for suffix in ["USD", "USDT", "BUSD", "USDC", "DAI"]:
+                if asset.endswith(suffix) and len(asset) > len(suffix):
+                    asset = asset[: -len(suffix)]
+        elif format.lower() == "coingecko":
+            # CoinGecko通常使用全小写格式
+            return asset.lower()
 
-        asset = asset.strip()
+        # 3. 处理特殊符号
+        asset = asset.replace("-", "").replace("_", "")
 
-        # 处理常见的代币前缀
-        # 移除 "st" 前缀（质押代币）
-        if asset.lower().startswith("st") and len(asset) > 2:
-            # 确保是前缀而不是代币名称本身的一部分
-            self.logger.info(f"移除质押代币前缀: {asset} -> {asset[2:]}")
-            return asset[2:]
-
-        # 其他常见 DeFi 前缀处理
-        prefixes = {
-            "c": "compound ",  # Compound 代币
-            "a": "aave ",  # Aave 代币
-            "x": "x",  # 合成代币
-            "v": "v",  # 某些版本代币
-            "b": "b",  # 代表"Bridge"或"Binance"上的代币
-            "f": "frax ",  # Frax Finance 代币
+        # 4. 处理特殊代币的别名
+        aliases = {
+            "BTC": "BTC",
+            "ETH": "ETH",
+            "XBT": "BTC",
+            "WBTC": "BTC",
+            "WETH": "ETH",
+            "BETH": "ETH",
         }
+        if asset in aliases:
+            return aliases[asset]
 
-        for prefix, full_name in prefixes.items():
-            if (
-                asset.lower().startswith(prefix)
-                and len(asset) > 1
-                and asset[1].isupper()
-            ):
-                # 这里我们不移除前缀，而是记录映射关系
-                self.logger.debug(f"识别到 {full_name.strip()} 代币: {asset}")
-                break
-
-        # 对于 Coingecko 格式，我们直接返回处理后的结果，不添加交易对后缀
         return asset
 
     async def get_asset_historical_data(self, asset: str) -> Optional[pd.DataFrame]:
@@ -1652,10 +1866,7 @@ class BlockchainService:
     async def get_wallet_alerts(
         self, wallet_address: str, positions: List[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
-        """
-        获取钱包相关的警报，使用CoinGecko数据增强风险分析.
-        Refactored for parallel data fetching and modular alert generation.
-        """
+        """获取钱包相关的警报"""
         self.logger.info(f"开始为钱包 {wallet_address} 获取警报 (已重构)")
         start_time = time.time()
 
@@ -1672,6 +1883,7 @@ class BlockchainService:
             assets_value_map: Dict[str, float] = {}  # 资产 -> 总价值 映射
             protocols: set[str] = set()  # 协议集合
             position_details: List[Dict] = []  # 存储所有头寸的详细信息
+            pool_data: Dict[str, Dict] = {}  # 存储流动性池数据
 
             for position_info in positions:
                 # 兼容旧格式和OKX返回的格式
@@ -1680,6 +1892,22 @@ class BlockchainService:
                 platform_leverage = float(
                     position_info.get("leverage", 1.0)
                 )  # Use 1.0 if leverage not present
+
+                # 如果是DEX协议，获取池子数据
+                if self._is_dex_protocol(protocol):
+                    for pos in platform_positions:
+                        if isinstance(pos, dict):
+                            pool_name = pos.get("pool_name", "")
+                            if pool_name:
+                                try:
+                                    pool_info = await self.get_pool_info(
+                                        protocol, pool_name
+                                    )
+                                    if pool_info:
+                                        pool_data[pool_name] = pool_info
+                                except Exception as e:
+                                    self.logger.error(f"获取池子数据失败: {str(e)}")
+
                 # Ensure protocol is a valid string
                 if (
                     not isinstance(protocol, str)
@@ -1756,6 +1984,11 @@ class BlockchainService:
                             "leverage": leverage,
                             "apy": apy,
                             "invest_type": invest_type,
+                            "pool_name": (
+                                pos.get("pool_name", "")
+                                if isinstance(pos, dict)
+                                else ""
+                            ),
                         }
                     )
 
@@ -1842,6 +2075,10 @@ class BlockchainService:
             )
             all_alerts.extend(
                 await self._generate_stablecoin_depeg_alerts(asset_data_24h)
+            )
+            # 添加DEX特定警报
+            all_alerts.extend(
+                await self._generate_dex_alerts(position_details, pool_data)
             )
 
             alerts_generation_duration = time.time() - alerts_generation_start_time
@@ -2141,10 +2378,14 @@ class BlockchainService:
                     "low_price": market_data.get("low_24h", {}).get("usd", 0),
                     "volume": market_data.get("total_volume", {}).get("usd", 0),
                     "market_cap": market_data.get("market_cap", {}).get("usd", 0),
+                    "market_cap_rank": market_data.get("market_cap_rank", 0),
                     "volatility": abs(
                         market_data.get("price_change_percentage_24h", 0)
                     ),
                     "last_updated": data.get("last_updated", ""),
+                    "categories": data.get("categories", []),
+                    "asset_platform_id": data.get("asset_platform_id", None),
+                    "contract_address": data.get("contract_address", None),
                 }
 
                 # 将结果存入缓存
@@ -2212,40 +2453,102 @@ class BlockchainService:
             price_ma7 = historical_data["price"].rolling(window=7).mean().iloc[-1]
             price_ma30 = historical_data["price"].rolling(window=30).mean().iloc[-1]
 
-            # 5. 计算风险评分
+            # 5. 类别分析 - 新增
+            categories = data_24h.get("categories", [])
+            asset_platform_id = data_24h.get("asset_platform_id")
+
+            # 6. 合约相关风险 - 新增
+            contract_address = data_24h.get("contract_address")
+            has_contract = bool(contract_address)
+
+            # 计算风险评分
             risk_score = 0
             max_score = 100
 
-            # 市值风险 (30分)
+            # 市值风险 (25分)
+            market_cap_score = 0
             if market_cap > 10000000000:  # > 100亿
-                risk_score += 30
+                market_cap_score = 25
             elif market_cap > 1000000000:  # > 10亿
-                risk_score += 20
+                market_cap_score = 20
             elif market_cap > 100000000:  # > 1亿
-                risk_score += 10
+                market_cap_score = 15
+            elif market_cap > 10000000:  # > 1000万
+                market_cap_score = 10
+            elif market_cap > 1000000:  # > 100万
+                market_cap_score = 5
+            risk_score += market_cap_score
 
             # 流动性风险 (20分)
+            liquidity_score = 0
             if volume_to_mcap_ratio > 0.1:  # 日交易量超过市值的10%
-                risk_score += 20
+                liquidity_score = 20
             elif volume_to_mcap_ratio > 0.05:  # 日交易量超过市值的5%
-                risk_score += 10
+                liquidity_score = 15
+            elif volume_to_mcap_ratio > 0.02:  # 日交易量超过市值的2%
+                liquidity_score = 10
+            elif volume_to_mcap_ratio > 0.01:  # 日交易量超过市值的1%
+                liquidity_score = 5
+            risk_score += liquidity_score
 
             # 波动性风险 (20分)
+            volatility_score = 0
             if price_volatility < 5:  # 波动率小于5%
-                risk_score += 20
+                volatility_score = 20
             elif price_volatility < 10:  # 波动率小于10%
-                risk_score += 10
+                volatility_score = 15
+            elif price_volatility < 15:  # 波动率小于15%
+                volatility_score = 10
+            elif price_volatility < 20:  # 波动率小于20%
+                volatility_score = 5
+            risk_score += volatility_score
 
-            # 趋势风险 (30分)
+            # 趋势风险 (15分)
+            trend_score = 0
             if current_price > price_ma7 > price_ma30:  # 上升趋势
-                risk_score += 30
+                trend_score = 15
             elif current_price > price_ma7:  # 短期上升
-                risk_score += 20
+                trend_score = 10
             elif current_price > price_ma30:  # 长期上升
-                risk_score += 10
+                trend_score = 5
+            risk_score += trend_score
+
+            # 类别和平台风险 (10分) - 新增
+            category_score = 0
+            high_risk_categories = ["Privacy", "Gambling", "Meme"]
+            medium_risk_categories = ["DeFi", "NFT", "Gaming"]
+            low_risk_categories = [
+                "Smart Contract Platform",
+                "Infrastructure",
+                "Ethereum Ecosystem",
+            ]
+
+            if any(category in high_risk_categories for category in categories):
+                category_score = 0  # 高风险类别
+            elif any(category in medium_risk_categories for category in categories):
+                category_score = 5  # 中风险类别
+            elif any(category in low_risk_categories for category in categories):
+                category_score = 10  # 低风险类别
+
+            # 增加平台因素
+            if asset_platform_id in ["ethereum", "bitcoin", "binance-smart-chain"]:
+                category_score += 0  # 主流平台不加分
+            else:
+                category_score = max(0, category_score - 5)  # 非主流平台减分
+
+            risk_score += category_score
+
+            # 智能合约和技术风险 (10分) - 新增
+            technology_score = 0
+            if "Zero Knowledge (ZK)" in categories:
+                technology_score += 5  # ZK技术相对成熟且安全
+            if "Smart Contract Platform" in categories:
+                technology_score += 5  # 智能合约平台通常经过更多审计
+
+            risk_score += technology_score
 
             # 确定风险等级
-            risk_level = "高风险"
+            risk_level = "极高风险"
             if risk_score >= 80:
                 risk_level = "低风险"
             elif risk_score >= 60:
@@ -2254,6 +2557,18 @@ class BlockchainService:
                 risk_level = "中等风险"
             elif risk_score >= 20:
                 risk_level = "中高风险"
+
+            # 生成风险建议
+            recommendations = self._generate_risk_recommendations(
+                risk_score,
+                {
+                    "market_cap": market_cap,
+                    "volume_to_mcap_ratio": volume_to_mcap_ratio,
+                    "price_volatility": price_volatility,
+                    "categories": categories,
+                    "platform": asset_platform_id,
+                },
+            )
 
             return RiskAnalysisResult(
                 asset_id=asset,
@@ -2269,34 +2584,34 @@ class BlockchainService:
                     market_cap_analysis=f"市值{market_cap:,.0f}美元，排名第{market_cap_rank}位",
                     liquidity_analysis=f"日交易量/市值比率{volume_to_mcap_ratio:.2%}",
                     volatility_analysis=f"价格波动率{price_volatility:.2f}%",
-                    trend_analysis=(
-                        "上升趋势" if current_price > price_ma7 else "下降趋势"
+                    trend_analysis=f"当前价格 vs 7日均价: {(current_price/price_ma7-1)*100:.2f}%, vs 30日均价: {(current_price/price_ma30-1)*100:.2f}%",
+                    tvl_factor=None,
+                    stability_factor=f"市值评分: {market_cap_score}/25, 流动性评分: {liquidity_score}/20, 波动性评分: {volatility_score}/20, 趋势评分: {trend_score}/15",
+                    category_factor=(
+                        f"类别: {', '.join(categories)}" if categories else None
+                    ),
+                    chain_factor=(
+                        f"所在区块链: {asset_platform_id}"
+                        if asset_platform_id
+                        else None
                     ),
                 ),
-                recommendations=self._generate_risk_recommendations(
-                    risk_score,
-                    {
-                        "price_volatility": price_volatility,
-                        "market_cap": market_cap,
-                        "market_cap_rank": market_cap_rank,
-                        "volume_to_mcap_ratio": volume_to_mcap_ratio,
-                        "price_trend": {
-                            "current": current_price,
-                            "ma7": price_ma7,
-                            "ma30": price_ma30,
-                        },
-                    },
-                ),
+                recommendations=recommendations,
+                raw_data=data_24h,
             )
         except Exception as e:
-            self.logger.error(f"分析资产{asset}风险时出错: {str(e)}")
+            error_msg = f"分析资产风险时发生错误: {str(e)}"
+            self.logger.error(error_msg)
+            import traceback
+
+            self.logger.error(traceback.format_exc())
             return RiskAnalysisResult(
                 asset_id=asset,
                 risk_score=0,
                 risk_level="未知",
                 metrics=RiskMetrics(),
                 analysis=RiskAnalysis(),
-                error=f"风险分析失败: {str(e)}",
+                error=error_msg,
             )
 
     def _generate_risk_recommendations(
@@ -2308,22 +2623,66 @@ class BlockchainService:
         recommendations = []
 
         # 基于市值
-        if metrics.get("market_cap", 0) < 100000000:  # < 1亿
+        market_cap = metrics.get("market_cap", 0)
+        if market_cap < 100000000:  # < 1亿
             recommendations.append("市值较小，建议控制仓位")
+        if market_cap < 10000000:  # < 1000万
+            recommendations.append(
+                "微小市值代币，极高波动风险，建议限制投资比例不超过总资产的5%"
+            )
 
         # 基于流动性
-        if metrics.get("volume_to_mcap_ratio", 0) < 0.01:
+        volume_to_mcap_ratio = metrics.get("volume_to_mcap_ratio", 0)
+        if volume_to_mcap_ratio < 0.01:
             recommendations.append("流动性较低，建议关注交易风险")
+        if volume_to_mcap_ratio < 0.005:
+            recommendations.append("极低流动性，大额交易可能导致严重滑点，建议分批交易")
 
         # 基于波动性
-        if metrics.get("price_volatility", 0) > 10:
+        price_volatility = metrics.get("price_volatility", 0)
+        if price_volatility > 20:
+            recommendations.append("价格极度波动，建议使用限价单并设置严格止损")
+        elif price_volatility > 10:
             recommendations.append("价格波动较大，建议设置止损")
 
-        # 基于趋势
-        if metrics.get("price_trend", {}).get("current", 0) < metrics.get(
-            "price_trend", {}
-        ).get("ma30", 0):
-            recommendations.append("处于下降趋势，建议谨慎操作")
+        # 基于趋势 - 兼容新旧格式
+        if isinstance(metrics.get("price_trend", {}), dict):
+            current_price = metrics.get("price_trend", {}).get("current", 0)
+            ma30 = metrics.get("price_trend", {}).get("ma30", 0)
+            if current_price < ma30:
+                recommendations.append("处于下降趋势，建议谨慎操作")
+
+        # 基于代币类别 - 新增
+        categories = metrics.get("categories", [])
+        if "Privacy" in categories:
+            recommendations.append("隐私类代币可能面临监管风险，建议关注相关法规发展")
+
+        if "Zero Knowledge (ZK)" in categories:
+            recommendations.append(
+                "零知识证明技术的应用仍在早期阶段，技术风险和应用场景值得关注"
+            )
+
+        if "Smart Contract Platform" in categories:
+            recommendations.append(
+                "智能合约平台代币价值与平台生态发展紧密相关，建议关注开发者活跃度和DApp数量"
+            )
+
+        # 基于代币平台 - 新增
+        platform = metrics.get("platform")
+        if platform and platform not in ["ethereum", "bitcoin", "binance-smart-chain"]:
+            recommendations.append(
+                f"该代币基于{platform}链，可能存在跨链兼容性和流动性风险"
+            )
+
+        # 根据风险评分提供综合建议
+        if risk_score < 40:
+            recommendations.append(
+                "综合风险评分较低，此类资产适合作为投资组合的高风险部分，建议控制仓位"
+            )
+        elif risk_score < 20:
+            recommendations.append(
+                "综合风险评分极低，此类资产属于高投机性质，建议仅使用少量资金尝试性投资"
+            )
 
         return recommendations
 
@@ -2475,6 +2834,31 @@ class BlockchainService:
         try:
             self.logger.info(f"获取{asset}的市场趋势数据")
 
+            # 检查是否为Pendle PT或YT代币
+            is_pendle_token = asset.startswith("PT-") or asset.startswith("YT-")
+
+            # 如果是Pendle代币，提取基础资产
+            base_asset = asset
+            if is_pendle_token:
+                # 移除前缀PT-或YT-
+                remaining = asset[3:]
+
+                # 查找最后一个"-"的位置，以分离基础代币和日期部分
+                last_dash_index = remaining.rfind("-")
+
+                if last_dash_index > 0:
+                    # 如果找到了"-"，取其前面的部分作为基础代币
+                    base_asset = remaining[:last_dash_index]
+                    self.logger.info(
+                        f"检测到带日期的Pendle代币 {asset}，将使用基础资产 {base_asset} 获取趋势数据"
+                    )
+                else:
+                    # 如果没有额外的"-"，整个剩余部分就是基础代币
+                    base_asset = remaining
+                    self.logger.info(
+                        f"检测到Pendle代币 {asset}，将使用基础资产 {base_asset} 获取趋势数据"
+                    )
+
             # 检查缓存
             cache_key = f"token_trend_{asset}"
             cache_interval = "1h"  # 1小时缓存
@@ -2484,14 +2868,14 @@ class BlockchainService:
                 self.logger.info(f"从缓存获取{asset}的趋势数据")
                 return cached_data
 
-            # 获取历史数据
-            historical_data = await self.get_asset_historical_data(asset)
+            # 获取历史数据 (对Pendle代币使用基础资产的历史数据)
+            historical_data = await self.get_asset_historical_data(base_asset)
             if historical_data is None or historical_data.empty:
-                self.logger.warning(f"无法获取{asset}的历史数据")
+                self.logger.warning(f"无法获取{base_asset}的历史数据")
                 return None
 
-            # 获取24小时数据
-            data_24h = await self._get_coingecko_24h_data(asset)
+            # 获取24小时数据 (对Pendle代币使用基础资产的24小时数据)
+            data_24h = await self._get_coingecko_24h_data(base_asset)
 
             # 计算趋势指标
             # 1. 计算移动平均线
@@ -2593,6 +2977,18 @@ class BlockchainService:
             # 计算趋势强度（0到1，0表示弱趋势，1表示强趋势）
             trend_strength = abs(trend_direction)
 
+            # 对PT和YT代币进行调整
+            if is_pendle_token:
+                # PT和YT代币的价格波动通常与基础资产相关，但可能有特定特征
+                if asset.startswith("PT-"):
+                    # PT代币通常更稳定，减少趋势强度
+                    trend_strength = trend_strength * 0.7
+                    self.logger.info(f"调整PT代币 {asset} 的趋势强度: {trend_strength}")
+                else:  # YT-
+                    # YT代币通常更波动，可能增加趋势强度
+                    trend_strength = min(1.0, trend_strength * 1.2)
+                    self.logger.info(f"调整YT代币 {asset} 的趋势强度: {trend_strength}")
+
             # 准备返回数据
             trend_data = {
                 "trend_direction": trend_direction,
@@ -2627,6 +3023,8 @@ class BlockchainService:
                 "macd": macd_value,
                 "macd_signal": macd_signal,
                 "macd_histogram": macd_hist,
+                "is_derived_data": is_pendle_token,  # 标记是否为派生数据
+                "base_asset": base_asset if is_pendle_token else None,  # 记录基础资产
             }
 
             # 将结果存入缓存
@@ -2661,6 +3059,31 @@ class BlockchainService:
         try:
             self.logger.info(f"获取{asset}的历史价格数据")
 
+            # 检查是否为Pendle PT或YT代币
+            is_pendle_token = asset.startswith("PT-") or asset.startswith("YT-")
+
+            # 如果是Pendle代币，提取基础资产
+            base_asset = asset
+            if is_pendle_token:
+                # 移除前缀PT-或YT-
+                remaining = asset[3:]
+
+                # 查找最后一个"-"的位置，以分离基础代币和日期部分
+                last_dash_index = remaining.rfind("-")
+
+                if last_dash_index > 0:
+                    # 如果找到了"-"，取其前面的部分作为基础代币
+                    base_asset = remaining[:last_dash_index]
+                    self.logger.info(
+                        f"检测到带日期的Pendle代币 {asset}，将使用基础资产 {base_asset} 获取历史价格数据"
+                    )
+                else:
+                    # 如果没有额外的"-"，整个剩余部分就是基础代币
+                    base_asset = remaining
+                    self.logger.info(
+                        f"检测到Pendle代币 {asset}，将使用基础资产 {base_asset} 获取历史价格数据"
+                    )
+
             # 检查缓存
             cache_key = f"token_historical_prices_{asset}_{days}"
             cache_interval = "1h"  # 1小时缓存
@@ -2670,23 +3093,38 @@ class BlockchainService:
                 self.logger.info(f"从缓存获取{asset}的历史价格数据")
                 return cached_data
 
-            # 使用get_asset_historical_data获取历史数据
-            historical_data = await self.get_asset_historical_data(asset)
+            # 使用get_asset_historical_data获取历史数据 (对Pendle代币使用基础资产)
+            historical_data = await self.get_asset_historical_data(base_asset)
 
             if historical_data is None or historical_data.empty:
-                self.logger.warning(f"无法获取{asset}的历史数据")
+                self.logger.warning(f"无法获取{base_asset}的历史数据")
                 return None
 
             # 限制数据点数量
             if len(historical_data) > days:
                 historical_data = historical_data.tail(days)
 
+            # 为PT或YT代币调整价格
+            if is_pendle_token:
+                price_adjustment = 0.85 if asset.startswith("PT-") else 0.15
+                self.logger.info(f"对{asset}的历史价格应用{price_adjustment}的调整系数")
+
+                # 创建副本以避免修改原始数据
+                adjusted_data = historical_data.copy()
+                adjusted_data["price"] = adjusted_data["price"] * price_adjustment
+                historical_data = adjusted_data
+
             # 转换为需要的格式
             dates = historical_data["timestamp"].dt.strftime("%Y-%m-%d").tolist()
             prices = historical_data["price"].tolist()
 
             # 准备返回数据
-            price_data = {"dates": dates, "prices": prices}
+            price_data = {
+                "dates": dates,
+                "prices": prices,
+                "is_derived_data": is_pendle_token,  # 标记是否为派生数据
+                "base_asset": base_asset if is_pendle_token else None,  # 记录基础资产
+            }
 
             # 存入缓存
             self.historical_data_cache.set(cache_key, price_data, cache_interval)
@@ -2710,6 +3148,31 @@ class BlockchainService:
         try:
             self.logger.info(f"获取{asset}的流动性数据")
 
+            # 检查是否为Pendle PT或YT代币
+            is_pendle_token = asset.startswith("PT-") or asset.startswith("YT-")
+
+            # 如果是Pendle代币，提取基础资产
+            base_asset = asset
+            if is_pendle_token:
+                # 移除前缀PT-或YT-
+                remaining = asset[3:]
+
+                # 查找最后一个"-"的位置，以分离基础代币和日期部分
+                last_dash_index = remaining.rfind("-")
+
+                if last_dash_index > 0:
+                    # 如果找到了"-"，取其前面的部分作为基础代币
+                    base_asset = remaining[:last_dash_index]
+                    self.logger.info(
+                        f"检测到带日期的Pendle代币 {asset}，将使用基础资产 {base_asset} 获取流动性数据"
+                    )
+                else:
+                    # 如果没有额外的"-"，整个剩余部分就是基础代币
+                    base_asset = remaining
+                    self.logger.info(
+                        f"检测到Pendle代币 {asset}，将使用基础资产 {base_asset} 获取流动性数据"
+                    )
+
             # 检查缓存
             cache_key = f"asset_liquidity_{asset}"
             cache_interval = "15m"  # 15分钟缓存
@@ -2720,29 +3183,46 @@ class BlockchainService:
                 return cached_data
 
             # 使用_get_coingecko_24h_data获取市场数据
-            market_data = await self._get_coingecko_24h_data(asset)
+            market_data = await self._get_coingecko_24h_data(base_asset)
 
             if market_data is None:
-                self.logger.warning(f"无法获取{asset}的市场数据")
+                self.logger.warning(f"无法获取{base_asset}的市场数据")
                 return None
 
-            # 提取流动性相关数据
+            # 为PT或YT代币调整流动性数据
+            if is_pendle_token:
+                # 对于PT和YT代币，流动性通常低于基础资产
+                market_data = market_data.copy()
+
+                # 估算PT和YT代币的流动性比例
+                liquidity_factor = 0.3 if asset.startswith("PT-") else 0.1
+                self.logger.info(
+                    f"对{asset}的流动性数据应用{liquidity_factor}的调整系数"
+                )
+
+                # 调整交易量和市值
+                market_data["volume"] = market_data.get("volume", 0) * liquidity_factor
+                market_data["market_cap"] = (
+                    market_data.get("market_cap", 0) * liquidity_factor
+                )
+
+                # 添加标记
+                market_data["is_derived_data"] = True
+                market_data["base_asset"] = base_asset
+
+            # 准备返回数据
             liquidity_data = {
                 "volume_24h": market_data.get("volume", 0),
                 "market_cap": market_data.get("market_cap", 0),
-                "volume_to_mcap_ratio": 0.0,
                 "price": market_data.get("price", 0),
-                "price_change_24h": market_data.get("price_change_percent", 0),
-                "last_updated": market_data.get("last_updated", ""),
+                "liquidity_score": self.calculate_liquidity_score(
+                    market_data.get("volume", 0), market_data.get("market_cap", 0)
+                ),
+                "is_derived_data": is_pendle_token,
+                "base_asset": base_asset if is_pendle_token else None,
             }
 
-            # 计算交易量/市值比率
-            if liquidity_data["market_cap"] > 0:
-                liquidity_data["volume_to_mcap_ratio"] = (
-                    liquidity_data["volume_24h"] / liquidity_data["market_cap"]
-                )
-
-            # 存入缓存
+            # 将结果存入缓存
             self.historical_data_cache.set(cache_key, liquidity_data, cache_interval)
 
             return liquidity_data
@@ -2750,6 +3230,39 @@ class BlockchainService:
         except Exception as e:
             self.logger.error(f"获取{asset}的流动性数据失败: {str(e)}")
             return None
+
+    # 辅助函数：计算流动性评分
+    def calculate_liquidity_score(self, volume_24h: float, market_cap: float) -> int:
+        """
+        根据24小时交易量和市值计算流动性评分（0-100）
+
+        Args:
+            volume_24h: 24小时交易量
+            market_cap: 市值
+
+        Returns:
+            int: 流动性评分（0-100），0为最差，100为最佳
+        """
+        try:
+            if market_cap <= 0:
+                return 0
+
+            # 计算交易量/市值比率
+            volume_to_mcap = volume_24h / market_cap
+
+            # 将比率转换为分数
+            if volume_to_mcap <= 0:
+                return 0
+            elif volume_to_mcap < 0.01:  # 交易量小于市值的1%，低流动性
+                return int(volume_to_mcap * 2000)  # 0-20分
+            elif volume_to_mcap < 0.05:  # 交易量小于市值的5%，中等流动性
+                return int(20 + (volume_to_mcap - 0.01) * 1000)  # 20-60分
+            elif volume_to_mcap < 0.1:  # 交易量小于市值的10%，良好流动性
+                return int(60 + (volume_to_mcap - 0.05) * 800)  # 60-100分
+            else:  # 交易量大于市值的10%，极佳流动性
+                return 100
+        except:
+            return 50  # 出错返回中等评分
 
     def _init_api_clients(self):
         """初始化API客户端"""
@@ -3230,3 +3743,367 @@ class BlockchainService:
                 self.logger.error(f"流动性风险检查：分析{asset}时失败: {str(e)}")
                 # 继续处理下一个资产，不中断流程
         return alerts
+
+    async def _generate_dex_alerts(
+        self, position_details: List[Dict], pool_data: Dict[str, Dict]
+    ) -> List[Dict]:
+        """生成DEX特定警报"""
+        alerts = []
+
+        try:
+            for pos in position_details:
+                # 检查是否是DEX相关头寸
+                if not pos.get("protocol", "").lower() in [
+                    "uniswap",
+                    "sushiswap",
+                    "curve",
+                    "balancer",
+                ]:
+                    continue
+
+                pool_name = pos.get("pool_name", "未知池")
+                asset = pos.get("asset", "unknown")
+                protocol = pos.get("protocol", "unknown")
+
+                # 获取池子数据
+                pool_info = pool_data.get(pool_name, {})
+                if not pool_info:
+                    continue
+
+                # 1. 检查流动性深度
+                total_liquidity = float(pool_info.get("total_liquidity_usd", 0))
+                if total_liquidity < 100000:  # 10万美元阈值
+                    alerts.append(
+                        {
+                            "id": f"low-liquidity-{pool_name}-{int(datetime.now().timestamp())}",
+                            "type": "dex_liquidity",
+                            "severity": "warning",
+                            "protocol": protocol,
+                            "asset": asset,
+                            "message": f"{protocol}上的{pool_name}流动性池深度较低(${total_liquidity:,.2f})，交易可能遇到较大滑点",
+                            "timestamp": datetime.now().isoformat(),
+                            "details": {
+                                "pool_name": pool_name,
+                                "total_liquidity": total_liquidity,
+                                "threshold": 100000,
+                                "recommendation": "建议限制交易规模或选择流动性更充足的池子",
+                            },
+                        }
+                    )
+
+                # 2. 检查价格影响
+                volume_24h = float(pool_info.get("volume_24h", 0))
+                if total_liquidity > 0:
+                    price_impact = volume_24h / (total_liquidity * 100)
+                    if price_impact > 0.01:  # 1%阈值
+                        alerts.append(
+                            {
+                                "id": f"high-impact-{pool_name}-{int(datetime.now().timestamp())}",
+                                "type": "dex_price_impact",
+                                "severity": "warning",
+                                "protocol": protocol,
+                                "asset": asset,
+                                "message": f"{protocol}上的{pool_name}预期价格影响较大({price_impact:.2%})，建议谨慎交易",
+                                "timestamp": datetime.now().isoformat(),
+                                "details": {
+                                    "pool_name": pool_name,
+                                    "price_impact": price_impact,
+                                    "volume_24h": volume_24h,
+                                    "total_liquidity": total_liquidity,
+                                    "recommendation": "建议分批交易或使用限价单",
+                                },
+                            }
+                        )
+
+                # 3. 检查无常损失风险
+                price_volatility = float(pool_info.get("price_volatility", 0))
+                if price_volatility > 0.1:  # 10%波动率阈值
+                    alerts.append(
+                        {
+                            "id": f"il-risk-{pool_name}-{int(datetime.now().timestamp())}",
+                            "type": "dex_impermanent_loss",
+                            "severity": "warning",
+                            "protocol": protocol,
+                            "asset": asset,
+                            "message": f"{protocol}上的{pool_name}存在较高的无常损失风险，价格波动率为{price_volatility:.2%}",
+                            "timestamp": datetime.now().isoformat(),
+                            "details": {
+                                "pool_name": pool_name,
+                                "price_volatility": price_volatility,
+                                "threshold": 0.1,
+                                "recommendation": "注意资产价格波动带来的无常损失风险",
+                            },
+                        }
+                    )
+
+                # 4. 检查流动性集中度
+                lp_positions = pool_info.get("lp_positions", [])
+                if lp_positions:
+                    total_lp = sum(float(lp.get("liquidity", 0)) for lp in lp_positions)
+                    if total_lp > 0:
+                        max_lp_share = (
+                            max(float(lp.get("liquidity", 0)) for lp in lp_positions)
+                            / total_lp
+                        )
+                        if max_lp_share > 0.2:  # 20%集中度阈值
+                            alerts.append(
+                                {
+                                    "id": f"concentration-{pool_name}-{int(datetime.now().timestamp())}",
+                                    "type": "dex_concentration",
+                                    "severity": "warning",
+                                    "protocol": protocol,
+                                    "asset": asset,
+                                    "message": f"{protocol}上的{pool_name}流动性过度集中，最大LP占比为{max_lp_share:.2%}",
+                                    "timestamp": datetime.now().isoformat(),
+                                    "details": {
+                                        "pool_name": pool_name,
+                                        "max_lp_share": max_lp_share,
+                                        "threshold": 0.2,
+                                        "recommendation": "注意流动性集中可能带来的操纵风险",
+                                    },
+                                }
+                            )
+
+        except Exception as e:
+            self.logger.error(f"生成DEX警报时出错: {str(e)}")
+
+        return alerts
+
+    async def get_pool_info(self, protocol: str, pool_name: str) -> Optional[Dict]:
+        """获取流动性池信息"""
+        try:
+            # 从缓存中获取数据
+            cache_key = f"pool_info_{protocol}_{pool_name}"
+            cached_data = self.analysis_cache.get(cache_key)
+            if cached_data:
+                return cached_data
+
+            # 标准化协议名称
+            normalized_protocol = self._normalize_dex_protocol_name(protocol)
+
+            # 根据不同的协议获取数据
+            if normalized_protocol == "uniswap":
+                pool_info = await self._get_uniswap_pool_info(pool_name)
+            elif normalized_protocol == "sushiswap":
+                pool_info = await self._get_sushiswap_pool_info(pool_name)
+            elif normalized_protocol == "curve":
+                pool_info = await self._get_curve_pool_info(pool_name)
+            elif normalized_protocol == "balancer":
+                pool_info = await self._get_balancer_pool_info(pool_name)
+            elif normalized_protocol == "pancakeswap":
+                pool_info = await self._get_pancakeswap_pool_info(pool_name)
+            elif normalized_protocol == "traderjoe":
+                pool_info = await self._get_traderjoe_pool_info(pool_name)
+            else:
+                self.logger.warning(f"不支持的DEX协议: {protocol}")
+                return None
+
+            if pool_info:
+                # 缓存数据
+                self.analysis_cache[cache_key] = pool_info
+                return pool_info
+
+            return None
+
+        except Exception as e:
+            self.logger.error(f"获取池子信息时出错: {str(e)}")
+            return None
+
+    async def _get_uniswap_pool_info(self, pool_name: str) -> Optional[Dict]:
+        """获取Uniswap池子信息"""
+        try:
+            # 使用Graph API获取池子数据
+            query = (
+                """
+            {
+              pool(id: "%s") {
+                totalValueLockedUSD
+                volumeUSD
+                token0Price
+                token1Price
+                token0 {
+                  symbol
+                  decimals
+                }
+                token1 {
+                  symbol
+                  decimals
+                }
+                liquidityProviderCount
+                liquidityPositions(first: 100, orderBy: liquidityTokenBalance, orderDirection: desc) {
+                  liquidityTokenBalance
+                }
+              }
+            }
+            """
+                % pool_name
+            )
+
+            # 这里需要实现实际的Graph API调用
+            # 示例数据结构
+            pool_data = {
+                "total_liquidity_usd": 1000000,  # 示例数据
+                "volume_24h": 500000,
+                "price_volatility": 0.05,
+                "lp_positions": [
+                    {"liquidity": 100000},
+                    {"liquidity": 50000},
+                    {"liquidity": 25000},
+                ],
+            }
+
+            return pool_data
+
+        except Exception as e:
+            self.logger.error(f"获取Uniswap池子信息时出错: {str(e)}")
+            return None
+
+    async def _get_sushiswap_pool_info(self, pool_name: str) -> Optional[Dict]:
+        """获取SushiSwap池子信息"""
+        try:
+            # 实现SushiSwap特定的数据获取逻辑
+            # 示例数据结构
+            pool_data = {
+                "total_liquidity_usd": 800000,  # 示例数据
+                "volume_24h": 400000,
+                "price_volatility": 0.06,
+                "lp_positions": [
+                    {"liquidity": 80000},
+                    {"liquidity": 40000},
+                    {"liquidity": 20000},
+                ],
+            }
+
+            return pool_data
+
+        except Exception as e:
+            self.logger.error(f"获取SushiSwap池子信息时出错: {str(e)}")
+            return None
+
+    async def _get_curve_pool_info(self, pool_name: str) -> Optional[Dict]:
+        """获取Curve池子信息"""
+        try:
+            # 实现Curve特定的数据获取逻辑
+            # 示例数据结构
+            pool_data = {
+                "total_liquidity_usd": 1500000,  # 示例数据
+                "volume_24h": 750000,
+                "price_volatility": 0.02,
+                "lp_positions": [
+                    {"liquidity": 150000},
+                    {"liquidity": 75000},
+                    {"liquidity": 37500},
+                ],
+            }
+
+            return pool_data
+
+        except Exception as e:
+            self.logger.error(f"获取Curve池子信息时出错: {str(e)}")
+            return None
+
+    async def _get_balancer_pool_info(self, pool_name: str) -> Optional[Dict]:
+        """获取Balancer池子信息"""
+        try:
+            # 实现Balancer特定的数据获取逻辑
+            # 示例数据结构
+            pool_data = {
+                "total_liquidity_usd": 1200000,  # 示例数据
+                "volume_24h": 600000,
+                "price_volatility": 0.04,
+                "lp_positions": [
+                    {"liquidity": 120000},
+                    {"liquidity": 60000},
+                    {"liquidity": 30000},
+                ],
+            }
+
+            return pool_data
+
+        except Exception as e:
+            self.logger.error(f"获取Balancer池子信息时出错: {str(e)}")
+            return None
+
+    async def _get_pancakeswap_pool_info(self, pool_name: str) -> Optional[Dict]:
+        """获取PancakeSwap池子信息"""
+        try:
+            # 实现PancakeSwap特定的数据获取逻辑
+            # 示例数据结构
+            pool_data = {
+                "total_liquidity_usd": 1000000,  # 示例数据
+                "volume_24h": 500000,
+                "price_volatility": 0.05,
+                "lp_positions": [
+                    {"liquidity": 100000},
+                    {"liquidity": 50000},
+                    {"liquidity": 25000},
+                ],
+            }
+
+            return pool_data
+
+        except Exception as e:
+            self.logger.error(f"获取PancakeSwap池子信息时出错: {str(e)}")
+            return None
+
+    async def _get_traderjoe_pool_info(self, pool_name: str) -> Optional[Dict]:
+        """获取Trader Joe池子信息"""
+        try:
+            # 实现Trader Joe特定的数据获取逻辑
+            # 示例数据结构
+            pool_data = {
+                "total_liquidity_usd": 800000,  # 示例数据
+                "volume_24h": 400000,
+                "price_volatility": 0.06,
+                "lp_positions": [
+                    {"liquidity": 80000},
+                    {"liquidity": 40000},
+                    {"liquidity": 20000},
+                ],
+            }
+
+            return pool_data
+
+        except Exception as e:
+            self.logger.error(f"获取Trader Joe池子信息时出错: {str(e)}")
+            return None
+
+    def _normalize_dex_protocol_name(self, protocol: str) -> str:
+        """标准化DEX协议名称，处理不同版本的命名"""
+        protocol = protocol.lower().strip()
+
+        # Uniswap系列
+        if protocol.startswith("uniswap"):
+            return "uniswap"
+        # SushiSwap系列
+        elif protocol.startswith("sushiswap"):
+            return "sushiswap"
+        # Curve系列
+        elif protocol.startswith("curve") or protocol == "crv":
+            return "curve"
+        # Balancer系列
+        elif protocol.startswith("balancer"):
+            return "balancer"
+        # PancakeSwap系列
+        elif protocol.startswith("pancakeswap"):
+            return "pancakeswap"
+        # TraderJoe系列
+        elif protocol.startswith("trader joe"):
+            return "traderjoe"
+        # 其他DEX
+        return protocol
+
+    def _is_dex_protocol(self, protocol: str) -> bool:
+        """
+        检查一个协议是否为去中心化交易所(DEX)
+
+        Args:
+            protocol: 协议名称
+
+        Returns:
+            bool: 如果是DEX则返回True，否则返回False
+        """
+        # 标准化协议名称
+        normalized_protocol = self._normalize_dex_protocol_name(protocol)
+        # 检查是否在DEX列表中
+        return normalized_protocol in self.dex_protocols

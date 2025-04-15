@@ -166,6 +166,7 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
             # HHI指数=各实体占比的平方和，范围0-10000，越大表示越集中
 
             assets = {}
+            reward_assets = {}  # 单独跟踪奖励代币
             protocols = {}
             total_value = 0
 
@@ -192,8 +193,10 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                             safe_get(pos, "tokenList", [])
                         )
 
-                        for token in filtered_tokens:
+                        # 处理所有代币，包括奖励代币（为了单独跟踪）
+                        for token in safe_get(pos, "tokenList", []):
                             token_symbol = safe_get(token, "tokenSymbol", "")
+                            token_type = safe_get(token, "tokenType", "")
                             if not token_symbol:
                                 continue
 
@@ -210,10 +213,17 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                                     else 0
                                 )
 
-                            # 累加到资产映射中
-                            if token_symbol not in assets:
-                                assets[token_symbol] = 0
-                            assets[token_symbol] += token_value
+                            # 如果是奖励代币，单独记录
+                            if token_type == "reward":
+                                if token_symbol not in reward_assets:
+                                    reward_assets[token_symbol] = 0
+                                reward_assets[token_symbol] += token_value
+
+                            # 对于过滤后的代币（包括有价值的奖励代币），计入资产映射
+                            if token in filtered_tokens:
+                                if token_symbol not in assets:
+                                    assets[token_symbol] = 0
+                                assets[token_symbol] += token_value
                     else:
                         # 如果没有tokenList，使用资产名称
                         asset = safe_get(pos, "asset", "Unknown").split("/")[
@@ -234,6 +244,11 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
             if not assets:
                 self.logger.warning("没有检测到任何资产，无法分析市场集中度风险")
                 return None
+
+            # 分析奖励代币对市场集中度风险的影响
+            reward_impact = self.analyze_reward_tokens_impact(
+                assets, reward_assets, total_value, "市场集中度风险"
+            )
 
             # 计算风险
             if len(assets) >= 2 and total_value > 0:
@@ -262,6 +277,8 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                             "assets": assets,
                             "total_value": total_value,
                             "protocols": protocols,
+                            "reward_assets": reward_impact.get("valuable_rewards", {}),
+                            "reward_impact": reward_impact,
                             "metrics": {
                                 "asset_count": len(assets),
                                 "protocol_count": len(protocols),
@@ -283,6 +300,10 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                             trend = ai_analysis.get("trend", "稳定")
                             data_points = ai_analysis.get("data_points", [])
 
+                            # 如果奖励代币有显著影响，添加提示
+                            if reward_impact.get("significant_impact", False):
+                                description += f"（注意：奖励代币占总价值的{reward_impact['reward_percentage']:.2f}%，对集中度风险有{reward_impact['impact_level']}影响）"
+
                             return self.create_risk_factor(
                                 risk_type=RiskType.MARKET.value,
                                 factor_name="市场集中度风险",
@@ -300,6 +321,8 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                                         protocol: value / total_value
                                         for protocol, value in protocols.items()
                                     },
+                                    "reward_assets": reward_assets,
+                                    "reward_impact": reward_impact,
                                     "ai_analysis": ai_analysis,
                                 },
                             )

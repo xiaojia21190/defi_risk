@@ -216,10 +216,24 @@ class RiskAnalyzerBase(ABC):
         # 将代币符号转换为小写进行检查
         token_symbol_lower = token_symbol.lower()
 
-        # 检查是否为yt代币或pt代币
-        if "yt" in token_symbol_lower or "pt" in token_symbol_lower:
-            self.logger.info(f"排除代币{token_symbol}，因为它是yt或pt代币")
-            return True
+        # 特殊处理：Pendle V2 的 PT 和 YT 代币不应被排除
+        if token_symbol.startswith("PT-") or token_symbol.startswith("YT-"):
+            self.logger.info(f"不排除 Pendle V2 代币 {token_symbol}")
+            return False
+
+        # 检查是否为其他应被排除的代币类型
+        # 注意：这里不再使用简单的字符串包含检查，而是更精确的模式匹配
+        excluded_patterns = [
+            # 添加需要排除的特定代币模式
+            # 例如可以添加一些测试代币、包装代币等
+        ]
+
+        for pattern in excluded_patterns:
+            if pattern in token_symbol_lower:
+                self.logger.info(
+                    f"排除代币 {token_symbol}，因为它匹配排除模式: {pattern}"
+                )
+                return True
 
         return False
 
@@ -239,18 +253,70 @@ class RiskAnalyzerBase(ABC):
             return []
 
         filtered_tokens = []
+        pendle_reward_tokens = []  # 专门用于存储 Pendle 的奖励代币
+        valuable_reward_tokens = []  # 存储所有有价值的奖励代币
+
         for token in token_list:
-            # 忽略奖励代币
-            if token.get("tokenType") == "reward":
+            token_symbol = token.get("tokenSymbol", "")
+            is_reward = token.get("tokenType") == "reward"
+
+            # 检查代币是否有价值（currencyAmount > 0）
+            has_value = False
+            if token.get("currencyAmount"):
+                try:
+                    currency_amount = float(token.get("currencyAmount", "0"))
+                    has_value = currency_amount > 0
+                except (ValueError, TypeError):
+                    has_value = False
+
+            # Pendle V2 的 PT 和 YT 代币特殊处理
+            is_pendle_token = token_symbol.startswith("PT-") or token_symbol.startswith(
+                "YT-"
+            )
+
+            # 如果是 Pendle 的奖励代币，单独收集
+            if is_reward and is_pendle_token:
+                pendle_reward_tokens.append(token)
                 continue
 
-            token_symbol = token.get("tokenSymbol", "")
+            # 如果是有价值的奖励代币，也单独收集
+            if is_reward and has_value:
+                valuable_reward_tokens.append(token)
+                self.logger.info(
+                    f"收集到有价值的奖励代币 {token_symbol}，价值: {token.get('currencyAmount')}"
+                )
+                # 常规奖励代币还是被排除，但我们已经收集了它们
+                continue
+            # 常规奖励代币仍然被排除
+            elif is_reward and not is_pendle_token:
+                continue
 
             # 检查是否应排除该代币
             if self.is_excluded_token(token_symbol):
                 continue
 
             filtered_tokens.append(token)
+
+        # 检查是否有任何有价值的正常代币
+        has_valuable_normal_tokens = any(
+            float(token.get("currencyAmount", "0")) > 0
+            for token in filtered_tokens
+            if token.get("currencyAmount")
+        )
+
+        # 如果没有常规代币但有 Pendle 奖励代币，则将 Pendle 奖励代币添加到结果中
+        if not filtered_tokens and pendle_reward_tokens:
+            self.logger.info(
+                f"没有常规代币但有 Pendle 奖励代币，将 {len(pendle_reward_tokens)} 个 Pendle 奖励代币添加到风险计算中"
+            )
+            filtered_tokens.extend(pendle_reward_tokens)
+
+        # 如果没有有价值的常规代币但有其他有价值的奖励代币，则将这些奖励代币也添加到结果中
+        if not has_valuable_normal_tokens and valuable_reward_tokens:
+            self.logger.info(
+                f"常规代币没有价值但有 {len(valuable_reward_tokens)} 个有价值的奖励代币，将它们添加到风险计算中"
+            )
+            filtered_tokens.extend(valuable_reward_tokens)
 
         return filtered_tokens
 
@@ -265,3 +331,88 @@ class RiskAnalyzerBase(ABC):
             中文风险类型
         """
         return self.risk_type_map.get(risk_type, risk_type)
+
+    def analyze_reward_tokens_impact(
+        self,
+        assets: Dict[str, float],
+        reward_assets: Dict[str, float],
+        total_value: float,
+        risk_context: str = "风险",
+    ) -> Dict[str, Any]:
+        """
+        分析奖励代币对风险的影响并记录日志
+
+        Args:
+            assets: 资产及其价值的字典
+            reward_assets: 奖励代币及其价值的字典
+            total_value: 投资组合总价值
+            risk_context: 风险上下文描述（如"流动性风险"、"相关性风险"等）
+
+        Returns:
+            包含奖励代币影响分析结果的字典
+        """
+        if not reward_assets:
+            return {
+                "has_reward_tokens": False,
+                "reward_percentage": 0,
+                "reward_tokens_count": 0,
+                "significant_impact": False,
+                "impact_level": "无",
+                "reward_included_in_assets": False,
+            }
+
+        # 筛选有价值的奖励代币
+        valuable_rewards = {
+            symbol: value for symbol, value in reward_assets.items() if value > 0
+        }
+
+        # 计算奖励代币在总价值中的占比
+        reward_total = sum(valuable_rewards.values())
+        reward_percentage = (reward_total / total_value * 100) if total_value > 0 else 0
+
+        # 检查有价值的奖励代币是否已包含在资产列表中
+        reward_included = bool(set(valuable_rewards.keys()) & set(assets.keys()))
+
+        # 确定影响级别
+        impact_level = "低"
+        significant_impact = False
+
+        if reward_percentage > 30:
+            impact_level = "高"
+            significant_impact = True
+        elif reward_percentage > 10:
+            impact_level = "中"
+            significant_impact = True
+
+        # 记录日志
+        if valuable_rewards:
+            if significant_impact:
+                self.logger.warning(
+                    f"奖励代币占总价值的{reward_percentage:.2f}%，对{risk_context}有{impact_level}影响"
+                )
+                for symbol, value in valuable_rewards.items():
+                    percentage = (value / total_value * 100) if total_value > 0 else 0
+                    self.logger.info(
+                        f"奖励代币 {symbol} 价值: {value:.2f}，占比: {percentage:.2f}%"
+                    )
+            else:
+                self.logger.info(
+                    f"奖励代币占总价值的{reward_percentage:.2f}%，对{risk_context}影响较小"
+                )
+
+            if reward_included:
+                self.logger.info("有价值的奖励代币已包含在风险计算中")
+            else:
+                self.logger.warning(
+                    "有价值的奖励代币未包含在风险计算中，可能导致风险评估不完整"
+                )
+
+        return {
+            "has_reward_tokens": bool(valuable_rewards),
+            "reward_percentage": reward_percentage,
+            "reward_tokens_count": len(valuable_rewards),
+            "significant_impact": significant_impact,
+            "impact_level": impact_level,
+            "reward_included_in_assets": reward_included,
+            "valuable_rewards": valuable_rewards,
+        }

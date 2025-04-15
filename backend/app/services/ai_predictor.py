@@ -3705,11 +3705,13 @@ class AiPredictor:
         Args:
             data: 流动性池数据，包含 liquidity_pools 字段，是一个列表，每个元素包含:
                 protocol: 协议名称
-                asset: 资产名称（通常是代币对，如 'ETH/USDC'）
+                asset: 资产名称（通常是代币对，如 'ETH-WBTC'）
                 tokens: 代币列表
                 valid_tokens: 用于风险计算的有效代币列表
                 weight: 在投资组合中的权重
                 amount: 投资金额
+                position_status: 池子状态（如"ACTIVE"或"INACTIVE"）
+                range_info: 价格范围信息（对于Uniswap V4）
 
         Returns:
             Dict: 风险分析结果，包含风险评分、描述、趋势和数据点
@@ -3719,6 +3721,7 @@ class AiPredictor:
 
             # 提取流动性池数据
             liquidity_pools = data.get("liquidity_pools", [])
+            platform = data.get("platform", "Unknown")  # 获取平台信息
 
             if not liquidity_pools:
                 self.logger.warning("未提供流动性池数据，无法分析流动性池风险")
@@ -3743,14 +3746,25 @@ class AiPredictor:
                 weight = pool.get("weight", 0)
                 amount = pool.get("amount", 0)
 
+                # 获取Uniswap V4特定数据
+                position_status = pool.get("position_status", "UNKNOWN")
+                range_info = pool.get("range_info", {})
+
                 # 分析代币组合风险
                 token_risk = self._analyze_token_composition(valid_tokens)
 
                 # 计算基于协议的风险调整（例如，知名协议风险较低）
                 protocol_risk_factor = self._get_protocol_risk_factor(protocol)
 
-                # 计算最终池子风险分数
-                pool_risk = min(100, max(0, token_risk * protocol_risk_factor))
+                # Uniswap V4特定风险调整
+                position_status_risk = self._get_position_status_risk(position_status)
+                price_range_risk = self._get_price_range_risk(range_info)
+
+                # 计算最终池子风险分数，综合考虑代币组成、协议因素、池子状态和价格范围
+                base_risk = token_risk * protocol_risk_factor
+                pool_risk = min(
+                    100, max(0, base_risk * position_status_risk * price_range_risk)
+                )
 
                 # 保存池子风险分数（加权）
                 if weight > 0:
@@ -3758,16 +3772,22 @@ class AiPredictor:
 
                 # 添加数据点
                 token_str = "/".join(tokens) if tokens else asset
-                data_points.append(
-                    {
-                        "protocol": protocol,
-                        "pool": asset,
-                        "tokens": token_str,
-                        "risk_score": pool_risk,
-                        "weight": weight,
-                        "amount": amount,
-                    }
-                )
+                data_point = {
+                    "protocol": protocol,
+                    "pool": asset,
+                    "tokens": token_str,
+                    "risk_score": pool_risk,
+                    "weight": weight,
+                    "amount": amount,
+                }
+
+                # 添加Uniswap V4特定数据
+                if position_status != "UNKNOWN":
+                    data_point["position_status"] = position_status
+                if range_info:
+                    data_point["range_info"] = range_info
+
+                data_points.append(data_point)
 
             # 计算加权平均风险分数
             if pool_risk_scores:
@@ -3790,7 +3810,7 @@ class AiPredictor:
 
             # 生成风险描述
             description = self._generate_liquidity_pool_description(
-                risk_score, data_points
+                risk_score, data_points, platform
             )
 
             # 构建完整分析结果
@@ -3915,7 +3935,7 @@ class AiPredictor:
         return "稳定"
 
     def _generate_liquidity_pool_description(
-        self, risk_score: float, data_points: List[Dict]
+        self, risk_score: float, data_points: List[Dict], platform: str = "Unknown"
     ) -> str:
         """
         生成流动性池风险描述
@@ -3923,27 +3943,88 @@ class AiPredictor:
         Args:
             risk_score: 风险评分
             data_points: 流动性池数据点
+            platform: 平台名称
 
         Returns:
             str: 风险描述
         """
-        # 计算高风险和低风险池子的数量
-        high_risk_pools = [p for p in data_points if p.get("risk_score", 0) > 70]
-        low_risk_pools = [p for p in data_points if p.get("risk_score", 0) < 30]
+        # 统计池子分布情况
         total_pools = len(data_points)
+        if total_pools == 0:
+            return "未检测到流动性池头寸"
 
-        if risk_score >= 80:
-            return f"流动性池组合风险较高，{len(high_risk_pools)}/{total_pools}的池子风险评分超过70分，建议减少高风险池子敞口。"
-        elif risk_score >= 60:
-            return f"流动性池组合风险中等偏高，包含一些高波动性代币池，考虑增加稳定币池比例。"
-        elif risk_score >= 40:
-            return (
+        high_risk_pools = [p for p in data_points if p.get("risk_score", 0) > 70]
+        medium_risk_pools = [
+            p for p in data_points if 30 <= p.get("risk_score", 0) <= 70
+        ]
+        low_risk_pools = [p for p in data_points if p.get("risk_score", 0) < 30]
+
+        # 统计池子状态（针对Uniswap V4）
+        inactive_pools = [
+            p for p in data_points if p.get("position_status", "") == "INACTIVE"
+        ]
+        active_pools = [
+            p for p in data_points if p.get("position_status", "") == "ACTIVE"
+        ]
+
+        is_uniswap_v4 = platform == "Uniswap V4"
+
+        # 根据风险评分生成基础描述
+        if risk_score > 75:
+            description = f"流动性池组合风险较高，{len(high_risk_pools)}/{total_pools}的池子风险评分超过70分，建议减少高风险池子敞口。"
+        elif risk_score > 60:
+            description = f"流动性池组合风险中等偏高，包含一些高波动性代币池，考虑增加稳定币池比例。"
+        elif risk_score > 40:
+            description = (
                 f"流动性池组合风险适中，代币组合相对平衡，继续监控个别高风险池子表现。"
             )
-        elif risk_score >= 20:
-            return f"流动性池组合风险较低，{len(low_risk_pools)}/{total_pools}的池子风险评分低于30分，以稳定币池和蓝筹代币池为主。"
+        elif risk_score > 25:
+            description = f"流动性池组合风险较低，{len(low_risk_pools)}/{total_pools}的池子风险评分低于30分，以稳定币池和蓝筹代币池为主。"
         else:
-            return "流动性池组合风险非常低，主要由稳定币池构成，预期收益和风险都较低。"
+            description = (
+                "流动性池组合风险非常低，主要由稳定币池构成，预期收益和风险都较低。"
+            )
+
+        # 添加Uniswap V4特定描述
+        if is_uniswap_v4 and inactive_pools:
+            description += f" 有{len(inactive_pools)}/{total_pools}的池子处于非活跃状态，这些头寸当前不会产生收益，考虑调整价格范围或移除流动性。"
+
+        # 添加针对Uniswap V4的建议
+        if is_uniswap_v4:
+            # 添加价格范围建议
+            narrow_range_pools = []
+            wide_range_pools = []
+
+            for pool in data_points:
+                range_info = pool.get("range_info", {})
+                try:
+                    lower_price = float(range_info.get("lower_price", 0))
+                    upper_price = float(range_info.get("upper_price", 0))
+                    if lower_price > 0:
+                        price_range_width = (upper_price - lower_price) / lower_price
+                        if price_range_width < 0.01:
+                            narrow_range_pools.append(pool)
+                        elif price_range_width > 10:
+                            wide_range_pools.append(pool)
+                except (ValueError, TypeError, ZeroDivisionError):
+                    pass
+
+            if narrow_range_pools:
+                description += f" 发现{len(narrow_range_pools)}个价格范围极窄的池子，可能容易失去活跃状态，建议适当扩大价格范围。"
+
+            if wide_range_pools:
+                description += f" 发现{len(wide_range_pools)}个价格范围极宽的池子，资本效率可能较低，建议考虑缩小价格范围提高资本效率。"
+
+            # 添加未领取手续费建议
+            has_fees = any(
+                p.get("unclaimed_fees", 0) > 0
+                for p in data_points
+                if "unclaimed_fees" in p
+            )
+            if has_fees:
+                description += " 有未领取的交易手续费，建议及时领取。"
+
+        return description
 
     def _analyze_protocol_security(
         self,
@@ -4945,33 +5026,45 @@ class AiPredictor:
                 "error": str(e),
             }
 
-    def _generate_liquidity_pool_description(
-        self, risk_score: float, data_points: List[Dict]
-    ) -> str:
+    def _get_position_status_risk(self, position_status: str) -> float:
         """
-        生成流动性池风险描述
+        根据池子状态评估风险因子
 
         Args:
-            risk_score: 风险评分
-            data_points: 流动性池数据点
+            position_status: 池子状态
 
         Returns:
-            str: 风险描述
+            float: 风险调整因子
         """
-        # 计算高风险和低风险池子的数量
-        high_risk_pools = [p for p in data_points if p.get("risk_score", 0) > 70]
-        low_risk_pools = [p for p in data_points if p.get("risk_score", 0) < 30]
-        total_pools = len(data_points)
+        if position_status == "INACTIVE":
+            return 1.15  # 增加15%风险
+        return 1.0  # 默认不调整
 
-        if risk_score >= 80:
-            return f"流动性池组合风险较高，{len(high_risk_pools)}/{total_pools}的池子风险评分超过70分，建议减少高风险池子敞口。"
-        elif risk_score >= 60:
-            return f"流动性池组合风险中等偏高，包含一些高波动性代币池，考虑增加稳定币池比例。"
-        elif risk_score >= 40:
-            return (
-                f"流动性池组合风险适中，代币组合相对平衡，继续监控个别高风险池子表现。"
-            )
-        elif risk_score >= 20:
-            return f"流动性池组合风险较低，{len(low_risk_pools)}/{total_pools}的池子风险评分低于30分，以稳定币池和蓝筹代币池为主。"
-        else:
-            return "流动性池组合风险非常低，主要由稳定币池构成，预期收益和风险都较低。"
+    def _get_price_range_risk(self, range_info: Dict[str, Any]) -> float:
+        """
+        根据价格范围评估风险因子
+
+        Args:
+            range_info: 价格范围信息
+
+        Returns:
+            float: 风险调整因子
+        """
+        try:
+            lower_price = float(range_info.get("lower_price", 0))
+            upper_price = float(range_info.get("upper_price", 0))
+
+            if lower_price <= 0:
+                return 1.0  # 无法计算
+
+            price_range_width = (upper_price - lower_price) / lower_price
+
+            # 价格范围极窄或极宽都增加风险
+            if price_range_width < 0.01:
+                return 1.2  # 范围太窄，增加20%风险
+            elif price_range_width > 10:
+                return 1.1  # 范围很宽，增加10%风险
+
+            return 1.0  # 默认不调整
+        except (ValueError, TypeError, ZeroDivisionError):
+            return 1.0  # 默认不调整

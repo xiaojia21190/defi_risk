@@ -250,10 +250,34 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
                             float(position_amount) if position_amount else 0
                         )
 
-            # 如果资产不足，无法进行相关性分析
+            # 如果资产不足，尝试使用有价值的奖励资产
             if len(assets) < 2:
-                self.logger.warning("检测到的非奖励资产少于2个，无法进行相关性分析")
-                return None
+                self.logger.info("检测到的非奖励资产少于2个，尝试考虑奖励资产")
+
+                # 筛选有价值的奖励资产
+                valuable_rewards = {
+                    symbol: value
+                    for symbol, value in reward_assets.items()
+                    if value > 0
+                }
+
+                if valuable_rewards:
+                    self.logger.info(
+                        f"找到{len(valuable_rewards)}个有价值的奖励资产，将它们纳入相关性分析"
+                    )
+                    assets.update(valuable_rewards)
+
+                # 再次检查资产数量
+                if len(assets) < 2:
+                    self.logger.warning(
+                        "即使考虑奖励资产，检测到的资产仍少于2个，无法进行相关性分析"
+                    )
+                    return None
+
+            # 分析奖励代币对相关性风险的影响
+            reward_impact = self.analyze_reward_tokens_impact(
+                assets, reward_assets, total_value, "相关性风险"
+            )
 
             # 尝试使用AI服务进行资产相关性分析
             if self.ai_service:
@@ -265,6 +289,8 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
                             asset: (value / total_value if total_value > 0 else 0)
                             for asset, value in assets.items()
                         },
+                        "reward_assets": reward_impact.get("valuable_rewards", {}),
+                        "reward_impact": reward_impact,
                         "analysis_type": "asset_correlation",
                     }
 
@@ -280,6 +306,10 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
                         trend = ai_analysis.get("trend", "稳定")
                         data_points = ai_analysis.get("data_points", [])
 
+                        # 如果奖励代币有显著影响，添加提示
+                        if reward_impact.get("significant_impact", False):
+                            description += f"（注意：奖励代币占总价值的{reward_impact['reward_percentage']:.2f}%，对相关性有{reward_impact['impact_level']}影响）"
+
                         return self.create_risk_factor(
                             risk_type=RiskType.CORRELATION.value,
                             factor_name="资产相关性风险",
@@ -291,6 +321,7 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
                             metadata={
                                 "assets": assets,
                                 "reward_assets": reward_assets,
+                                "reward_impact": reward_impact,
                                 "ai_analysis": ai_analysis,
                             },
                         )
@@ -948,25 +979,9 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
         Returns:
             过滤后的代币列表
         """
-        if not token_list:
-            return []
-
-        filtered_tokens = []
-        for token in token_list:
-            token_symbol = self._safe_get_attr(token, "tokenSymbol", "")
-            token_type = self._safe_get_attr(token, "tokenType", "")
-
-            # 排除奖励代币和应该被排除的代币
-            if (
-                not token_symbol
-                or token_type == "reward"
-                or self.is_excluded_token(token_symbol)
-            ):
-                continue
-
-            filtered_tokens.append(token)
-
-        return filtered_tokens
+        # 使用基类的filter_token_list方法以确保一致性
+        # 基类方法已经处理了有价值的奖励代币的情况
+        return super().filter_token_list(token_list)
 
     def is_excluded_token(self, token_symbol):
         """
@@ -978,6 +993,13 @@ class CorrelationRiskAnalyzer(RiskAnalyzerBase):
         Returns:
             bool: 是否应该被排除
         """
+        # 特殊处理：Pendle V2 的 PT 和 YT 代币不应被排除
+        if token_symbol and (
+            token_symbol.startswith("PT-") or token_symbol.startswith("YT-")
+        ):
+            self.logger.info(f"相关性分析中不排除 Pendle V2 代币 {token_symbol}")
+            return False
+
         excluded_tokens = [
             # 稳定币通常不参与相关性分析，因为它们的价格波动很小
             "USDT",

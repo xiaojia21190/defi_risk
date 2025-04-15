@@ -128,6 +128,7 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
 
             # 处理嵌套的positions结构
             assets = {}
+            reward_assets = {}  # 单独跟踪奖励代币
             total_value = 0
 
             # 遍历协议positions
@@ -146,8 +147,10 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                             safe_get(pos, "tokenList", [])
                         )
 
-                        for token in filtered_tokens:
+                        # 处理所有代币，包括奖励代币（为了单独跟踪）
+                        for token in safe_get(pos, "tokenList", []):
                             token_symbol = safe_get(token, "tokenSymbol", "")
+                            token_type = safe_get(token, "tokenType", "")
                             if not token_symbol:
                                 continue
 
@@ -164,10 +167,17 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                                     else 0
                                 )
 
-                            # 累加到资产映射中
-                            if token_symbol not in assets:
-                                assets[token_symbol] = 0
-                            assets[token_symbol] += token_value
+                            # 如果是奖励代币，单独记录
+                            if token_type == "reward":
+                                if token_symbol not in reward_assets:
+                                    reward_assets[token_symbol] = 0
+                                reward_assets[token_symbol] += token_value
+
+                            # 对于过滤后的代币（包括有价值的奖励代币），计入资产映射
+                            if token in filtered_tokens:
+                                if token_symbol not in assets:
+                                    assets[token_symbol] = 0
+                                assets[token_symbol] += token_value
                     else:
                         # 如果没有tokenList，使用资产名称
                         asset = safe_get(pos, "asset", "Unknown").split("/")[
@@ -189,6 +199,11 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                 self.logger.warning("投资组合总价值为0，无法分析资产流动性风险")
                 return None
 
+            # 分析奖励代币对流动性风险的影响
+            reward_impact = self.analyze_reward_tokens_impact(
+                assets, reward_assets, total_value, "流动性风险"
+            )
+
             # 尝试使用AI服务进行资产流动性分析
             if self.ai_service:
                 try:
@@ -199,6 +214,8 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                             asset: (value / total_value)
                             for asset, value in assets.items()
                         },
+                        "reward_assets": reward_impact.get("valuable_rewards", {}),
+                        "reward_impact": reward_impact,
                         "analysis_type": "asset_liquidity",
                     }
 
@@ -214,6 +231,12 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                         trend = ai_analysis.get("trend", "稳定")
                         data_points = ai_analysis.get("data_points", [])
 
+                        # 如果奖励代币有显著影响但未包含在分析中，添加提示
+                        if reward_impact.get(
+                            "significant_impact", False
+                        ) and not reward_impact.get("reward_included_in_assets", False):
+                            description += f"（注意：奖励代币占总价值的{reward_impact['reward_percentage']:.2f}%，但未包含在风险分析中）"
+
                         return self.create_risk_factor(
                             risk_type=RiskType.LIQUIDITY.value,
                             factor_name="资产流动性风险",
@@ -224,6 +247,8 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                             data_points=data_points,
                             metadata={
                                 "assets": assets,
+                                "reward_assets": reward_assets,
+                                "reward_impact": reward_impact,
                                 "ai_analysis": ai_analysis,
                             },
                         )
@@ -673,12 +698,17 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                             "invest_type": safe_get(pos, "invest_type", 1),
                             "apy": safe_get(pos, "apy", None),
                             "tokenList": safe_get(pos, "tokenList", []),
+                            "metadata": safe_get(
+                                pos, "metadata", {}
+                            ),  # 添加metadata支持
                         }
 
                     if "protocol" not in lp_pos:
                         lp_pos["protocol"] = protocol
 
-                    lp_positions.append(lp_pos)
+                    # 只添加流动性池类型的头寸
+                    if safe_get(lp_pos, "invest_type", 1) == 2:
+                        lp_positions.append(lp_pos)
 
             if not lp_positions:
                 self.logger.info("未检测到头寸，跳过流动性池风险分析")
@@ -723,13 +753,25 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                                 valid_tokens.append(token_symbol)
                         else:
                             # 尝试从资产名称解析
-                            tokens = asset.split("/")
+                            tokens = asset.split("-")
                             # 使用基类方法过滤代币
                             valid_tokens = [
                                 token
                                 for token in tokens
                                 if not self.is_excluded_token(token)
                             ]
+
+                        # 获取Uniswap V4特定元数据
+                        metadata = safe_get(pos, "metadata", {})
+                        position_status = metadata.get("position_status", "UNKNOWN")
+                        range_info = metadata.get("range_info", {})
+                        token_id = metadata.get("token_id", "")
+
+                        # 获取价格范围信息
+                        lower_price = range_info.get("lowerPrice", "0")
+                        upper_price = range_info.get("upperPrice", "0")
+                        token0_symbol = range_info.get("token0Symbol", "")
+                        token1_symbol = range_info.get("token1Symbol", "")
 
                         pools_data.append(
                             {
@@ -739,12 +781,21 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                                 "valid_tokens": valid_tokens,  # 仅用于风险计算的代币
                                 "weight": weight,
                                 "amount": amount,
+                                "position_status": position_status,
+                                "token_id": token_id,
+                                "range_info": {
+                                    "lower_price": lower_price,
+                                    "upper_price": upper_price,
+                                    "token0_symbol": token0_symbol,
+                                    "token1_symbol": token1_symbol,
+                                },
                             }
                         )
 
                     ai_input_data = {
                         "liquidity_pools": pools_data,
                         "analysis_type": "liquidity_pool_risk",
+                        "platform": "Uniswap V4",  # 指定平台
                     }
 
                     # 确保AI服务使用valid_tokens进行分析
@@ -799,6 +850,12 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                 # 提取代币列表
                 token_list = safe_get(pos, "tokenList", [])
 
+                # 获取Uniswap V4特定元数据
+                metadata = safe_get(pos, "metadata", {})
+                position_status = metadata.get("position_status", "UNKNOWN")
+                range_info = metadata.get("range_info", {})
+                token_id = metadata.get("token_id", "")
+
                 # 计算池子风险
                 pool_risk = 50  # 默认中等风险
 
@@ -823,7 +880,7 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
 
                         valid_tokens.append(token_symbol)
 
-                        # 判断是否为稳定币
+                        # 判断是否为稳定币（添加了USDe和sUSDe）
                         if token_symbol in [
                             "USDT",
                             "USDC",
@@ -832,6 +889,8 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                             "TUSD",
                             "USDP",
                             "GUSD",
+                            "USDe",
+                            "sUSDe",
                         ]:
                             stablecoin_count += 1
                         else:
@@ -850,6 +909,32 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                             pool_risk = 70
                     # 没有有效代币时使用默认风险
 
+                    # Uniswap V4特定风险调整
+                    # 1. 根据池子状态调整风险
+                    if position_status == "INACTIVE":
+                        pool_risk += 10  # INACTIVE状态风险增加
+
+                    # 2. 根据价格范围调整风险
+                    try:
+                        lower_price = float(range_info.get("lowerPrice", 0))
+                        upper_price = float(range_info.get("upperPrice", 0))
+                        if lower_price > 0:
+                            price_range_width = (
+                                upper_price - lower_price
+                            ) / lower_price
+
+                            # 价格范围极窄（小于1%）或极宽（大于1000%）都增加风险
+                            if price_range_width < 0.01:
+                                pool_risk += 15  # 范围太窄，增加风险
+                            elif price_range_width > 10:
+                                pool_risk += 5  # 范围很宽，小幅增加风险
+                    except (ValueError, TypeError, ZeroDivisionError):
+                        # 价格格式无效的情况
+                        pass
+
+                    # 确保风险在0-100之间
+                    pool_risk = min(100, max(0, pool_risk))
+
                     # 添加代币信息，显示所有代币但在metadata中指明有效代币
                     pool_risks.append(
                         {
@@ -861,11 +946,13 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                             "weight": weight,
                             "amount": amount,
                             "token_count": len(valid_tokens),  # 使用有效代币数量
+                            "position_status": position_status,
+                            "range_info": range_info,
                         }
                     )
                 else:
                     # 如果没有tokenList，尝试从资产名称解析
-                    all_tokens = asset.split("/")
+                    all_tokens = asset.split("-")
                     tokens = all_tokens  # 保留所有代币用于显示
 
                     # 使用基类方法过滤代币
@@ -886,6 +973,8 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                             "TUSD",
                             "USDP",
                             "GUSD",
+                            "USDe",
+                            "sUSDe",
                         ]:
                             stablecoin_count += 1
 
@@ -900,6 +989,32 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                             # 多种波动币池风险较高
                             pool_risk = 70
 
+                    # Uniswap V4特定风险调整
+                    # 1. 根据池子状态调整风险
+                    if position_status == "INACTIVE":
+                        pool_risk += 10  # INACTIVE状态风险增加
+
+                    # 2. 根据价格范围调整风险
+                    try:
+                        lower_price = float(range_info.get("lowerPrice", 0))
+                        upper_price = float(range_info.get("upperPrice", 0))
+                        if lower_price > 0:
+                            price_range_width = (
+                                upper_price - lower_price
+                            ) / lower_price
+
+                            # 价格范围极窄（小于1%）或极宽（大于1000%）都增加风险
+                            if price_range_width < 0.01:
+                                pool_risk += 15  # 范围太窄，增加风险
+                            elif price_range_width > 10:
+                                pool_risk += 5  # 范围很宽，小幅增加风险
+                    except (ValueError, TypeError, ZeroDivisionError):
+                        # 价格格式无效的情况
+                        pass
+
+                    # 确保风险在0-100之间
+                    pool_risk = min(100, max(0, pool_risk))
+
                     pool_risks.append(
                         {
                             "protocol": protocol,
@@ -910,18 +1025,30 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
                             "weight": weight,
                             "amount": amount,
                             "token_count": len(valid_tokens),  # 使用有效代币数量
+                            "position_status": position_status,
+                            "range_info": range_info,
                         }
                     )
 
             # 计算加权平均风险
             weighted_risk = sum(pool["risk"] * pool["weight"] for pool in pool_risks)
 
+            # 检查是否有INACTIVE的池子
+            inactive_pools = [
+                p for p in pool_risks if p["position_status"] == "INACTIVE"
+            ]
+            active_pools = [p for p in pool_risks if p["position_status"] == "ACTIVE"]
+            inactive_count = len(inactive_pools)
+            active_count = len(active_pools)
+
             # 构建描述
             if weighted_risk > 70:
-                description = "流动性池风险较高，主要由波动性资产组成，可能面临无常损失"
+                description = (
+                    "流动性池风险较高，主要由波动性资产组成，可能面临显著的无常损失"
+                )
                 trend = "上升"
             elif weighted_risk > 40:
-                description = "流动性池风险中等，包含一定比例的稳定币和波动性资产"
+                description = "流动性池风险中等，包含一定比例的稳定币和波动性资产，无常损失风险适中"
                 trend = "稳定"
             else:
                 description = "流动性池风险较低，主要由稳定币组成，无常损失风险较小"
@@ -930,20 +1057,33 @@ class LiquidityRiskAnalyzer(RiskAnalyzerBase):
             # 添加池子数量信息
             description += f"，共有{len(pool_risks)}个流动性池头寸"
 
+            # 添加Uniswap V4特定信息
+            if inactive_count > 0:
+                description += (
+                    f"，其中{inactive_count}个池子处于非活跃状态，可能无法产生收益"
+                )
+                if inactive_count > active_count:
+                    description += "，建议调整价格范围重新激活这些头寸"
+
             # 构建数据点
             data_points = []
             for pool in pool_risks:
-                data_points.append(
-                    {
-                        "protocol": pool["protocol"],
-                        "asset": pool["asset"],
-                        "tokens": pool["tokens"],
-                        "risk": pool["risk"],
-                        "weight": pool["weight"],
-                        "amount": pool["amount"],
-                        "token_count": pool["token_count"],
-                    }
-                )
+                data_point = {
+                    "protocol": pool["protocol"],
+                    "asset": pool["asset"],
+                    "tokens": pool["tokens"],
+                    "risk": pool["risk"],
+                    "weight": pool["weight"],
+                    "amount": pool["amount"],
+                    "token_count": pool["token_count"],
+                    "position_status": pool["position_status"],
+                }
+
+                # 添加价格范围信息
+                if "range_info" in pool:
+                    data_point["range_info"] = pool["range_info"]
+
+                data_points.append(data_point)
 
             return self.create_risk_factor(
                 risk_type=RiskType.LIQUIDITY.value,

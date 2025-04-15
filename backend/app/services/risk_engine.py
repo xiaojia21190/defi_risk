@@ -69,6 +69,7 @@ class RiskEngine:
             "liquidity": "流动性风险",
             "correlation": "相关性风险",
             "smart_contract": "智能合约风险",
+            "dex": "DEX风险",  # 添加DEX风险类型映射
         }
 
         # 不再自动创建ai_predictor，改为通过外部依赖注入

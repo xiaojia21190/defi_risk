@@ -18,8 +18,8 @@ interface AlertsListProps {
 
 interface Alert {
   id: string;
-  type: "liquidation" | "marketVolatility" | "technicalSignal" | "riskWarning" | "opportunityAlert";
-  severity: "high" | "medium" | "low";
+  type: "liquidation" | "marketVolatility" | "technicalSignal" | "riskWarning" | "opportunityAlert" | "infoNotice";
+  severity: "high" | "medium" | "low" | "info";
   message: string;
   timestamp: string;
   protocol: string;
@@ -47,6 +47,7 @@ interface AlertStats {
   high: number;
   medium: number;
   low: number;
+  info: number;
   byType: Record<string, number>;
 }
 
@@ -72,6 +73,11 @@ const severityConfigs: Record<string, SeverityConfig> = {
     color: "default",
     icon: <CheckCircle className="w-4 h-4" />,
   },
+  info: {
+    label: "信息",
+    color: "outline",
+    icon: <CheckCircle className="w-4 h-4" />,
+  },
 };
 
 const typeConfigs: Record<string, { label: string; icon: React.ReactNode }> = {
@@ -95,6 +101,10 @@ const typeConfigs: Record<string, { label: string; icon: React.ReactNode }> = {
     label: "机会提示",
     icon: <Lightbulb className="w-4 h-4" />,
   },
+  infoNotice: {
+    label: "信息通知",
+    icon: <CheckCircle className="w-4 h-4" />,
+  },
 };
 
 // 映射后端警报类型到前端类型
@@ -106,6 +116,7 @@ const mapAlertType = (type: string): Alert["type"] => {
     technical_signal: "technicalSignal",
     risk_warning: "riskWarning",
     opportunity: "opportunityAlert",
+    info: "infoNotice",
   };
 
   return typeMap[type] || "riskWarning";
@@ -117,6 +128,7 @@ const mapSeverity = (severity: string): Alert["severity"] => {
     high: "high",
     medium: "medium",
     low: "low",
+    info: "info",
   };
 
   return severityMap[severity] || "medium";
@@ -715,10 +727,13 @@ const AlertsState = memo(({ loading, error, filteredAlerts, handleRefresh, stats
     );
   }
 
-  if (filteredAlerts.length === 0) {
+  // 检查是否只有信息通知类型的警报
+  const hasOnlyInfoAlerts = filteredAlerts.length > 0 && filteredAlerts.every((alert) => alert.type === "infoNotice" || alert.severity === "info");
+
+  if (filteredAlerts.length === 0 || hasOnlyInfoAlerts) {
     return (
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={cn("py-12 text-center rounded-lg border border-dashed", stats.total > 0 ? "bg-muted/20 border-muted" : "glass-effect bg-success/5")}>
-        {stats.total > 0 ? (
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={cn("py-12 text-center rounded-lg border border-dashed", stats.total > 0 && !hasOnlyInfoAlerts ? "bg-muted/20 border-muted" : "glass-effect bg-success/5")}>
+        {stats.total > 0 && !hasOnlyInfoAlerts ? (
           <>
             <Filter className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-70" />
             <h3 className="mb-2 text-lg font-medium">没有匹配结果</h3>
@@ -730,7 +745,8 @@ const AlertsState = memo(({ loading, error, filteredAlerts, handleRefresh, stats
               <CheckCircle className="w-16 h-16 mx-auto mb-4 text-green-500 opacity-80" />
             </motion.div>
             <h3 className="mb-2 text-xl font-medium">一切安好</h3>
-            <p className="max-w-md mx-auto text-muted-foreground">您的投资组合目前没有任何风险警报，我们将持续监控市场变化</p>
+            <p className="max-w-md mx-auto text-muted-foreground">{hasOnlyInfoAlerts && filteredAlerts[0]?.message ? filteredAlerts[0].message : "您的投资组合目前没有任何风险警报，我们将持续监控市场变化"}</p>
+            {hasOnlyInfoAlerts && filteredAlerts[0]?.details?.recommendation && <p className="max-w-md mx-auto mt-2 text-sm text-muted-foreground">{filteredAlerts[0].details.recommendation}</p>}
           </>
         )}
       </motion.div>
@@ -745,7 +761,7 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [stats, setStats] = useState<AlertStats>({ total: 0, high: 0, medium: 0, low: 0, byType: {} });
+  const [stats, setStats] = useState<AlertStats>({ total: 0, high: 0, medium: 0, low: 0, info: 0, byType: {} });
   const [filter, setFilter] = useState<{ severity: string | null; type: string | null; sortBy?: string }>({
     severity: null,
     type: null,
@@ -815,7 +831,7 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
         severity: mapSeverity(alert.severity),
         message: alert.message,
         timestamp: alert.timestamp || new Date().toISOString(),
-        protocol: alert.protocol || "未知协议",
+        protocol: alert.protocol || "Ethereum",
         asset: alert.asset || "未知资产",
         details: alert.details || {},
       }));
@@ -823,16 +839,18 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
       setAlerts(formattedAlerts);
       setLastRefreshTime(new Date().toLocaleTimeString());
 
-      // 计算统计数据
+      // 计算统计数据 - 排除info类型警报
+      const alertsWithoutInfo = formattedAlerts.filter((a) => a.severity !== "info");
       const newStats: AlertStats = {
-        total: formattedAlerts.length,
-        high: formattedAlerts.filter((a) => a.severity === "high").length,
-        medium: formattedAlerts.filter((a) => a.severity === "medium").length,
-        low: formattedAlerts.filter((a) => a.severity === "low").length,
+        total: alertsWithoutInfo.length,
+        high: alertsWithoutInfo.filter((a) => a.severity === "high").length,
+        medium: alertsWithoutInfo.filter((a) => a.severity === "medium").length,
+        low: alertsWithoutInfo.filter((a) => a.severity === "low").length,
+        info: formattedAlerts.filter((a) => a.severity === "info").length,
         byType: {},
       };
 
-      formattedAlerts.forEach((alert) => {
+      alertsWithoutInfo.forEach((alert) => {
         newStats.byType[alert.type] = (newStats.byType[alert.type] || 0) + 1;
       });
 
@@ -873,8 +891,8 @@ const AlertsList: React.FC<AlertsListProps> = ({ address }) => {
 
     // 根据排序选项对过滤后的警报进行排序
     if (filter.sortBy === "severity") {
-      const severityWeight = { high: 3, medium: 2, low: 1 };
-      return [...filtered].sort((a, b) => (severityWeight[b.severity] || 0) - (severityWeight[a.severity] || 0));
+      const severityWeight: Record<Alert["severity"], number> = { high: 3, medium: 2, low: 1, info: 0 };
+      return [...filtered].sort((a, b) => severityWeight[b.severity] - severityWeight[a.severity]);
     } else if (filter.sortBy === "type") {
       return [...filtered].sort((a, b) => a.type.localeCompare(b.type));
     } else {
