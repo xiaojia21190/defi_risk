@@ -14,6 +14,7 @@ import asyncio
 import time
 import uuid
 import traceback
+import random
 
 logger = logging.getLogger("defi_risk.ai_predictor")
 
@@ -1971,6 +1972,327 @@ class AiPredictor:
             self.logger.error(f"调用外部AI服务出错: {str(e)}")
             self.logger.error(traceback.format_exc())
             return None
+
+    def _predict_with_ai_service(
+        self,
+        asset: str,
+        current_price: float,
+        price_change_24h: float,
+        volatility: float,
+        rsi: float,
+        ma7: float,
+        ma30: float,
+        macd_trend: str,
+        bb_position: str,
+        volume_trend: str,
+        volume_strength: str,
+        support_levels: List[float],
+        resistance_levels: List[float],
+    ) -> Dict[str, Any]:
+        """
+        使用AI服务预测市场趋势和价格
+
+        Args:
+            asset: 资产名称
+            current_price: 当前价格
+            price_change_24h: 24小时价格变化百分比
+            volatility: 波动率
+            rsi: 相对强弱指数
+            ma7: 7日移动平均线
+            ma30: 30日移动平均线
+            macd_trend: MACD趋势
+            bb_position: 布林带位置
+            volume_trend: 成交量趋势
+            volume_strength: 成交量强度
+            support_levels: 支撑位列表
+            resistance_levels: 阻力位列表
+
+        Returns:
+            Dict: AI预测结果，包含预测价格范围和建议
+        """
+        try:
+            # 准备调用外部AI服务的输入数据
+            input_data = {
+                "analysis_type": "market_prediction",
+                "asset_data": {
+                    "asset": asset,
+                    "current_price": current_price,
+                    "price_change_24h": price_change_24h,
+                    "volatility": volatility,
+                    "technical_indicators": {
+                        "rsi": rsi,
+                        "ma7": ma7,
+                        "ma30": ma30,
+                        "macd_trend": macd_trend,
+                        "bollinger_position": bb_position,
+                        "volume": {"trend": volume_trend, "strength": volume_strength},
+                    },
+                    "support_levels": support_levels,
+                    "resistance_levels": resistance_levels,
+                },
+            }
+
+            # 记录开始预测
+            self.logger.info(f"开始使用AI服务预测{asset}市场趋势")
+
+            # 调用外部AI服务
+            ai_result = self._call_external_ai_service(input_data)
+
+            if ai_result is None:
+                # 如果AI服务调用失败，使用基于规则的预测
+                self.logger.warning("AI服务调用失败，使用备用预测方法")
+
+                # 基于基本指标的简单预测
+                trend_direction = (
+                    "bullish" if price_change_24h > 0 and rsi > 50 else "bearish"
+                )
+                trend_strength = (
+                    "strong"
+                    if abs(price_change_24h) > 5 or abs(rsi - 50) > 15
+                    else "moderate"
+                )
+
+                # 计算简单的价格预测范围
+                volatility_factor = max(
+                    0.005, min(volatility, 0.05)
+                )  # 限制在0.5%-5%范围内
+
+                # 24小时预测
+                change_24h = price_change_24h * 0.5  # 假设趋势会继续，但幅度减半
+                predicted_change_24h = change_24h * (1 + random.uniform(-0.5, 0.5))
+                range_24h = [
+                    current_price
+                    * (1 + predicted_change_24h / 100 - volatility_factor),
+                    current_price
+                    * (1 + predicted_change_24h / 100 + volatility_factor),
+                ]
+
+                # 7天预测
+                predicted_change_7d = change_24h * 3  # 假设7天变化是24小时的3倍
+                range_7d = [
+                    current_price
+                    * (1 + predicted_change_7d / 100 - volatility_factor * 2),
+                    current_price
+                    * (1 + predicted_change_7d / 100 + volatility_factor * 2),
+                ]
+
+                # 生成一些基本建议
+                recommendations = []
+                if rsi > 70:
+                    recommendations.append(f"{asset}当前RSI高于70，可能面临回调风险")
+                elif rsi < 30:
+                    recommendations.append(f"{asset}当前RSI低于30，可能存在超卖现象")
+
+                if bb_position == "超买":
+                    recommendations.append(
+                        f"{asset}当前处于布林带上轨附近，价格可能高估"
+                    )
+                elif bb_position == "超卖":
+                    recommendations.append(
+                        f"{asset}当前处于布林带下轨附近，价格可能低估"
+                    )
+
+                if macd_trend == "bullish":
+                    recommendations.append(f"{asset}的MACD显示看涨信号，可能继续上涨")
+                elif macd_trend == "bearish":
+                    recommendations.append(f"{asset}的MACD显示看跌信号，可能继续下跌")
+
+                if len(recommendations) < 3:
+                    recommendations.append(
+                        f"建议关注{asset}的成交量变化，判断趋势持续性"
+                    )
+
+                # 构造备用结果
+                return {
+                    "trend": trend_direction,
+                    "trend_strength": trend_strength,
+                    "predicted_price_range": {"24h": range_24h, "7d": range_7d},
+                    "confidence": 0.6,  # 备用预测置信度较低
+                    "recommendations": recommendations,
+                }
+
+            # 如果AI服务返回结果，但没有必要的字段，需要补充
+            if "predicted_price_range" not in ai_result:
+                # 使用和备用逻辑类似的方法生成预测价格范围
+                volatility_factor = max(0.005, min(volatility, 0.05))
+
+                # 基于AI分析的趋势方向调整预测
+                trend_factor = 0.5
+                if ai_result.get("trend") == "bullish":
+                    trend_factor = 1.0
+                elif ai_result.get("trend") == "bearish":
+                    trend_factor = -1.0
+
+                # 24小时和7天的预测范围
+                ai_result["predicted_price_range"] = {
+                    "24h": [
+                        current_price * (1 + trend_factor * volatility_factor),
+                        current_price * (1 + trend_factor * volatility_factor * 2),
+                    ],
+                    "7d": [
+                        current_price * (1 + trend_factor * volatility_factor * 3),
+                        current_price * (1 + trend_factor * volatility_factor * 5),
+                    ],
+                }
+
+            # 如果没有趋势信息，添加
+            if "trend" not in ai_result:
+                ai_result["trend"] = (
+                    "bullish" if price_change_24h > 0 and rsi > 50 else "bearish"
+                )
+
+            # 如果没有趋势强度，添加
+            if "trend_strength" not in ai_result:
+                ai_result["trend_strength"] = (
+                    "strong"
+                    if abs(price_change_24h) > 5 or abs(rsi - 50) > 15
+                    else "moderate"
+                )
+
+            # 如果没有建议，生成一些
+            if "recommendations" not in ai_result or not ai_result["recommendations"]:
+                ai_result["recommendations"] = self._generate_market_recommendations(
+                    ai_result.get("trend", "neutral"),
+                    rsi,
+                    macd_trend,
+                    bb_position,
+                    volatility,
+                    asset,
+                )
+
+            # 记录预测完成
+            self.logger.info(
+                f"AI服务成功预测{asset}市场趋势: {ai_result.get('trend')}，强度: {ai_result.get('trend_strength')}"
+            )
+
+            return ai_result
+
+        except Exception as e:
+            self.logger.error(f"使用AI服务预测市场趋势时出错: {str(e)}")
+            self.logger.error(traceback.format_exc())
+
+            # 返回简单的默认结果
+            return {
+                "trend": "neutral",
+                "trend_strength": "moderate",
+                "predicted_price_range": {
+                    "24h": [current_price * 0.98, current_price * 1.02],
+                    "7d": [current_price * 0.95, current_price * 1.05],
+                },
+                "confidence": 0.5,
+                "recommendations": [
+                    f"由于技术原因无法提供{asset}的准确预测，建议谨慎交易"
+                ],
+            }
+
+    def _combine_predictions(
+        self, traditional_prediction: Dict[str, Any], ai_prediction: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        合并传统技术分析和AI预测结果
+
+        Args:
+            traditional_prediction: 传统技术分析预测结果
+            ai_prediction: AI预测结果
+
+        Returns:
+            Dict: 合并后的预测结果
+        """
+        try:
+            # 获取两种预测的置信度，如果没有提供则使用默认值
+            traditional_confidence = traditional_prediction.get("confidence", 0.7)
+            ai_confidence = ai_prediction.get("confidence", 0.8)
+
+            # 计算总置信度
+            total_confidence = traditional_confidence + ai_confidence
+
+            # 计算加权因子
+            traditional_weight = traditional_confidence / total_confidence
+            ai_weight = ai_confidence / total_confidence
+
+            # 获取价格和价格范围
+            traditional_price = traditional_prediction.get("price", 0)
+            ai_price = ai_prediction.get("price", 0)
+
+            traditional_range = traditional_prediction.get("range", [0, 0])
+            ai_range = ai_prediction.get("range", [0, 0])
+
+            # 如果传统预测价格为0，使用AI预测价格
+            if traditional_price == 0 and ai_price > 0:
+                combined_price = ai_price
+            # 如果AI预测价格为0，使用传统预测价格
+            elif ai_price == 0 and traditional_price > 0:
+                combined_price = traditional_price
+            # 如果两者都大于0，进行加权计算
+            elif traditional_price > 0 and ai_price > 0:
+                combined_price = (
+                    traditional_price * traditional_weight + ai_price * ai_weight
+                )
+            # 如果两者都为0，使用0作为预测价格
+            else:
+                combined_price = 0
+
+            # 合并价格范围，采用范围扩展策略
+            combined_range = [
+                (
+                    min(traditional_range[0], ai_range[0])
+                    if len(traditional_range) > 0 and len(ai_range) > 0
+                    else 0
+                ),
+                (
+                    max(traditional_range[-1], ai_range[-1])
+                    if len(traditional_range) > 0 and len(ai_range) > 0
+                    else 0
+                ),
+            ]
+
+            # 计算变化百分比
+            combined_change_percent = (
+                traditional_prediction.get("change_percent", 0) * traditional_weight
+                + ai_prediction.get("change_percent", 0) * ai_weight
+            )
+
+            # 合并置信度，取两者的加权平均
+            combined_confidence = (
+                traditional_confidence * traditional_weight + ai_confidence * ai_weight
+            )
+
+            # 构建合并结果
+            result = {
+                "price": combined_price,
+                "range": combined_range,
+                "change_percent": combined_change_percent,
+                "confidence": combined_confidence,
+                "sources": {
+                    "traditional": {
+                        "weight": traditional_weight,
+                        "confidence": traditional_confidence,
+                    },
+                    "ai": {"weight": ai_weight, "confidence": ai_confidence},
+                },
+            }
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"合并预测结果时出错: {str(e)}")
+
+            # 出错时优先使用AI预测，因为它通常更全面
+            if ai_prediction and "price" in ai_prediction:
+                return ai_prediction
+
+            # 如果AI预测也不可用，使用传统预测
+            if traditional_prediction and "price" in traditional_prediction:
+                return traditional_prediction
+
+            # 两者都不可用时，返回默认值
+            return {
+                "price": 0,
+                "range": [0, 0],
+                "change_percent": 0,
+                "confidence": 0.5,
+                "error": "无法合并预测结果",
+            }
 
     def _merge_analysis_results(
         self, rule_results: Dict[str, Any], ai_results: Dict[str, Any]

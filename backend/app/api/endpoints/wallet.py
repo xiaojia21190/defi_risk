@@ -297,7 +297,9 @@ async def analyze_wallet_risk(
                         )
                     ),
                 },
-                "ai_enhanced": ai_insights.get("recommendations", []) != [],
+                "ai_insights": ai_insights.get("insights", []),
+                "ai_warnings": ai_insights.get("warnings", []),
+                "ai_confidence": ai_insights.get("confidence", 0),
             },
             wallet_address=wallet_address,
         )

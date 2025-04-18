@@ -370,6 +370,41 @@ const InfoTooltip: React.FC<InfoTooltipProps> = ({ content, children }) => {
   );
 };
 
+// AI置信度徽章组件
+interface ConfidenceBadgeProps {
+  confidence: number; // 0-1范围
+}
+
+const ConfidenceBadge: React.FC<ConfidenceBadgeProps> = ({ confidence }) => {
+  // 根据置信度值确定颜色
+  const getColor = () => {
+    if (confidence >= 0.8) return "text-green-500 border-green-500";
+    if (confidence >= 0.5) return "text-amber-500 border-amber-500";
+    return "text-red-500 border-red-500";
+  };
+
+  const getText = () => {
+    if (confidence >= 0.8) return "高";
+    if (confidence >= 0.5) return "中";
+    return "低";
+  };
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="outline" className={`ml-2 ${getColor()}`}>
+            置信度: {getText()} ({(confidence * 100).toFixed(0)}%)
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent side="top" align="center" className="max-w-[300px] text-xs">
+          AI分析结果的置信度，反映模型对当前分析结论的确信程度
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
+
 // 可折叠卡片组件
 interface CollapsibleCardProps {
   title: string;
@@ -378,9 +413,10 @@ interface CollapsibleCardProps {
   tooltip?: string;
   initiallyExpanded?: boolean;
   accentColor?: string;
+  badge?: React.ReactNode;
 }
 
-const CollapsibleCard: React.FC<CollapsibleCardProps> = ({ title, icon, children, tooltip, initiallyExpanded = true, accentColor = "primary" }) => {
+const CollapsibleCard: React.FC<CollapsibleCardProps> = ({ title, icon, children, tooltip, initiallyExpanded = true, accentColor = "primary", badge }) => {
   const [expanded, setExpanded] = useState(initiallyExpanded);
 
   return (
@@ -395,6 +431,7 @@ const CollapsibleCard: React.FC<CollapsibleCardProps> = ({ title, icon, children
                 <Info className="w-3.5 h-3.5 text-muted-foreground" />
               </InfoTooltip>
             )}
+            {badge}
           </div>
         </div>
         <ChevronDown className={`w-5 h-5 text-muted-foreground transition-transform duration-200 ${expanded ? "rotate-180" : ""}`} />
@@ -642,8 +679,24 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, anal
 
   // 获取AI洞察 - 使用useMemo缓存
   const aiInsights = useMemo(() => {
+    if (riskAnalysis?.ai_insights && riskAnalysis.ai_insights.length > 0) {
+      return riskAnalysis.ai_insights;
+    }
     return [];
-  }, []);
+  }, [riskAnalysis?.ai_insights]);
+
+  // 获取AI警告 - 使用useMemo缓存
+  const aiWarnings = useMemo(() => {
+    if (riskAnalysis?.ai_warnings && riskAnalysis.ai_warnings.length > 0) {
+      return riskAnalysis.ai_warnings;
+    }
+    return [];
+  }, [riskAnalysis?.ai_warnings]);
+
+  // 获取AI置信度 - 使用useMemo缓存
+  const aiConfidence = useMemo(() => {
+    return riskAnalysis?.ai_confidence || 0;
+  }, [riskAnalysis?.ai_confidence]);
 
   // 获取建议 - 使用useMemo缓存
   const recommendations = useMemo(() => {
@@ -763,19 +816,19 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, anal
             </motion.div>
           )}
 
-          {/* 风险建议 - 使用CollapsibleCard */}
-          <CollapsibleCard title="风险管理建议" icon={<Zap className="w-5 h-5" />} tooltip="基于AI分析的投资组合风险管理建议" accentColor="primary">
-            <ul className="pl-5 space-y-2 list-disc">
-              {recommendations.map((recommendation, index) => (
-                <motion.li key={index} className="text-sm" initial={{ opacity: 0, x: -5 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2, delay: index * 0.05 }}>
-                  {recommendation}
-                </motion.li>
-              ))}
-            </ul>
-          </CollapsibleCard>
-
           {/* 风险监控点 - 使用CollapsibleCard */}
-          <CollapsibleCard title="关键监控点" icon={<Target className="w-5 h-5" />} tooltip="需持续监控的关键风险指标和事件" accentColor="primary" initiallyExpanded={false}>
+          <CollapsibleCard
+            title="关键监控点"
+            icon={<Target className="w-5 h-5" />}
+            tooltip="需持续监控的关键风险指标和事件"
+            accentColor="primary"
+            initiallyExpanded={true}
+            badge={
+              <Badge variant="secondary" className="text-xs">
+                最新
+              </Badge>
+            }
+          >
             <ul className="pl-5 space-y-2 list-disc">
               {monitoringPoints.map((point, index) => (
                 <motion.li key={index} className="text-sm" initial={{ opacity: 0, x: -5 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2, delay: index * 0.05 }}>
@@ -785,9 +838,44 @@ const RiskMonitor: React.FC<RiskMonitorProps> = ({ portfolio, riskAnalysis, anal
             </ul>
           </CollapsibleCard>
 
+          {/* AI警告 - 使用CollapsibleCard，仅在有数据时显示 */}
+          {aiWarnings.length > 0 && (
+            <CollapsibleCard
+              title="AI 风险警告"
+              icon={<AlertTriangle className="w-5 h-5" />}
+              tooltip="AI检测到的潜在高风险因素"
+              accentColor="destructive"
+              badge={
+                <Badge variant="destructive" className="text-xs">
+                  重要
+                </Badge>
+              }
+              initiallyExpanded={true}
+            >
+              <ul className="pl-5 space-y-2 list-disc">
+                {aiWarnings.map((warning, index) => (
+                  <motion.li key={index} className="text-sm font-medium text-destructive" initial={{ opacity: 0, x: -5 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2, delay: index * 0.05 }}>
+                    {warning}
+                  </motion.li>
+                ))}
+              </ul>
+            </CollapsibleCard>
+          )}
+
+          {/* 风险建议 - 使用CollapsibleCard */}
+          <CollapsibleCard title="AI风险管理建议" icon={<Zap className="w-5 h-5" />} tooltip="基于AI分析的投资组合风险管理建议" accentColor="primary" badge={<ConfidenceBadge confidence={aiConfidence} />}>
+            <ul className="pl-5 space-y-2 list-disc">
+              {recommendations.map((recommendation, index) => (
+                <motion.li key={index} className="text-sm" initial={{ opacity: 0, x: -5 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2, delay: index * 0.05 }}>
+                  {recommendation}
+                </motion.li>
+              ))}
+            </ul>
+          </CollapsibleCard>
+
           {/* AI洞察 - 使用CollapsibleCard，仅在有数据时显示 */}
           {aiInsights.length > 0 && (
-            <CollapsibleCard title="AI 洞察" icon={<Lightbulb className="w-5 h-5" />} tooltip="AI模型针对投资组合的深度洞察" accentColor="blue-600">
+            <CollapsibleCard title="AI 洞察" icon={<Lightbulb className="w-5 h-5" />} tooltip="AI模型针对投资组合的深度洞察" accentColor="blue-600" badge={<ConfidenceBadge confidence={aiConfidence} />}>
               <ul className="pl-5 space-y-2 list-disc">
                 {aiInsights.map((insight, index) => (
                   <motion.li key={index} className="text-sm" initial={{ opacity: 0, x: -5 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2, delay: index * 0.05 }}>

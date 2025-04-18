@@ -226,6 +226,9 @@ export interface WalletRiskAssessment {
     assets: string[];
   };
   ai_enhanced: boolean;
+  ai_insights: string[];
+  ai_warnings: string[];
+  ai_confidence: number;
   timestamp: string;
   is_demo_data: boolean;
 }
@@ -533,6 +536,9 @@ class ApiService {
           assets: []
         },
         ai_enhanced: response.ai_enhanced || false,
+        ai_insights: response.ai_insights || [],
+        ai_warnings: response.ai_warnings || [],
+        ai_confidence: response.ai_confidence || 0.5,
         timestamp: response.timestamp || new Date().toISOString(),
         is_demo_data: response.is_demo_data || false
       };
