@@ -337,9 +337,12 @@ export const Dashboard: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button onClick={handleRefresh} disabled={loading} variant="outline" size="icon">
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-          </Button>
+          {/* tab 为 第一个时，显示 重新分析 */}
+          {activeTab === "overview" && (
+            <Button onClick={handleRefresh} disabled={loading} variant="outline" size="icon">
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            </Button>
+          )}
         </div>
       </div>
 

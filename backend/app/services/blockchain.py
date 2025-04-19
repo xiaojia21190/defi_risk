@@ -700,7 +700,7 @@ class BlockchainService:
             API响应数据
         """
         # 间隔1-2秒
-        time.sleep(random.randint(3, 5))
+        time.sleep(1)
         if full_path_header == "":
             full_path = self.okx_api_defi_path + path
         else:

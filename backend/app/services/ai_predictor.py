@@ -15,6 +15,7 @@ import time
 import uuid
 import traceback
 import random
+import re  # 添加导入re模块用于正则表达式
 
 logger = logging.getLogger("defi_risk.ai_predictor")
 
@@ -1935,6 +1936,28 @@ class AiPredictor:
             if response and response.choices and len(response.choices) > 0:
                 try:
                     content = response.choices[0].message.content
+
+                    # 记录原始内容以便调试（截断以避免日志过大）
+                    self.logger.debug(f"AI服务原始响应: {content[:500]}...")
+
+                    # 如果响应为空
+                    if not content or not content.strip():
+                        self.logger.error("外部AI服务返回空响应")
+                        return None
+
+                    # 检测并移除可能的Markdown代码块格式
+                    if (
+                        content.strip().startswith("```")
+                        and "```" in content.strip()[3:]
+                    ):
+                        # 提取JSON部分
+                        pattern = r"```(?:json)?\n([\s\S]*?)\n```"
+                        matches = re.search(pattern, content)
+                        if matches:
+                            content = matches.group(1).strip()
+                            self.logger.info("从Markdown代码块中提取JSON内容")
+
+                    # 解析JSON
                     result = json.loads(content)
 
                     # 验证返回的JSON结构
@@ -1961,7 +1984,7 @@ class AiPredictor:
                         f"无法解析外部AI服务的JSON响应: {str(json_error)}"
                     )
                     self.logger.debug(
-                        f"无效的JSON内容: {response.choices[0].message.content[:200]}..."
+                        f"无效的JSON内容: {content if 'content' in locals() else '未获取到内容'}"
                     )
                     return None
             else:

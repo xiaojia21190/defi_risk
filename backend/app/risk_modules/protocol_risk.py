@@ -223,9 +223,9 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
 
                     # 提取AI分析结果
                     risk_score = ai_analysis.get("risk_score", 50)
-                    description = ai_analysis.get(
-                        "recommendations", ["对协议的安全风险分析"]
-                    ).join(",")
+                    description = ",".join(
+                        ai_analysis.get("recommendations", ["对协议的安全风险分析"])
+                    )
                     trend = ai_analysis.get("tvl_trend", {}).get("trend", "稳定")
                     data_points = [
                         {"metric": k, "value": v}
@@ -428,9 +428,9 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
 
                     # 提取AI分析结果
                     risk_score = ai_analysis.get("risk_score", 50)
-                    description = ai_analysis.get(
-                        "recommendations", ["对协议的治理风险分析"]
-                    ).join(",")
+                    description = ",".join(
+                        ai_analysis.get("recommendations", ["对协议的治理风险分析"])
+                    )
                     trend = ai_analysis.get("tvl_trend", {}).get("trend", "稳定")
                     data_points = [
                         {"metric": k, "value": v}
@@ -637,9 +637,9 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
 
                     # 提取AI分析结果
                     risk_score = ai_analysis.get("risk_score", 50)
-                    description = ai_analysis.get(
-                        "recommendations", ["对协议的历史风险分析"]
-                    ).join(",")
+                    description = ",".join(
+                        ai_analysis.get("recommendations", ["对协议的历史风险分析"])
+                    )
                     trend = ai_analysis.get("tvl_trend", {}).get("trend", "稳定")
                     data_points = [
                         {"metric": k, "value": v}
@@ -902,9 +902,9 @@ class ProtocolRiskAnalyzer(RiskAnalyzerBase):
 
                     # 提取AI分析结果
                     risk_score = ai_analysis.get("risk_score", 50)
-                    description = ai_analysis.get(
-                        "recommendations", ["对协议的复杂性风险分析"]
-                    ).join(",")
+                    description = ",".join(
+                        ai_analysis.get("recommendations", ["对协议的复杂性风险分析"])
+                    )
                     trend = ai_analysis.get("tvl_trend", {}).get("trend", "稳定")
                     data_points = [
                         {"metric": k, "value": v}
