@@ -105,28 +105,74 @@ async def get_wallet_positions(
                 try:
                     # 获取协议详细信息
                     protocol_info = await blockchain_service.get_protocol(protocol_name)
+                    # 确定链信息：优先使用顶层chain，其次尝试chains数组的第一个，再次使用position中的chain
+                    chain = (
+                        protocol_info.get("chain")  # 直接从顶层获取
+                        or (
+                            protocol_info.get("chains", [])[0]  # 从chains数组获取第一个
+                            if protocol_info.get("chains")
+                            and len(protocol_info.get("chains", [])) > 0
+                            else None
+                        )
+                        or position.get(
+                            "chain", "Ethereum"
+                        )  # 最后使用position中的chain或默认值
+                    )
+
+                    # 尝试获取特性/类别：优先使用顶层category，其次使用categories，再次尝试coingecko中的categories
+                    features = (
+                        [protocol_info.get("category")]  # 单个类别
+                        if protocol_info.get("category")
+                        else protocol_info.get("categories", [])  # 类别数组
+                        or protocol_info.get("coingecko", {}).get(
+                            "categories", ["借贷", "流动性挖矿"]
+                        )  # 从coingecko获取
+                    )
+                    # 确保features是列表且不为空
+                    if not isinstance(features, list):
+                        features = [features] if features else ["借贷", "流动性挖矿"]
+
+                    # 获取描述：优先使用顶层description，其次尝试coingecko中的description
+                    description = (
+                        protocol_info.get("description")
+                        or protocol_info.get("coingecko", {}).get("description")
+                        or f"{protocol_name}是一个DeFi协议"
+                    )
+
+                    # 获取合约地址：处理多种可能的数据结构
+                    contract_address = ""
+                    if protocol_info.get("address"):
+                        # 如果有顶层地址
+                        contract_address = protocol_info.get("address")
+                    elif (
+                        protocol_info.get("coingecko", {})
+                        .get("contract_addresses", {})
+                        .get("ethereum")
+                    ):
+                        # 从coingecko获取以太坊合约地址
+                        contract_address = (
+                            protocol_info.get("coingecko", {})
+                            .get("contract_addresses", {})
+                            .get("ethereum", "")
+                        )
+
                     protocols_used.append(
                         {
                             "name": protocol_name,
-                            "chain": protocol_info.get(
-                                "chain", position.get("chain", "Ethereum")
+                            "chain": chain,
+                            "tvl": protocol_info.get("tvl", 0)
+                            or protocol_info.get("currentChainTvls", {}).get(
+                                "Ethereum", 0
                             ),
-                            "tvl": protocol_info.get("tvl", 0),
-                            "supported_assets": protocol_info.get(
-                                "supported_assets", ["ETH", "USDC"]
-                            ),
-                            "features": protocol_info.get("coingecko", {}).get(
-                                "categories", ["借贷", "流动性挖矿"]
-                            ),
-                            "description": protocol_info.get("coingecko", {}).get(
-                                "description", f"{protocol_name}是一个DeFi协议"
-                            ),
-                            "contract_addresses": protocol_info.get("coingecko", {})
-                            .get("contract_addresses", {})
-                            .get("ethereum", ""),
+                            "supported_assets": protocol_info.get("supported_assets")
+                            or ["ETH", "USDC"],
+                            "features": features,
+                            "description": description,
+                            "contract_addresses": contract_address,
                         }
                     )
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"获取协议{protocol_name}详情失败: {str(e)}")
                     # 如果获取协议信息失败，使用基本信息
                     protocols_used.append(
                         {

@@ -11,7 +11,7 @@ import pandas as pd
 import logging
 import asyncio
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Union
 import aiohttp
 import requests
 import json
@@ -700,7 +700,7 @@ class BlockchainService:
             API响应数据
         """
         # 间隔1-2秒
-        time.sleep(1)
+        time.sleep(1.2)
         if full_path_header == "":
             full_path = self.okx_api_defi_path + path
         else:
@@ -1257,6 +1257,10 @@ class BlockchainService:
             "WBTC": "BTC",
             "WETH": "ETH",
             "BETH": "ETH",
+            "uniswap": "uniswap",
+            "uniswap v2": "uniswap",
+            "uniswap v3": "uniswap",
+            "uniswap v4": "uniswap",
         }
         if asset in aliases:
             return aliases[asset]
@@ -1310,6 +1314,12 @@ class BlockchainService:
                 protocol = "Pendle"
             if protocol == "Aethir":
                 protocol = "aethir"
+            if protocol == "Aave V2" or protocol == "Aave V3" or protocol == "Aave V4":
+                protocol = "Aave"
+
+            # curve
+            if protocol == "Curve":
+                protocol = "curve dex"
 
             # 获取DeFi Llama协议数据
             try:
@@ -1319,12 +1329,18 @@ class BlockchainService:
                 protocol_data = {}
 
             # tvl
-            try:
-                tvl = await self.get_protocol_tvl(protocol)
-                protocol_data["tvl"] = tvl
-            except Exception as e:
-                self.logger.warning(f"获取协议TVL失败: {str(e)}")
-                protocol_data["tvl"] = 0
+            if protocol_data.get("tvl", 0) == 0:
+                try:
+                    tvl = await self.get_protocol_tvl(protocol)
+                    protocol_data["tvl"] = tvl
+                except Exception as e:
+                    self.logger.warning(f"获取协议TVL失败: {str(e)}")
+                    protocol_data["tvl"] = 0
+            else:
+                # 获取第一个chain的tvl
+                protocol_data["tvl"] = protocol_data.get("currentChainTvls", {}).get(
+                    "Ethereum", 0
+                )
 
             # 尝试从CoinGecko获取额外信息
             try:
@@ -1427,7 +1443,39 @@ class BlockchainService:
                 protocol = "aethir"
 
             # 这里应该调用DeFiLlama或类似的API
-            tvl = self.defi_llama_client.get_protocol_current_tvl(protocol)
+            try:
+                tvl = self.defi_llama_client.get_protocol_current_tvl(protocol)
+
+                # 验证返回结果类型
+                if isinstance(tvl, (int, float)):
+                    # 如果是数字，直接使用
+                    pass
+                elif isinstance(tvl, dict) and "tvl" in tvl:
+                    # 如果是字典且包含tvl键，使用其值
+                    tvl = float(tvl["tvl"])
+                elif isinstance(tvl, dict) and len(tvl) > 0:
+                    # 如果是字典但没有tvl键，尝试使用第一个值
+                    tvl = float(next(iter(tvl.values())))
+                elif isinstance(tvl, str):
+                    # 如果是字符串，尝试转换为浮点数
+                    tvl = float(tvl)
+                else:
+                    # 其他情况，记录警告并使用默认值
+                    self.logger.warning(
+                        f"意外的TVL数据格式: {type(tvl)}, 值: {tvl}, 使用默认值0.0"
+                    )
+                    tvl = 0.0
+
+            except (ValueError, TypeError, json.JSONDecodeError) as e:
+                self.logger.warning(
+                    f"解析{protocol}的TVL数据时出错: {str(e)}, 使用默认值0.0"
+                )
+                tvl = 0.0
+            except Exception as e:
+                self.logger.warning(
+                    f"获取{protocol}的TVL数据时出现未预期的错误: {str(e)}, 使用默认值0.0"
+                )
+                tvl = 0.0
 
             # 存入缓存
             self.historical_data_cache.set(cache_key, tvl, cache_interval)
@@ -1463,15 +1511,70 @@ class BlockchainService:
             # 提取历史TVL数据
             historical_tvl = protocol_data.get("tvl", [])
 
+            # 类型检查和异常处理
+            if not historical_tvl:
+                self.logger.warning(f"{protocol}的历史TVL数据为空，返回空列表")
+                return []
+
+            # 检查historical_tvl是否可迭代
+            if not hasattr(historical_tvl, "__iter__") or isinstance(
+                historical_tvl, (int, float, str)
+            ):
+                self.logger.warning(
+                    f"{protocol}的历史TVL数据不是可迭代对象 (类型: {type(historical_tvl)})，创建单条记录"
+                )
+                # 如果是单个值（如float），创建一个包含当前时间戳的单条记录
+                current_timestamp = int(datetime.now().timestamp())
+                try:
+                    if isinstance(historical_tvl, str):
+                        historical_tvl = float(historical_tvl)
+                    formatted_data = [
+                        {
+                            "date": datetime.now(),
+                            "tvl": float(historical_tvl),
+                        }
+                    ]
+                    self.historical_data_cache.set(
+                        cache_key, formatted_data, cache_interval
+                    )
+                    return formatted_data
+                except (ValueError, TypeError):
+                    self.logger.error(
+                        f"无法将{protocol}的历史TVL数据转换为浮点数: {historical_tvl}"
+                    )
+                    return []
+
             # 格式化数据为统一格式
             formatted_data = []
-            for item in historical_tvl:
-                formatted_data.append(
-                    {
-                        "date": datetime.fromtimestamp(item.get("date", 0)),
-                        "tvl": item.get("totalLiquidityUSD", 0),
-                    }
-                )
+            try:
+                for item in historical_tvl:
+                    if isinstance(item, dict):
+                        formatted_data.append(
+                            {
+                                "date": datetime.fromtimestamp(item.get("date", 0)),
+                                "tvl": item.get("totalLiquidityUSD", 0),
+                            }
+                        )
+                    elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                        # 处理[timestamp, value]格式
+                        formatted_data.append(
+                            {
+                                "date": datetime.fromtimestamp(item[0]),
+                                "tvl": item[1],
+                            }
+                        )
+                    elif isinstance(item, (int, float)):
+                        # 如果是单个数值，假设是当前TVL，使用当前时间
+                        formatted_data.append(
+                            {
+                                "date": datetime.now(),
+                                "tvl": float(item),
+                            }
+                        )
+            except Exception as e:
+                self.logger.error(f"格式化{protocol}的历史TVL数据时出错: {str(e)}")
+                if not formatted_data:
+                    return []
 
             # 存入缓存
             self.historical_data_cache.set(cache_key, formatted_data, cache_interval)

@@ -1429,12 +1429,43 @@ class AiPredictor:
                     "data_points": [],
                 }
 
+            # 计算总价值
+            total_value = sum(assets.values())
+            if total_value <= 0:
+                return {
+                    "risk_score": 50,
+                    "description": "无法分析资产集中度风险，资产总价值为零",
+                    "trend": "稳定",
+                    "data_points": [],
+                }
+
+            # 计算资产权重
+            asset_weights = {
+                asset: value / total_value for asset, value in assets.items()
+            }
+
             # 计算赫芬达尔-赫希曼指数 (HHI)
-            hhi = sum(value**2 for value in assets.values()) * 10000
+            # 正确计算方式：将每个占比平方后相加，再乘以10000
+            # 例如：三个资产各占33.33%，则HHI = (0.3333^2 + 0.3333^2 + 0.3333^2) * 10000 = 3333
+            hhi_raw = sum(weight**2 for weight in asset_weights.values())
+            hhi = hhi_raw * 10000
+
+            # 记录原始计算值，用于调试
+            self.logger.info(f"HHI原始计算值: {hhi}, 原始和: {hhi_raw}")
+
+            # 确保HHI在正确范围内(0-10000)
+            if hhi > 10000:
+                self.logger.warning(
+                    f"HHI计算结果异常: {hhi}，超出正常范围(0-10000)，将被限制为10000"
+                )
+                hhi = 10000
 
             # 找出最大资产及其占比
-            max_asset = max(assets.items(), key=lambda x: x[1])
+            max_asset = max(asset_weights.items(), key=lambda x: x[1])
             max_concentration = max_asset[1]
+
+            # 记录最大集中度
+            self.logger.info(f"最大资产: {max_asset[0]}, 占比: {max_concentration:.2%}")
 
             # 计算风险评分
             if max_concentration > 0.7 or hhi > 6000:
@@ -1461,7 +1492,7 @@ class AiPredictor:
                     "percentage": percentage,
                     "is_max_asset": asset == max_asset[0],
                 }
-                for asset, percentage in assets.items()
+                for asset, percentage in asset_weights.items()
             ]
 
             return {

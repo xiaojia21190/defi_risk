@@ -162,6 +162,7 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
     ) -> Optional[RiskFactor]:
         """分析市场集中度风险"""
         try:
+            self.logger.info("开始分析市场集中度风险")
             # 使用HHI指数分析资产和协议集中度
             # HHI指数=各实体占比的平方和，范围0-10000，越大表示越集中
 
@@ -335,6 +336,24 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
             if assets:
                 asset_weights = [value / total_value for value in assets.values()]
                 asset_hhi = sum(weight**2 for weight in asset_weights)
+
+                # 计算HHI（范围0-10000）
+                asset_hhi_normalized = asset_hhi * 10000
+
+                # 记录原始计算值，用于调试
+                self.logger.info(
+                    f"资产HHI原始计算值: {asset_hhi_normalized}, 原始和: {asset_hhi}"
+                )
+
+                # 确保HHI在正确范围内(0-10000)
+                if asset_hhi_normalized > 10000:
+                    self.logger.warning(
+                        f"资产HHI计算结果异常: {asset_hhi_normalized}，超出正常范围(0-10000)，将被限制为10000"
+                    )
+                    asset_hhi_normalized = 10000
+
+                # 使用标准化后的值
+                asset_hhi = asset_hhi_normalized / 100
             else:
                 asset_hhi = 0
 
@@ -342,11 +361,29 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
             if protocols:
                 protocol_weights = [value / total_value for value in protocols.values()]
                 protocol_hhi = sum(weight**2 for weight in protocol_weights)
+
+                # 计算HHI（范围0-10000）
+                protocol_hhi_normalized = protocol_hhi * 10000
+
+                # 记录原始计算值，用于调试
+                self.logger.info(
+                    f"协议HHI原始计算值: {protocol_hhi_normalized}, 原始和: {protocol_hhi}"
+                )
+
+                # 确保HHI在正确范围内(0-10000)
+                if protocol_hhi_normalized > 10000:
+                    self.logger.warning(
+                        f"协议HHI计算结果异常: {protocol_hhi_normalized}，超出正常范围(0-10000)，将被限制为10000"
+                    )
+                    protocol_hhi_normalized = 10000
+
+                # 使用标准化后的值
+                protocol_hhi = protocol_hhi_normalized / 100
             else:
                 protocol_hhi = 0
 
-            # 综合集中度
-            concentration_score = max(asset_hhi, protocol_hhi) * 100
+            # 综合集中度（0-100范围内的评分）
+            concentration_score = max(asset_hhi, protocol_hhi)
 
             # 调整到0-100范围
             if concentration_score > 100:
@@ -356,19 +393,33 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
 
             # 根据分数判断风险级别
             if concentration_score > 70:  # 高集中度
-                description = "投资组合高度集中，存在显著的集中度风险"
+                description = f"投资组合高度集中，存在显著的集中度风险"
                 trend = "上升"
             elif concentration_score > 40:  # 中等集中度
-                description = "投资组合集中度中等，存在一定的集中度风险"
+                description = f"投资组合集中度中等，存在一定的集中度风险"
                 trend = "稳定"
             else:  # 低集中度
-                description = "投资组合分散良好，集中度风险较低"
+                description = f"投资组合分散良好，集中度风险较低"
                 trend = "下降"
 
             # 创建数据点
             data_points = [
-                {"name": "资产集中度HHI", "value": asset_hhi},
-                {"name": "协议集中度HHI", "value": protocol_hhi},
+                {
+                    "name": "资产集中度HHI",
+                    "value": (
+                        asset_hhi_normalized
+                        if "asset_hhi_normalized" in locals()
+                        else asset_hhi * 100
+                    ),
+                },
+                {
+                    "name": "协议集中度HHI",
+                    "value": (
+                        protocol_hhi_normalized
+                        if "protocol_hhi_normalized" in locals()
+                        else protocol_hhi * 100
+                    ),
+                },
             ]
 
             # 添加排名前三的资产和协议数据
@@ -408,8 +459,16 @@ class MarketRiskAnalyzer(RiskAnalyzerBase):
                 metadata={
                     "assets": assets,
                     "protocols": protocols,
-                    "asset_hhi": asset_hhi,
-                    "protocol_hhi": protocol_hhi,
+                    "asset_hhi": (
+                        asset_hhi_normalized
+                        if "asset_hhi_normalized" in locals()
+                        else asset_hhi * 100
+                    ),
+                    "protocol_hhi": (
+                        protocol_hhi_normalized
+                        if "protocol_hhi_normalized" in locals()
+                        else protocol_hhi * 100
+                    ),
                     "total_value": total_value,
                 },
             )
